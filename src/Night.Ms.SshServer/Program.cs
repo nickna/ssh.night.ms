@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
 
@@ -18,6 +19,14 @@ builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 builder.Services.AddSingleton<LoginArtProvider>();
+
+// Pluggable provider interfaces (M10 follow-up F9). Open-Meteo + Hacker News ship as the
+// default no-key implementations; swap in a paid news source or a different weather API
+// later by re-binding INewsProvider / IWeatherProvider.
+builder.Services.AddHttpClient(OpenMeteoWeatherProvider.HttpClientName);
+builder.Services.AddHttpClient(HackerNewsProvider.HttpClientName);
+builder.Services.AddSingleton<IWeatherProvider, OpenMeteoWeatherProvider>();
+builder.Services.AddSingleton<INewsProvider, HackerNewsProvider>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.

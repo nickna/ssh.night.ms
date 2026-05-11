@@ -6,7 +6,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Profile, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, News, Sysop, Logout }
 
 public sealed class LobbyScreen : Window
 {
@@ -83,9 +83,22 @@ public sealed class LobbyScreen : Window
             _app.RequestStop();
         };
 
-        var sysopButton = new Button
+        var news = new Button
         {
             X = Pos.Right(profile) + 2,
+            Y = contentTop + 4,
+            Text = "_News",
+        };
+        news.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.News;
+            _app.RequestStop();
+        };
+
+        var sysopButton = new Button
+        {
+            X = Pos.Right(news) + 2,
             Y = contentTop + 4,
             Text = "_Sysop",
             Visible = user.IsSysop,
@@ -100,7 +113,7 @@ public sealed class LobbyScreen : Window
 
         var logout = new Button
         {
-            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(profile) + 2,
+            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(news) + 2,
             Y = contentTop + 4,
             Text = "_Logout",
         };
@@ -118,7 +131,7 @@ public sealed class LobbyScreen : Window
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
 
-        Add(art, welcome, hint, chat, boards, profile, sysopButton, logout, sysopBadge);
+        Add(art, welcome, hint, chat, boards, profile, news, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
@@ -144,6 +157,12 @@ public sealed class LobbyScreen : Window
             else if (key == Key.P || key == Key.P.WithShift)
             {
                 Result = LobbyNavigation.Profile;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.N || key == Key.N.WithShift)
+            {
+                Result = LobbyNavigation.News;
                 _app.RequestStop();
                 key.Handled = true;
             }

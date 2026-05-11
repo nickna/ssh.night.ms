@@ -24,4 +24,8 @@
     <ProjectReference Include="..\Night.Ms.ServiceDefaults\Night.Ms.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Night.Ms.SshTransport\Night.Ms.SshTransport.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Night.Ms.SshServer.Tests" />
+  </ItemGroup>
 </Project>
