@@ -19,7 +19,7 @@ public sealed class NewTopicScreen : BbsWindow
     private readonly Label _status;
 
     public NewTopicScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
-        : base(app, services)
+        : base(app, services, user)
     {
         _app = app;
         _db = db;

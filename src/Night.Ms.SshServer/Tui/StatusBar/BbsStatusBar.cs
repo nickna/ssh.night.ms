@@ -1,3 +1,4 @@
+using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
@@ -18,6 +19,7 @@ public sealed class BbsStatusBar : View
 
     private readonly IApplication _app;
     private readonly IWeatherProvider? _weather;
+    private readonly User? _user;
     private readonly Label _clock;
     private readonly Label _weatherLabel;
     private readonly Label _slot;
@@ -27,16 +29,18 @@ public sealed class BbsStatusBar : View
     private object? _weatherTimerToken;
     private bool _disposed;
 
-    public BbsStatusBar(IApplication app, IServiceProvider services)
+    public BbsStatusBar(IApplication app, IServiceProvider services, User? user)
     {
         _app = app;
         _weather = services.GetService<IWeatherProvider>();
+        _user = user;
 
         Height = 1;
         Width = Dim.Fill();
         SetScheme(BbsTheme.Status);
 
-        _clock = new Label { X = 0, Y = 0, Width = 8, Text = string.Empty };
+        // Width 11 fits both "HH:mm:ss" (24h, 8 cols) and "h:mm:ss tt" (12h, up to 11 cols).
+        _clock = new Label { X = 0, Y = 0, Width = 11, Text = string.Empty };
         _clock.SetScheme(BbsTheme.Header_);
 
         var sep1 = new Label { X = Pos.Right(_clock) + 1, Y = 0, Width = 1, Text = "│" };
@@ -94,7 +98,7 @@ public sealed class BbsStatusBar : View
         if (_disposed) return false;
         _app.Invoke(() =>
         {
-            _clock.Text = DateTime.Now.ToString("HH:mm:ss");
+            _clock.Text = _user.FormatClockWithSeconds(DateTimeOffset.Now);
             _clock.SetNeedsDraw();
         });
         return true;
@@ -115,7 +119,7 @@ public sealed class BbsStatusBar : View
             {
                 _weatherLabel.Text = snap is null
                     ? "weather: (unavailable)"
-                    : $"{snap.LocationLabel} {snap.TemperatureCelsius:F0}°C/{snap.TemperatureFahrenheit:F0}°F {snap.Conditions}";
+                    : $"{snap.LocationLabel} {_user.FormatTemperature(snap)} {snap.Conditions}";
                 _weatherLabel.SetNeedsDraw();
             });
         }

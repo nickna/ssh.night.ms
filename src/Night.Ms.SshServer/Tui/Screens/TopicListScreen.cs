@@ -17,7 +17,7 @@ public sealed class TopicListScreen : BbsWindow
     public Topic? SelectedTopic { get; private set; }
 
     public TopicListScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
-        : base(app, services)
+        : base(app, services, user)
     {
         _app = app;
         Title = $"boards/{forum.Name} — [N]ew topic — [Esc] back";
@@ -36,7 +36,7 @@ public sealed class TopicListScreen : BbsWindow
         {
             lastReadByTopic.TryGetValue(t.Id, out var lastRead);
             var unread = t.LastPostAt > lastRead ? "*" : " ";
-            return $"{unread} {t.LastPostAt.ToLocalTime():yyyy-MM-dd HH:mm}  {t.Title}";
+            return $"{unread} {user.FormatDateTime(t.LastPostAt)}  {t.Title}";
         }).ToList();
 
         if (rows.Count == 0)

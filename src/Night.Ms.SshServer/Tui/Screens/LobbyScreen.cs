@@ -14,7 +14,7 @@ public sealed class LobbyScreen : BbsWindow
     private readonly IApplication _app;
 
     public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, LoginArtProvider loginArt)
-        : base(app, services)
+        : base(app, services, user)
     {
         _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text;
+using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
@@ -13,16 +14,18 @@ public sealed class NewsScreen : BbsWindow
 {
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
+    private readonly User _user;
     private readonly Label _weather;
     private readonly ListView _headlines;
     private readonly Label _status;
     private List<NewsHeadline> _items = [];
 
-    public NewsScreen(IServiceProvider services, IApplication app)
-        : base(app, services)
+    public NewsScreen(IServiceProvider services, IApplication app, User user)
+        : base(app, services, user)
     {
         _services = services;
         _app = app;
+        _user = user;
         Title = "ssh.night.ms — news — [R] refresh — [Enter] copy url — [Esc] back to lobby";
 
         _weather = new Label
@@ -102,7 +105,7 @@ public sealed class NewsScreen : BbsWindow
         var newsTask = LoadNewsAsync();
         await Task.WhenAll(weatherTask, newsTask).ConfigureAwait(false);
 
-        _app.Invoke(() => _status.Text = $"updated {DateTime.Now:HH:mm:ss} — Enter on a headline shows the URL down here");
+        _app.Invoke(() => _status.Text = $"updated {_user.FormatClockWithSeconds(DateTimeOffset.Now)} — Enter on a headline shows the URL down here");
     }
 
     private async Task LoadWeatherAsync()
@@ -157,8 +160,8 @@ public sealed class NewsScreen : BbsWindow
         }
     }
 
-    private static string FormatWeather(WeatherSnapshot s) =>
-        $"weather: {s.LocationLabel}  {s.TemperatureCelsius:F1}°C / {s.TemperatureFahrenheit:F0}°F  {s.Conditions}";
+    private string FormatWeather(WeatherSnapshot s) =>
+        $"weather: {s.LocationLabel}  {_user.FormatTemperature(s)}  {s.Conditions}";
 
     private static string FormatHeadline(NewsHeadline h)
     {

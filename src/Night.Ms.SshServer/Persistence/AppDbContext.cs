@@ -28,6 +28,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(u => u.Bio).HasMaxLength(500);
             b.Property(u => u.Location).HasMaxLength(64);
             b.Property(u => u.RealName).HasMaxLength(64);
+            b.Property(u => u.TimeZoneId).HasMaxLength(64).HasDefaultValue("UTC");
+            b.Property(u => u.TemperatureUnit).HasDefaultValue(TemperatureUnit.Celsius);
+            b.Property(u => u.ClockFormat).HasDefaultValue(ClockFormat.Hours24);
+            b.Property(u => u.DateFormat).HasDefaultValue(DateFormat.Iso);
             b.HasIndex(u => u.Handle).IsUnique();
         });
 

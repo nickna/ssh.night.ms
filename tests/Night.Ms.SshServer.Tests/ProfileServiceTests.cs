@@ -112,12 +112,22 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
 
     // ----- UpdateAsync -----
 
+    private static ProfileUpdate SampleUpdate(
+        string? realName = null,
+        string? location = null,
+        string? bio = null,
+        string timeZoneId = "UTC",
+        TemperatureUnit temperatureUnit = TemperatureUnit.Celsius,
+        ClockFormat clockFormat = ClockFormat.Hours24,
+        DateFormat dateFormat = DateFormat.Iso) =>
+        new(realName, location, bio, timeZoneId, temperatureUnit, clockFormat, dateFormat);
+
     [Fact]
     public async Task Update_persists_all_three_fields()
     {
         var u = await SeedUserAsync("nick");
 
-        var result = await _sut!.UpdateAsync(u.Id, realName: "Nick Q.", location: "Brooklyn, NY", bio: "making a mess", default);
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(realName: "Nick Q.", location: "Brooklyn, NY", bio: "making a mess"), default);
 
         Assert.True(result.Ok);
         await using var db = new AppDbContext(_dbOptions!);
@@ -128,13 +138,33 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
     }
 
     [Fact]
+    public async Task Update_persists_display_preferences()
+    {
+        var u = await SeedUserAsync("nick");
+
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(
+            timeZoneId: "America/New_York",
+            temperatureUnit: TemperatureUnit.Fahrenheit,
+            clockFormat: ClockFormat.Hours12,
+            dateFormat: DateFormat.UsSlash), default);
+
+        Assert.True(result.Ok);
+        await using var db = new AppDbContext(_dbOptions!);
+        var loaded = await db.Users.FindAsync(u.Id);
+        Assert.Equal("America/New_York", loaded!.TimeZoneId);
+        Assert.Equal(TemperatureUnit.Fahrenheit, loaded.TemperatureUnit);
+        Assert.Equal(ClockFormat.Hours12, loaded.ClockFormat);
+        Assert.Equal(DateFormat.UsSlash, loaded.DateFormat);
+    }
+
+    [Fact]
     public async Task Update_treats_whitespace_only_input_as_null()
     {
         var u = await SeedUserAsync("nick");
         // Pre-fill so we can verify the update clears them.
-        await _sut!.UpdateAsync(u.Id, "Nick", "NYC", "bio", default);
+        await _sut!.UpdateAsync(u.Id, SampleUpdate(realName: "Nick", location: "NYC", bio: "bio"), default);
 
-        var result = await _sut!.UpdateAsync(u.Id, "   ", "", null, default);
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(realName: "   ", location: "", bio: null), default);
 
         Assert.True(result.Ok);
         await using var db = new AppDbContext(_dbOptions!);
@@ -150,7 +180,7 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
         var u = await SeedUserAsync("nick");
         var oversize = new string('x', ProfileService.MaxBioLength + 1);
 
-        var result = await _sut!.UpdateAsync(u.Id, null, null, oversize, default);
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(bio: oversize), default);
 
         Assert.False(result.Ok);
         Assert.Contains("Bio", result.Error);
@@ -162,16 +192,38 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
         var u = await SeedUserAsync("nick");
         var oversize = new string('x', ProfileService.MaxRealNameLength + 1);
 
-        var result = await _sut!.UpdateAsync(u.Id, oversize, null, null, default);
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(realName: oversize), default);
 
         Assert.False(result.Ok);
         Assert.Contains("Real name", result.Error);
     }
 
     [Fact]
+    public async Task Update_rejects_unknown_time_zone()
+    {
+        var u = await SeedUserAsync("nick");
+
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(timeZoneId: "Mars/Olympus_Mons"), default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("Unknown time zone", result.Error);
+    }
+
+    [Fact]
+    public async Task Update_rejects_blank_time_zone()
+    {
+        var u = await SeedUserAsync("nick");
+
+        var result = await _sut!.UpdateAsync(u.Id, SampleUpdate(timeZoneId: "   "), default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("Time zone", result.Error);
+    }
+
+    [Fact]
     public async Task Update_returns_error_for_unknown_user_id()
     {
-        var result = await _sut!.UpdateAsync(userId: 999_999, "x", "y", "z", default);
+        var result = await _sut!.UpdateAsync(userId: 999_999, SampleUpdate(realName: "x", location: "y", bio: "z"), default);
 
         Assert.False(result.Ok);
         Assert.Equal("User not found.", result.Error);
@@ -179,23 +231,46 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
 
     // ----- FormatFinger -----
 
+    private static ProfileSnapshot SampleSnapshot(
+        string handle = "nick",
+        string? realName = null,
+        string? location = null,
+        string? bio = null,
+        DateTimeOffset? lastSeenAt = null,
+        bool isSysop = false,
+        string timeZoneId = "UTC",
+        int chatMessageCount = 0,
+        int topicCount = 0,
+        int postCount = 0) =>
+        new(
+            UserId: 1,
+            Handle: handle,
+            RealName: realName,
+            Location: location,
+            Bio: bio,
+            CreatedAt: new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero),
+            LastSeenAt: lastSeenAt,
+            IsSysop: isSysop,
+            TimeZoneId: timeZoneId,
+            ChatMessageCount: chatMessageCount,
+            TopicCount: topicCount,
+            PostCount: postCount);
+
     [Fact]
     public void FormatFinger_includes_handle_joined_lastseen_and_stats()
     {
-        var snap = new ProfileSnapshot(
-            UserId: 1,
-            Handle: "nick",
-            RealName: "Nick Q.",
-            Location: "Brooklyn, NY",
-            Bio: "making a mess",
-            CreatedAt: new DateTimeOffset(2026, 5, 11, 0, 0, 0, TimeSpan.Zero),
-            LastSeenAt: new DateTimeOffset(2026, 5, 11, 16, 42, 0, TimeSpan.Zero),
-            IsSysop: true,
-            ChatMessageCount: 127,
-            TopicCount: 3,
-            PostCount: 18);
+        var snap = SampleSnapshot(
+            handle: "nick",
+            realName: "Nick Q.",
+            location: "Brooklyn, NY",
+            bio: "making a mess",
+            lastSeenAt: new DateTimeOffset(2026, 5, 11, 16, 42, 0, TimeSpan.Zero),
+            isSysop: true,
+            chatMessageCount: 127,
+            topicCount: 3,
+            postCount: 18);
 
-        var rendered = ProfileService.FormatFinger(snap);
+        var rendered = ProfileService.FormatFinger(snap, viewer: null);
 
         Assert.Contains("finger nick (sysop)", rendered);
         Assert.Contains("Nick Q.", rendered);
@@ -207,25 +282,55 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
     [Fact]
     public void FormatFinger_omits_blank_optional_fields()
     {
-        var snap = new ProfileSnapshot(
-            UserId: 1,
-            Handle: "bare",
-            RealName: null,
-            Location: null,
-            Bio: null,
-            CreatedAt: DateTimeOffset.UtcNow,
-            LastSeenAt: null,
-            IsSysop: false,
-            ChatMessageCount: 0,
-            TopicCount: 0,
-            PostCount: 0);
+        var snap = SampleSnapshot(handle: "bare");
 
-        var rendered = ProfileService.FormatFinger(snap);
+        var rendered = ProfileService.FormatFinger(snap, viewer: null);
 
         Assert.Contains("finger bare ──", rendered);
         Assert.Contains("<never>", rendered);
         Assert.DoesNotContain("real name", rendered);
         Assert.DoesNotContain("location", rendered);
         Assert.DoesNotContain("bio", rendered);
+    }
+
+    [Fact]
+    public void FormatFinger_includes_local_time_line_for_known_timezone()
+    {
+        var snap = SampleSnapshot(handle: "alice", timeZoneId: "America/New_York");
+
+        var rendered = ProfileService.FormatFinger(snap, viewer: null);
+
+        Assert.Contains("local time", rendered);
+        Assert.Contains("(America/New_York)", rendered);
+    }
+
+    [Fact]
+    public void FormatFinger_skips_local_time_for_unknown_timezone()
+    {
+        var snap = SampleSnapshot(handle: "alice", timeZoneId: "Mars/Olympus_Mons");
+
+        var rendered = ProfileService.FormatFinger(snap, viewer: null);
+
+        Assert.DoesNotContain("local time", rendered);
+    }
+
+    [Fact]
+    public void FormatFinger_renders_dates_in_viewer_preferences()
+    {
+        var snap = SampleSnapshot(
+            handle: "alice",
+            lastSeenAt: new DateTimeOffset(2026, 5, 11, 14, 30, 0, TimeSpan.Zero));
+        var viewer = new User
+        {
+            Handle = "viewer",
+            TimeZoneId = "UTC",
+            DateFormat = DateFormat.UsSlash,
+            ClockFormat = ClockFormat.Hours12,
+        };
+
+        var rendered = ProfileService.FormatFinger(snap, viewer);
+
+        Assert.Contains("5/11/2026", rendered);
+        Assert.Contains("2:30 PM", rendered);
     }
 }

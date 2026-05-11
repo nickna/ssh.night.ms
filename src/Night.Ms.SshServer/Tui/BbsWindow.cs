@@ -1,3 +1,4 @@
+using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Tui.StatusBar;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
@@ -10,15 +11,18 @@ namespace Night.Ms.SshServer.Tui;
 // BbsStatusBar to the bottom row. Subclasses don't have to remember to call ApplyWindow or
 // add a footer — they get both for free. The bottom row of the viewport is owned by the
 // footer, so subclasses must leave Dim.Fill(1) (or more) of vertical headroom.
+//
+// `user` is nullable so the pre-login RegisterScreen (which has no User row yet) can render —
+// the status bar then formats time and weather using global defaults (UTC, °C, 24h, ISO).
 public abstract class BbsWindow : Window
 {
     protected BbsStatusBar StatusBar { get; }
 
-    protected BbsWindow(IApplication app, IServiceProvider services)
+    protected BbsWindow(IApplication app, IServiceProvider services, User? user)
     {
         BbsTheme.ApplyWindow(this);
 
-        StatusBar = new BbsStatusBar(app, services)
+        StatusBar = new BbsStatusBar(app, services, user)
         {
             X = 0,
             Y = Pos.AnchorEnd(1),

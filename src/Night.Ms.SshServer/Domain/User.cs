@@ -14,5 +14,12 @@ public sealed class User
     public string? Location { get; set; }
     public string? RealName { get; set; }
 
+    // Display preferences. Defaults match the neutral globals applied to every existing row
+    // by the AddUserDisplayPreferences migration: UTC, °C, 24-hour, ISO date.
+    public string TimeZoneId { get; set; } = "UTC";
+    public TemperatureUnit TemperatureUnit { get; set; }
+    public ClockFormat ClockFormat { get; set; }
+    public DateFormat DateFormat { get; set; }
+
     public List<SshKey> Keys { get; set; } = [];
 }

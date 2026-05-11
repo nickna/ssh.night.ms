@@ -21,7 +21,7 @@ public sealed class AdminScreen : BbsWindow
     private readonly TextField _command;
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
-        : base(app, services)
+        : base(app, services, actor)
     {
         _services = services;
         _app = app;
@@ -214,8 +214,8 @@ public sealed class AdminScreen : BbsWindow
                 .Include(a => a.Actor)
                 .ToListAsync();
 
-            var userText = string.Join("\n", users.Select(FormatUser));
-            var auditText = string.Join("\n", auditEntries.Select(FormatAudit));
+            var userText = string.Join("\n", users.Select(u => FormatUser(u, _actor)));
+            var auditText = string.Join("\n", auditEntries.Select(a => FormatAudit(a, _actor)));
 
             _app.Invoke(() =>
             {
@@ -237,17 +237,17 @@ public sealed class AdminScreen : BbsWindow
         _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Hint);
     });
 
-    private static string FormatUser(User u)
+    private static string FormatUser(User u, User viewer)
     {
         var flags = (u.IsSysop ? "S" : "-") + (u.IsBanned ? "B" : "-");
-        var seen = u.LastSeenAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "<never>";
+        var seen = u.LastSeenAt is { } ls ? viewer.FormatDateTime(ls) : "<never>";
         return $"{flags} {u.Handle,-20} {seen}";
     }
 
-    private static string FormatAudit(AuditLog a)
+    private static string FormatAudit(AuditLog a, User viewer)
     {
         var actor = a.Actor?.Handle ?? "<system>";
-        var ts = a.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+        var ts = viewer.FormatDateTime(a.CreatedAt);
         return $"{ts} {actor,-12} {a.Action,-22} {a.TargetType}#{a.TargetId}";
     }
 }

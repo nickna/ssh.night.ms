@@ -26,7 +26,7 @@ public sealed class ChatScreen : BbsWindow
     private Task? _subscriber;
 
     public ChatScreen(IServiceProvider services, IApplication app, User user, Channel initialChannel)
-        : base(app, services)
+        : base(app, services, user)
     {
         _services = services;
         _app = app;
@@ -184,7 +184,7 @@ public sealed class ChatScreen : BbsWindow
                 AppendOnUiThread($"── finger {handle} ──\n   no such user.\n");
                 return;
             }
-            AppendOnUiThread(ProfileService.FormatFinger(snap));
+            AppendOnUiThread(ProfileService.FormatFinger(snap, _user));
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
@@ -352,8 +352,8 @@ public sealed class ChatScreen : BbsWindow
         });
     }
 
-    private static string FormatMessage(DateTimeOffset at, string handle, string body) =>
-        $"[{at.ToLocalTime():HH:mm}] {handle}: {body}\n";
+    private string FormatMessage(DateTimeOffset at, string handle, string body) =>
+        $"[{_user.FormatClock(at)}] {handle}: {body}\n";
 
     protected override void Dispose(bool disposing)
     {

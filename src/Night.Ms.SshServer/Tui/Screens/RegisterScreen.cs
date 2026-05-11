@@ -22,7 +22,7 @@ public sealed class RegisterScreen : BbsWindow
     private readonly SysopBootstrap _sysopBootstrap;
 
     public RegisterScreen(IApplication app, IServiceProvider services, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, LoginArtProvider loginArt)
-        : base(app, services)
+        : base(app, services, user: null)
     {
         _app = app;
         _session = session;

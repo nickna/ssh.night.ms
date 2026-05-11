@@ -13,8 +13,8 @@ public sealed class ForumListScreen : BbsWindow
     private readonly IApplication _app;
     private readonly List<Forum> _forums;
 
-    public ForumListScreen(IApplication app, IServiceProvider services, AppDbContext db)
-        : base(app, services)
+    public ForumListScreen(IApplication app, IServiceProvider services, AppDbContext db, User user)
+        : base(app, services, user)
     {
         _app = app;
         Title = "ssh.night.ms — boards — [Esc] back to lobby";

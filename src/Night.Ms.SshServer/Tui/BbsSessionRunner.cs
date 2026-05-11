@@ -126,7 +126,7 @@ internal static class BbsSessionRunner
             }
             else if (nav == LobbyNavigation.News)
             {
-                app.Run(new NewsScreen(services, app));
+                app.Run(new NewsScreen(services, app, user));
             }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {
@@ -144,7 +144,7 @@ internal static class BbsSessionRunner
             using (var scope = services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                forum = app.Run(new ForumListScreen(app, services, db)) as Forum;
+                forum = app.Run(new ForumListScreen(app, services, db, user)) as Forum;
             }
             if (forum is null) return;
 

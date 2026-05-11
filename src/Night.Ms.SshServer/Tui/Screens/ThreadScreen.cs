@@ -21,7 +21,7 @@ public sealed class ThreadScreen : BbsWindow
     private readonly Label _status;
 
     public ThreadScreen(IServiceProvider services, IApplication app, User user, Topic topic)
-        : base(app, services)
+        : base(app, services, user)
     {
         _services = services;
         _app = app;
@@ -101,7 +101,7 @@ public sealed class ThreadScreen : BbsWindow
             var sb = new StringBuilder();
             foreach (var p in posts)
             {
-                sb.Append($"[{p.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}] {p.CreatedBy?.Handle ?? "?"}\n");
+                sb.Append($"[{_user.FormatDateTime(p.CreatedAt)}] {p.CreatedBy?.Handle ?? "?"}\n");
                 sb.Append(p.Body).Append("\n\n");
             }
             _app.Invoke(() =>
@@ -149,7 +149,7 @@ public sealed class ThreadScreen : BbsWindow
             _app.Invoke(() =>
             {
                 var current = _log.Text ?? string.Empty;
-                _log.Text = current + $"[{now.ToLocalTime():yyyy-MM-dd HH:mm}] {_user.Handle}\n{body}\n\n";
+                _log.Text = current + $"[{_user.FormatDateTime(now)}] {_user.Handle}\n{body}\n\n";
                 _log.MoveEnd();
                 _log.SetNeedsDraw();
             });
