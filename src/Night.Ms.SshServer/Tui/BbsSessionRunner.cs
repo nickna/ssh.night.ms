@@ -73,12 +73,12 @@ internal static class BbsSessionRunner
                 using var app = (IApplication)ApplicationImplCtor.Value.Invoke([factory, new SystemTimeProvider()]);
                 app.Init();
 
-                var loginArt = scope.ServiceProvider.GetRequiredService<LoginArtProvider>();
+                var art = scope.ServiceProvider.GetRequiredService<ArtProvider>();
 
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
                     var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
-                    var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider, session, db, sysopBootstrap, loginArt));
+                    var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider, session, db, sysopBootstrap, art));
                     if (registerResult is User registered)
                     {
                         user = registered;
@@ -98,7 +98,7 @@ internal static class BbsSessionRunner
                     return;
                 }
 
-                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, loginArt, session);
+                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, art, session);
             }
             catch (Exception ex)
             {
@@ -107,9 +107,9 @@ internal static class BbsSessionRunner
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, LoginArtProvider loginArt, BbsSession session)
+    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, BbsSession session)
     {
-        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, loginArt));
+        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, art));
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
@@ -132,7 +132,7 @@ internal static class BbsSessionRunner
             {
                 app.Run(new AdminScreen(services, app, user));
             }
-            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered: false, loginArt));
+            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered: false, art));
         }
     }
 

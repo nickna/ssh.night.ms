@@ -3,6 +3,7 @@ using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Night.Ms.SshTransport;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
@@ -21,7 +22,7 @@ public sealed class RegisterScreen : BbsWindow
     private readonly AppDbContext _db;
     private readonly SysopBootstrap _sysopBootstrap;
 
-    public RegisterScreen(IApplication app, IServiceProvider services, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, LoginArtProvider loginArt)
+    public RegisterScreen(IApplication app, IServiceProvider services, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, ArtProvider art)
         : base(app, services, user: null)
     {
         _app = app;
@@ -30,14 +31,18 @@ public sealed class RegisterScreen : BbsWindow
         _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
 
-        var art = new Label
+        View artView;
+        if (art.IsColor)
         {
-            X = 0,
-            Y = 0,
-            Text = loginArt.Art,
-        };
-        art.SetScheme(BbsTheme.Hint);
-        var contentTop = loginArt.LineCount + 1;
+            artView = new AnsiArtView { X = 0, Y = 0, Grid = art.Grid };
+        }
+        else
+        {
+            var label = new Label { X = 0, Y = 0, Text = art.Art };
+            label.SetScheme(BbsTheme.Hint);
+            artView = label;
+        }
+        var contentTop = art.LineCount + 1;
 
         var greeting = new Label
         {
@@ -130,7 +135,7 @@ public sealed class RegisterScreen : BbsWindow
             _app.RequestStop();
         };
 
-        Add(art, greeting, fp, prompt, handleField, status, submit, cancel);
+        Add(artView, greeting, fp, prompt, handleField, status, submit, cancel);
 
         KeyDown += (_, key) =>
         {

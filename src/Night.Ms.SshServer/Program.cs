@@ -18,7 +18,7 @@ builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
-builder.Services.AddSingleton<LoginArtProvider>();
+builder.Services.AddSingleton<ArtProvider>();
 
 // Pluggable provider interfaces (M10 follow-up F9). Open-Meteo + Hacker News ship as the
 // default no-key implementations; swap in a paid news source or a different weather API

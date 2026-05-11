@@ -4,9 +4,11 @@
     <Project Path="src/Night.Ms.ServiceDefaults/Night.Ms.ServiceDefaults.csproj" />
     <Project Path="src/Night.Ms.SshServer/Night.Ms.SshServer.csproj" />
     <Project Path="src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj" />
+    <Project Path="src/Night.Ms.Tools.AnsiConvert/Night.Ms.Tools.AnsiConvert.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Night.Ms.SshServer.Tests/Night.Ms.SshServer.Tests.csproj" />
     <Project Path="tests/Night.Ms.SshTransport.Tests/Night.Ms.SshTransport.Tests.csproj" />
+    <Project Path="tests/Night.Ms.Tools.AnsiConvert.Tests/Night.Ms.Tools.AnsiConvert.Tests.csproj" />
   </Folder>
 </Solution>

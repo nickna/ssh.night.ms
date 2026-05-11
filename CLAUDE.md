@@ -80,6 +80,29 @@ EF Core 10 + `EFCore.NamingConventions` (snake_case) against Postgres. The `cite
 
 `INewsProvider` (Hacker News) and `IWeatherProvider` (Open-Meteo) are pluggable behind interfaces. Implementations are no-key public APIs; both ship with in-process caches (per-instance, no Redis). Swap them by re-binding the interface in `Program.cs`.
 
+### Login art — `Tui/Art/`, `Tui/Views/AnsiArtView.cs`, `Tui/ArtProvider.cs`
+
+`ArtProvider` resolves the banner shown at the top of `LobbyScreen` + `RegisterScreen`. Path comes from `NIGHTMS_LOGIN_ART_PATH` (or the `LoginArt:Path` config key).
+
+- Files ending in `.ans` parse via `SgrParser` (16-color, 256, and truecolor SGR escapes plus bold) into a `CellGrid` of RGB cells, rendered by `AnsiArtView` — a custom Terminal.Gui v2 `View` that paints per-cell attributes.
+- Anything else loads as a monochrome string and renders via a plain `Label`.
+- A malformed or unreadable file falls back to the in-code `ArtProvider.DefaultArt` (also monochrome), so the lobby never fails to render.
+
+The art types (`Cell`, `CellGrid`, `ArtColor`, `ArtStyle`) deliberately do **not** reference Terminal.Gui — TG's `ConfigurationManager` module initializer crashes inside the xUnit process, and `SgrParserTests` would not run otherwise. `AnsiArtView` is the one place that bridges `ArtColor` → `Terminal.Gui.Drawing.Color`.
+
+### Adding new art — `Night.Ms.Tools.AnsiConvert/`
+
+Offline CLI that converts PNG/JPEG to a `.ans` file using half-block rendering (`▀` U+2580, foreground = top source pixel, background = bottom). Each output cell covers two source pixels vertically, so the effective resolution is `(cols × 2*rows)` source pixels.
+
+```sh
+dotnet run --project src/Night.Ms.Tools.AnsiConvert -- <input.png> \
+  [--width 80] [--depth truecolor|256|16] [--dither none|floyd] [--out path]
+```
+
+Depth defaults to `truecolor`; dither defaults to `none` for truecolor and `floyd` (Floyd–Steinberg) for the quantized depths. Without `--out`, output goes to stdout — so `... > art/welcome.ans` is the normal write pattern. Convert offline, commit the `.ans`, point `NIGHTMS_LOGIN_ART_PATH` at it; the server never converts raster at runtime.
+
+ImageSharp 3.1.x carries one open moderate-severity CVE (decode-time DoS). Acceptable for an offline build-time tool run on trusted inputs; upgrading to ImageSharp 4.x would resolve it but switches to the Six Labors Split License.
+
 ## Project-specific conventions worth knowing
 
 - **Don't add an Aspire endpoint for the SSH port.** `WithEndpoint(scheme: "tcp", port: …)` makes Aspire's DCP launcher bind the same port for proxying, which collides with SshServer's own bind (loopback bind wins, connections land on DCP and hang during banner exchange). The current setup passes `BBS_SSH_PORT` via env and lets SshServer bind directly — `SshHost.ResolveListenerPort` prefers that env var, falls back to parsing Aspire's auto-injected service URL, then `2222`. The trade-off is the SSH service has no clickable endpoint on the Aspire dashboard.

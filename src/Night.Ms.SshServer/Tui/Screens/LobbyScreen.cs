@@ -1,5 +1,6 @@
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -13,22 +14,26 @@ public sealed class LobbyScreen : BbsWindow
 {
     private readonly IApplication _app;
 
-    public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, LoginArtProvider loginArt)
+    public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, ArtProvider art)
         : base(app, services, user)
     {
         _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";
 
-        var art = new Label
+        View artView;
+        if (art.IsColor)
         {
-            X = 0,
-            Y = 0,
-            Text = loginArt.Art,
-        };
-        art.SetScheme(BbsTheme.Hint);
+            artView = new AnsiArtView { X = 0, Y = 0, Grid = art.Grid };
+        }
+        else
+        {
+            var label = new Label { X = 0, Y = 0, Text = art.Art };
+            label.SetScheme(BbsTheme.Hint);
+            artView = label;
+        }
 
         // Push the rest of the lobby below the art (with a one-row gap).
-        var contentTop = loginArt.LineCount + 1;
+        var contentTop = art.LineCount + 1;
 
         var welcome = new Label
         {
@@ -137,7 +142,7 @@ public sealed class LobbyScreen : BbsWindow
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
 
-        Add(art, welcome, hint, chat, boards, profile, news, sysopButton, logout, sysopBadge);
+        Add(artView, welcome, hint, chat, boards, profile, news, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
