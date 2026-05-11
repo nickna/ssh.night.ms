@@ -16,20 +16,20 @@ public sealed class ChatScreen : Window
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
     private readonly User _user;
-    private readonly Channel _channel;
     private readonly TextView _log;
     private readonly TextField _input;
     private readonly Label _status;
     private readonly CancellationTokenSource _shutdown = new();
+    private Channel _currentChannel;
+    private CancellationTokenSource _channelCts = new();
     private Task? _subscriber;
 
-    public ChatScreen(IServiceProvider services, IApplication app, User user, Channel channel)
+    public ChatScreen(IServiceProvider services, IApplication app, User user, Channel initialChannel)
     {
         _services = services;
         _app = app;
         _user = user;
-        _channel = channel;
-        Title = $"#{channel.Name} — {user.Handle} — [Esc] back to lobby";
+        _currentChannel = initialChannel;
 
         _log = new TextView
         {
@@ -46,7 +46,6 @@ public sealed class ChatScreen : Window
             X = 0,
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
-            Text = $"channel #{channel.Name}  topic: {channel.Topic ?? "(none)"}",
         };
 
         _input = new TextField
@@ -65,7 +64,7 @@ public sealed class ChatScreen : Window
                 if (text.Length > 0)
                 {
                     _input.Text = string.Empty;
-                    _ = SendAsync(text);
+                    _ = HandleInputAsync(text);
                 }
             }
         };
@@ -83,7 +82,132 @@ public sealed class ChatScreen : Window
             }
         };
 
+        UpdateChrome();
         _ = LoadHistoryAndSubscribeAsync();
+    }
+
+    private async Task HandleInputAsync(string text)
+    {
+        if (text.StartsWith('/'))
+        {
+            await HandleCommandAsync(text);
+            return;
+        }
+        await SendMessageAsync(text);
+    }
+
+    private async Task HandleCommandAsync(string text)
+    {
+        var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var verb = parts[0].ToLowerInvariant();
+        var arg = parts.Length > 1 ? parts[1] : null;
+
+        switch (verb)
+        {
+            case "/help":
+            case "/?":
+                AppendOnUiThread(
+                    "Commands:\n" +
+                    "  /join #channel    switch to (or auto-create) a public channel\n" +
+                    "  /dm <handle>      open a direct message with another user\n" +
+                    "  /quit             leave chat (back to lobby)\n" +
+                    "  /help             show this help\n");
+                return;
+
+            case "/quit":
+            case "/exit":
+                _shutdown.Cancel();
+                _app.RequestStop();
+                return;
+
+            case "/join":
+                if (string.IsNullOrEmpty(arg))
+                {
+                    SetStatus("[!] /join requires a channel name (e.g. /join #random).");
+                    return;
+                }
+                await SwitchToPublicAsync(arg);
+                return;
+
+            case "/dm":
+                if (string.IsNullOrEmpty(arg))
+                {
+                    SetStatus("[!] /dm requires a handle (e.g. /dm alice).");
+                    return;
+                }
+                await SwitchToDmAsync(arg);
+                return;
+
+            default:
+                SetStatus($"[!] unknown command: {verb} — type /help for the list.");
+                return;
+        }
+    }
+
+    private async Task SwitchToPublicAsync(string channelName)
+    {
+        var chat = _services.GetRequiredService<ChatService>();
+        var result = await chat.JoinPublicChannelAsync(channelName, _user.Id, _shutdown.Token);
+        await ApplyJoinResultAsync(result);
+    }
+
+    private async Task SwitchToDmAsync(string handle)
+    {
+        var chat = _services.GetRequiredService<ChatService>();
+        var result = await chat.JoinDmAsync(_user, handle, _shutdown.Token);
+        await ApplyJoinResultAsync(result);
+    }
+
+    private async Task ApplyJoinResultAsync(ChatService.JoinResult result)
+    {
+        switch (result)
+        {
+            case ChatService.JoinResult.Joined j:
+                await SwitchChannelAsync(j.Channel, "joined");
+                return;
+            case ChatService.JoinResult.Created c:
+                await SwitchChannelAsync(c.Channel, "created");
+                return;
+            case ChatService.JoinResult.Denied d:
+                SetStatus($"[!] {d.Reason}");
+                return;
+            case ChatService.JoinResult.InvalidName i:
+                SetStatus($"[!] {i.Reason}");
+                return;
+            case ChatService.JoinResult.UserNotFound u:
+                SetStatus($"[!] No user named '{u.Handle}'.");
+                return;
+        }
+    }
+
+    private async Task SwitchChannelAsync(Channel target, string verb)
+    {
+        if (target.Id == _currentChannel.Id)
+        {
+            SetStatus($"You're already in #{target.Name}.");
+            return;
+        }
+
+        // Unhook the prior subscriber and wait for it to actually exit so the next pump doesn't
+        // race against this one (two writers into _log at once would cause garbage).
+        _channelCts.Cancel();
+        if (_subscriber is not null)
+        {
+            try { await _subscriber.ConfigureAwait(false); }
+            catch { /* expected on cancel */ }
+        }
+        _channelCts.Dispose();
+        _channelCts = new CancellationTokenSource();
+
+        _currentChannel = target;
+        _app.Invoke(() =>
+        {
+            _log.Text = $"--- {verb} #{target.Name} ---\n";
+            _log.MoveEnd();
+            _log.SetNeedsDraw();
+        });
+        UpdateChrome();
+        await LoadHistoryAndSubscribeAsync();
     }
 
     private async Task LoadHistoryAndSubscribeAsync()
@@ -93,11 +217,11 @@ public sealed class ChatScreen : Window
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var history = await db.ChatMessages
-                .Where(m => m.ChannelId == _channel.Id)
+                .Where(m => m.ChannelId == _currentChannel.Id)
                 .OrderByDescending(m => m.CreatedAt)
                 .Take(20)
                 .Include(m => m.User)
-                .ToListAsync(_shutdown.Token);
+                .ToListAsync(_channelCts.Token);
 
             history.Reverse();
             foreach (var msg in history)
@@ -105,37 +229,42 @@ public sealed class ChatScreen : Window
                 AppendOnUiThread(FormatMessage(msg.CreatedAt, msg.User?.Handle ?? "?", msg.Body));
             }
 
-            _subscriber = Task.Run(() => RunSubscribeAsync(_shutdown.Token));
+            var channelToken = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, _channelCts.Token).Token;
+            _subscriber = Task.Run(() => RunSubscribeAsync(_currentChannel.Id, channelToken));
         }
-        catch (OperationCanceledException) { /* expected on screen close */ }
+        catch (OperationCanceledException) { /* expected on close/switch */ }
         catch (Exception ex)
         {
             AppendOnUiThread($"[!] history load failed: {ex.Message}\n");
         }
     }
 
-    private async Task RunSubscribeAsync(CancellationToken ct)
+    private async Task RunSubscribeAsync(long channelId, CancellationToken ct)
     {
         var bus = _services.GetRequiredService<IRealtimeBus>();
-        await foreach (var payload in bus.SubscribeAsync(ChatTopics.Channel(_channel.Id), ct))
+        try
         {
-            ChatMessageDto? msg;
-            try
+            await foreach (var payload in bus.SubscribeAsync(ChatTopics.Channel(channelId), ct))
             {
-                msg = JsonSerializer.Deserialize<ChatMessageDto>(payload);
+                ChatMessageDto? msg;
+                try { msg = JsonSerializer.Deserialize<ChatMessageDto>(payload); } catch { continue; }
+                if (msg is null) continue;
+                AppendOnUiThread(FormatMessage(msg.CreatedAt, msg.Handle, msg.Body));
             }
-            catch
-            {
-                continue;
-            }
-            if (msg is null) continue;
-
-            AppendOnUiThread(FormatMessage(msg.CreatedAt, msg.Handle, msg.Body));
         }
+        catch (OperationCanceledException) { /* expected on close/switch */ }
     }
 
-    private async Task SendAsync(string body)
+    private async Task SendMessageAsync(string body)
     {
+        // Re-check access right before write so banning/private-channel revocation lands fast.
+        var chat = _services.GetRequiredService<ChatService>();
+        if (!await chat.CanAccessAsync(_currentChannel.Id, _user.Id, _shutdown.Token))
+        {
+            SetStatus("[!] You no longer have access to this channel.");
+            return;
+        }
+
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -143,7 +272,7 @@ public sealed class ChatScreen : Window
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var msg = new ChatMessage
             {
-                ChannelId = _channel.Id,
+                ChannelId = _currentChannel.Id,
                 UserId = _user.Id,
                 Body = body,
                 CreatedAt = now,
@@ -152,8 +281,8 @@ public sealed class ChatScreen : Window
             await db.SaveChangesAsync(_shutdown.Token);
 
             var bus = scope.ServiceProvider.GetRequiredService<IRealtimeBus>();
-            var dto = new ChatMessageDto(msg.Id, _channel.Id, _user.Id, _user.Handle, body, now);
-            await bus.PublishAsync(ChatTopics.Channel(_channel.Id), JsonSerializer.SerializeToUtf8Bytes(dto), _shutdown.Token);
+            var dto = new ChatMessageDto(msg.Id, _currentChannel.Id, _user.Id, _user.Handle, body, now);
+            await bus.PublishAsync(ChatTopics.Channel(_currentChannel.Id), JsonSerializer.SerializeToUtf8Bytes(dto), _shutdown.Token);
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
@@ -162,13 +291,23 @@ public sealed class ChatScreen : Window
         }
     }
 
+    private void UpdateChrome()
+    {
+        var label = _currentChannel.Name.StartsWith("dm-", StringComparison.Ordinal)
+            ? "DM"
+            : $"#{_currentChannel.Name}";
+        Title = $"{label} — {_user.Handle} — /help — [Esc] back to lobby";
+        SetStatus($"in {label}  topic: {_currentChannel.Topic ?? "(none)"}");
+    }
+
+    private void SetStatus(string text) => _app.Invoke(() => _status.Text = text);
+
     private void AppendOnUiThread(string text)
     {
         _app.Invoke(() =>
         {
             var current = _log.Text ?? string.Empty;
             _log.Text = current + text;
-            // Pin the cursor at the bottom of the buffer so new lines are visible.
             _log.MoveEnd();
             _log.SetNeedsDraw();
         });
@@ -182,7 +321,9 @@ public sealed class ChatScreen : Window
         if (disposing)
         {
             try { _shutdown.Cancel(); } catch { /* ignore */ }
+            try { _channelCts.Cancel(); } catch { /* ignore */ }
             _shutdown.Dispose();
+            _channelCts.Dispose();
         }
         base.Dispose(disposing);
     }

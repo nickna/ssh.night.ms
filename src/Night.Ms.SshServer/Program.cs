@@ -13,6 +13,7 @@ builder.AddRedisClient("redis");
 
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
+builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
