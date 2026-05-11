@@ -6,12 +6,15 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-// Placeholder lobby — M7/M8 wire the actual Chat / Boards / Profile screens. For M5 it's
-// enough to prove that the post-auth handoff lands the right handle in the right place.
+public enum LobbyNavigation { Chat, Logout }
+
 public sealed class LobbyScreen : Window
 {
-    public LobbyScreen(User user, bool justRegistered)
+    private readonly IApplication _app;
+
+    public LobbyScreen(IApplication app, User user, bool justRegistered)
     {
+        _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";
 
         var welcome = new Label
@@ -23,32 +26,70 @@ public sealed class LobbyScreen : Window
                 : $"Welcome back, {user.Handle}.",
         };
 
-        var menu = new Label
+        var hint = new Label
         {
             X = 2,
             Y = 3,
-            Text = """
-                Chat       — coming in M7
-                Boards     — coming in M8
-                Profile    — coming later
-                Logout     — press [Esc]
-                """,
+            Text = "Choose where to go:",
+        };
+
+        var chat = new Button
+        {
+            X = 2,
+            Y = 5,
+            Text = "_Chat (#lobby)",
+            IsDefault = true,
+        };
+        chat.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Chat;
+            _app.RequestStop();
+        };
+
+        var boards = new Button
+        {
+            X = Pos.Right(chat) + 2,
+            Y = 5,
+            Text = "_Boards (M8)",
+        };
+        boards.Enabled = false;
+
+        var logout = new Button
+        {
+            X = Pos.Right(boards) + 2,
+            Y = 5,
+            Text = "_Logout",
+        };
+        logout.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Logout;
+            _app.RequestStop();
         };
 
         var sysop = new Label
         {
             X = 2,
-            Y = 9,
+            Y = 8,
             Text = user.IsSysop ? "[ sysop access granted ]" : string.Empty,
         };
 
-        Add(welcome, menu, sysop);
+        Add(welcome, hint, chat, boards, logout, sysop);
 
         KeyDown += (_, key) =>
         {
             if (key == Key.Esc)
             {
-                Application.RequestStop();
+                Result = LobbyNavigation.Logout;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.Enter)
+            {
+                // Enter from anywhere on the lobby jumps into chat — saves a Tab dance.
+                Result = LobbyNavigation.Chat;
+                _app.RequestStop();
                 key.Handled = true;
             }
         };

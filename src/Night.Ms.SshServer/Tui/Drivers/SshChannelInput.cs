@@ -65,10 +65,7 @@ internal sealed class SshChannelInput : InputImpl<char>
                     return;
                 }
 
-                if (read == 0)
-                {
-                    return;
-                }
+                if (read == 0) return;
 
                 var charsWritten = decoder.GetChars(buffer, 0, read, charBuffer, 0, flush: false);
                 for (var i = 0; i < charsWritten; i++)
@@ -82,6 +79,7 @@ internal sealed class SshChannelInput : InputImpl<char>
             // expected on dispose
         }
     }
+
 
     public override void Dispose()
     {

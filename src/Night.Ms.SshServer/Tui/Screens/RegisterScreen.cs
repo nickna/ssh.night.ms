@@ -14,11 +14,13 @@ namespace Night.Ms.SshServer.Tui.Screens;
 // registering (we then disconnect from BbsSessionRunner).
 public sealed class RegisterScreen : Window
 {
+    private readonly IApplication _app;
     private readonly BbsSession _session;
     private readonly AppDbContext _db;
 
-    public RegisterScreen(BbsSession session, AppDbContext db)
+    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db)
     {
+        _app = app;
         _session = session;
         _db = db;
         Title = "ssh.night.ms — register a handle";
@@ -88,7 +90,7 @@ public sealed class RegisterScreen : Window
             {
                 var user = await CreateUserAsync(handle);
                 Result = user;
-                Application.RequestStop();
+                _app.RequestStop();
             }
             catch (DbUpdateException)
             {
@@ -103,7 +105,7 @@ public sealed class RegisterScreen : Window
         cancel.Accepting += (_, e) =>
         {
             e.Handled = true;
-            Application.RequestStop();
+            _app.RequestStop();
         };
 
         Add(greeting, fp, prompt, handleField, status, submit, cancel);
@@ -112,7 +114,7 @@ public sealed class RegisterScreen : Window
         {
             if (key == Key.Esc)
             {
-                Application.RequestStop();
+                _app.RequestStop();
                 key.Handled = true;
             }
         };

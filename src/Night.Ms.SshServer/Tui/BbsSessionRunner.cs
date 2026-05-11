@@ -42,8 +42,6 @@ internal static class BbsSessionRunner
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Resolve the user and decide which screen path to enter. For Known sessions we update
-        // last-seen up front so chat presence reflects connect time rather than logout time.
         User? user = null;
         var justRegistered = false;
         if (session.AuthDecision is AuthDecision.Known known)
@@ -56,9 +54,10 @@ internal static class BbsSessionRunner
             }
         }
 
-        // Terminal.Gui owns its own thread for the input pump + main loop. Spin up the
-        // Application on a dedicated thread so blocking inside Run() doesn't tie up the
-        // SSH session handler.
+        // Default channel for chat — seeded by DatabaseInitializer as #lobby.
+        Channel? lobbyChannel = await db.Channels
+            .FirstOrDefaultAsync(c => c.Name == "lobby", cancellationToken);
+
         await Task.Run(() =>
         {
             using var contextScope = SshChannelDriverContext.Push(new SshChannelDriverContext
@@ -70,21 +69,33 @@ internal static class BbsSessionRunner
 
             try
             {
+                var factory = new SshChannelComponentFactory();
+                using var app = (IApplication)ApplicationImplCtor.Value.Invoke([factory, new SystemTimeProvider()]);
+                app.Init();
+
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
-                    user = RunRegister(session, db, logger);
-                    justRegistered = user is not null;
-                    if (user is null) return; // they cancelled registration
+                    var registerResult = app.Run(new RegisterScreen(app, session, db));
+                    if (registerResult is User registered)
+                    {
+                        user = registered;
+                        justRegistered = true;
+                        logger.LogInformation("Registered new account: handle={Handle} fingerprint={Fingerprint}",
+                            registered.Handle, session.Fingerprint);
+                    }
+                    else
+                    {
+                        return; // user cancelled registration
+                    }
                 }
 
                 if (user is null)
                 {
-                    // Known auth but DB row missing — extremely unlikely, but bail safely.
                     logger.LogWarning("AuthDecision.Known but user row missing for fingerprint={Fingerprint}", session.Fingerprint);
                     return;
                 }
 
-                RunLobby(user, justRegistered);
+                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel);
             }
             catch (Exception ex)
             {
@@ -93,34 +104,18 @@ internal static class BbsSessionRunner
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static User? RunRegister(BbsSession session, AppDbContext db, ILogger logger)
+    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel)
     {
-        var factory = new SshChannelComponentFactory();
-        var app = (IApplication)ApplicationImplCtor.Value.Invoke([factory, new SystemTimeProvider()]);
-        using (app)
+        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered));
+        while (nav == LobbyNavigation.Chat)
         {
-            app.Init();
-            var screen = new RegisterScreen(session, db);
-            var result = app.Run(screen, _ => true);
-            if (result is User user)
+            if (lobbyChannel is null)
             {
-                logger.LogInformation("Registered new account: handle={Handle} fingerprint={Fingerprint}",
-                    user.Handle, session.Fingerprint);
-                return user;
+                // DatabaseInitializer always seeds #lobby, so this is defensive only.
+                break;
             }
-            return null;
-        }
-    }
-
-    private static void RunLobby(User user, bool justRegistered)
-    {
-        var factory = new SshChannelComponentFactory();
-        var app = (IApplication)ApplicationImplCtor.Value.Invoke([factory, new SystemTimeProvider()]);
-        using (app)
-        {
-            app.Init();
-            var screen = new LobbyScreen(user, justRegistered);
-            app.Run(screen, _ => true);
+            app.Run(new ChatScreen(services, app, user, lobbyChannel));
+            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false));
         }
     }
 
