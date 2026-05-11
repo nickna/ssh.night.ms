@@ -16,10 +16,12 @@ public sealed class SshHost(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var port = ResolveListenerPort();
+        var hostKeyDir = configuration["NIGHTMS_HOST_KEY_DIR"] ?? configuration["HostKeyDirectory"];
         _server = new BbsSshServer(
             new BbsSshServerOptions
             {
                 Port = port,
+                HostKeyDirectory = hostKeyDir,
                 AuthLookup = authLookup.LookupAsync,
             },
             loggerFactory.CreateLogger<BbsSshServer>());

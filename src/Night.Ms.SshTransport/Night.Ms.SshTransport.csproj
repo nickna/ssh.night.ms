@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="Microsoft.DevTunnels.Ssh" Version="3.12.29" />
+    <PackageReference Include="Microsoft.DevTunnels.Ssh.Keys" Version="3.12.29" />
     <PackageReference Include="Microsoft.DevTunnels.Ssh.Tcp" Version="3.12.29" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>

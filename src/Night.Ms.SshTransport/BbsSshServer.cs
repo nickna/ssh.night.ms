@@ -28,7 +28,7 @@ public sealed class BbsSshServer : IAsyncDisposable
     {
         _options = options;
         _logger = logger;
-        _hostKeys = HostKeyStore.GenerateEphemeralHostKeys(logger);
+        _hostKeys = HostKeyStore.LoadOrGenerate(options.HostKeyDirectory, logger);
     }
 
     public event Func<BbsSession, CancellationToken, Task>? SessionStarted;

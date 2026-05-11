@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
@@ -14,37 +14,40 @@ public sealed class AdminScreen : Window
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
     private readonly User _actor;
-    private readonly ListView _userList;
+    private readonly TextView _userPane;
     private readonly TextView _audit;
     private readonly Label _status;
-    private List<User> _users = [];
+    private readonly TextField _command;
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
     {
         _services = services;
         _app = app;
         _actor = actor;
-        Title = $"sysop console — {actor.Handle} — Tab to button row — [Esc] back";
+        Title = $"sysop console — {actor.Handle} — type 'help' + Enter — [Esc] back to lobby";
 
         var leftHeader = new Label
         {
             X = 0,
             Y = 0,
             Width = Dim.Percent(50),
-            Text = "users:",
+            Text = "users (S=sysop, B=banned):",
         };
 
-        _userList = new ListView
+        _userPane = new TextView
         {
             X = 0,
             Y = Pos.Bottom(leftHeader),
             Width = Dim.Percent(50),
             Height = Dim.Fill(3),
+            ReadOnly = true,
+            WordWrap = false,
+            CanFocus = false,
         };
 
         var rightHeader = new Label
         {
-            X = Pos.Right(_userList),
+            X = Pos.Right(_userPane),
             Y = 0,
             Width = Dim.Fill(),
             Text = "audit log (recent 50):",
@@ -52,7 +55,7 @@ public sealed class AdminScreen : Window
 
         _audit = new TextView
         {
-            X = Pos.Right(_userList),
+            X = Pos.Right(_userPane),
             Y = Pos.Bottom(rightHeader),
             Width = Dim.Fill(),
             Height = Dim.Fill(3),
@@ -61,25 +64,36 @@ public sealed class AdminScreen : Window
             CanFocus = false,
         };
 
-        var banButton = new Button { X = 0, Y = Pos.AnchorEnd(2), Text = "Toggle _Ban" };
-        banButton.Accepting += (_, e) => { e.Handled = true; _ = ToggleBanAsync(); };
-
-        var sysopButton = new Button { X = Pos.Right(banButton) + 1, Y = Pos.AnchorEnd(2), Text = "Toggle _Sysop" };
-        sysopButton.Accepting += (_, e) => { e.Handled = true; _ = ToggleSysopAsync(); };
-
-        var refreshButton = new Button { X = Pos.Right(sysopButton) + 1, Y = Pos.AnchorEnd(2), Text = "_Refresh" };
-        refreshButton.Accepting += (_, e) => { e.Handled = true; _ = LoadAsync(); };
-
         _status = new Label
+        {
+            X = 0,
+            Y = Pos.AnchorEnd(2),
+            Width = Dim.Fill(),
+            Text = "Commands: ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh",
+        };
+
+        _command = new TextField
         {
             X = 0,
             Y = Pos.AnchorEnd(1),
             Width = Dim.Fill(),
-            Text = "",
+        };
+        _command.KeyDown += (_, key) =>
+        {
+            if (key == Key.Enter)
+            {
+                key.Handled = true;
+                var line = (_command.Text ?? string.Empty).Trim();
+                if (line.Length > 0)
+                {
+                    _command.Text = string.Empty;
+                    _ = ExecuteAsync(line);
+                }
+            }
         };
 
-        Add(leftHeader, _userList, rightHeader, _audit, banButton, sysopButton, refreshButton, _status);
-        _userList.SetFocus();
+        Add(leftHeader, _userPane, rightHeader, _audit, _status, _command);
+        _command.SetFocus();
 
         KeyDown += (_, key) =>
         {
@@ -93,107 +107,125 @@ public sealed class AdminScreen : Window
         _ = LoadAsync();
     }
 
+    private async Task ExecuteAsync(string line)
+    {
+        var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var verb = parts[0].ToLowerInvariant();
+        var target = parts.Length > 1 ? parts[1] : null;
+
+        try
+        {
+            switch (verb)
+            {
+                case "help":
+                case "?":
+                    SetStatus("ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh");
+                    return;
+                case "refresh":
+                    await LoadAsync();
+                    SetStatus("Refreshed.");
+                    return;
+                case "ban":
+                    await TogglePropertyAsync(target, isBan: true, expectedAfter: true);
+                    return;
+                case "unban":
+                    await TogglePropertyAsync(target, isBan: true, expectedAfter: false);
+                    return;
+                case "sysop":
+                    await TogglePropertyAsync(target, isBan: false, expectedAfter: true);
+                    return;
+                case "unsysop":
+                    await TogglePropertyAsync(target, isBan: false, expectedAfter: false);
+                    return;
+                default:
+                    SetStatus($"[!] Unknown command: '{verb}'. Type 'help'.");
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"[!] {verb} failed: {ex.Message}");
+        }
+    }
+
+    private async Task TogglePropertyAsync(string? handle, bool isBan, bool expectedAfter)
+    {
+        if (string.IsNullOrEmpty(handle))
+        {
+            SetStatus($"[!] {(isBan ? "ban/unban" : "sysop/unsysop")} requires a handle.");
+            return;
+        }
+
+        await using var scope = _services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var target = await db.Users.FirstOrDefaultAsync(u => u.Handle == handle);
+        if (target is null)
+        {
+            SetStatus($"[!] No such user: '{handle}'.");
+            return;
+        }
+        if (target.Id == _actor.Id)
+        {
+            SetStatus("[!] You can't change your own status.");
+            return;
+        }
+
+        string action;
+        if (isBan)
+        {
+            target.IsBanned = expectedAfter;
+            action = expectedAfter ? "user.ban" : "user.unban";
+        }
+        else
+        {
+            target.IsSysop = expectedAfter;
+            action = expectedAfter ? "user.promote_sysop" : "user.demote_sysop";
+        }
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = _actor.Id,
+            Action = action,
+            TargetType = "user",
+            TargetId = target.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        SetStatus($"{action} {target.Handle}");
+        await LoadAsync();
+    }
+
     private async Task LoadAsync()
     {
         try
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            _users = await db.Users.OrderBy(u => u.Handle).Take(200).ToListAsync();
+            var users = await db.Users.OrderBy(u => u.Handle).Take(200).ToListAsync();
             var auditEntries = await db.AuditLogs
                 .OrderByDescending(a => a.CreatedAt)
                 .Take(50)
                 .Include(a => a.Actor)
                 .ToListAsync();
 
+            var userText = string.Join("\n", users.Select(FormatUser));
+            var auditText = string.Join("\n", auditEntries.Select(FormatAudit));
+
             _app.Invoke(() =>
             {
-                _userList.SetSource<string>(new ObservableCollection<string>(_users.Select(FormatUser)));
-                _audit.Text = string.Join("\n", auditEntries.Select(FormatAudit));
+                _userPane.Text = userText;
+                _audit.Text = auditText;
+                _userPane.SetNeedsDraw();
                 _audit.SetNeedsDraw();
-                _userList.SetNeedsDraw();
             });
         }
         catch (Exception ex)
         {
-            _app.Invoke(() => _status.Text = $"[!] load failed: {ex.Message}");
+            SetStatus($"[!] load failed: {ex.Message}");
         }
     }
 
-    private async Task ToggleBanAsync()
-    {
-        var target = SelectedUser();
-        if (target is null) { _app.Invoke(() => _status.Text = "[!] Select a user first."); return; }
-        if (target.Id == _actor.Id)
-        {
-            _app.Invoke(() => _status.Text = "[!] You can't ban yourself.");
-            return;
-        }
-
-        try
-        {
-            await using var scope = _services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var user = await db.Users.FirstAsync(u => u.Id == target.Id);
-            user.IsBanned = !user.IsBanned;
-            db.AuditLogs.Add(new AuditLog
-            {
-                ActorId = _actor.Id,
-                Action = user.IsBanned ? "user.ban" : "user.unban",
-                TargetType = "user",
-                TargetId = user.Id,
-                CreatedAt = DateTimeOffset.UtcNow,
-            });
-            await db.SaveChangesAsync();
-            _app.Invoke(() => _status.Text = $"{(user.IsBanned ? "Banned" : "Unbanned")} {user.Handle}.");
-            await LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            _app.Invoke(() => _status.Text = $"[!] toggle ban failed: {ex.Message}");
-        }
-    }
-
-    private async Task ToggleSysopAsync()
-    {
-        var target = SelectedUser();
-        if (target is null) { _app.Invoke(() => _status.Text = "[!] Select a user first."); return; }
-        if (target.Id == _actor.Id)
-        {
-            _app.Invoke(() => _status.Text = "[!] You can't change your own sysop status.");
-            return;
-        }
-
-        try
-        {
-            await using var scope = _services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var user = await db.Users.FirstAsync(u => u.Id == target.Id);
-            user.IsSysop = !user.IsSysop;
-            db.AuditLogs.Add(new AuditLog
-            {
-                ActorId = _actor.Id,
-                Action = user.IsSysop ? "user.promote_sysop" : "user.demote_sysop",
-                TargetType = "user",
-                TargetId = user.Id,
-                CreatedAt = DateTimeOffset.UtcNow,
-            });
-            await db.SaveChangesAsync();
-            _app.Invoke(() => _status.Text = $"{(user.IsSysop ? "Promoted" : "Demoted")} {user.Handle}.");
-            await LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            _app.Invoke(() => _status.Text = $"[!] toggle sysop failed: {ex.Message}");
-        }
-    }
-
-    private User? SelectedUser()
-    {
-        var idx = _userList.SelectedItem ?? -1;
-        if (idx < 0 || idx >= _users.Count) return null;
-        return _users[idx];
-    }
+    private void SetStatus(string text) => _app.Invoke(() => _status.Text = text);
 
     private static string FormatUser(User u)
     {
