@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Claims;
@@ -17,8 +18,11 @@ public sealed class BbsSshServer : IAsyncDisposable
     private readonly BbsSshServerOptions _options;
     private readonly ILogger<BbsSshServer> _logger;
     private readonly IReadOnlyList<IKeyPair> _hostKeys;
+    private readonly ConcurrentDictionary<SshSession, PendingAuth> _pendingAuth = new();
     private TcpSshServer? _server;
     private Task? _acceptLoop;
+
+    private sealed record PendingAuth(AuthDecision Decision, string Fingerprint, string KeyAlgorithm, byte[] PublicKeyBlob);
 
     public BbsSshServer(BbsSshServerOptions options, ILogger<BbsSshServer> logger)
     {
@@ -64,8 +68,6 @@ public sealed class BbsSshServer : IAsyncDisposable
 
     private void OnSessionAuthenticating(object? sender, SshAuthenticatingEventArgs e)
     {
-        // M2 placeholder: accept any client public key. M5 wires this to a fingerprint lookup
-        // against the users database for the TOFU flow.
         if (e.PublicKey is null)
         {
             _logger.LogDebug("Rejecting auth attempt: type={Type}", e.AuthenticationType);
@@ -75,33 +77,75 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         var fingerprint = ComputeFingerprint(e.PublicKey);
         var algorithm = e.PublicKey.KeyAlgorithmName;
+        var publicKeyBlob = e.PublicKey.GetPublicKeyBytes().ToArray();
 
-        if (e.AuthenticationType == SshAuthenticationType.ClientPublicKeyQuery)
-        {
-            // Phase 1: client asks "would this key be acceptable?". Return an UNauthenticated
-            // principal to signal yes; the library will then prompt the client for a signature.
-            _logger.LogDebug("Pubkey query: user={User} algorithm={Algorithm} fingerprint={Fingerprint}",
-                e.Username, algorithm, fingerprint);
-            e.AuthenticationTask = Task.FromResult<ClaimsPrincipal?>(new ClaimsPrincipal(new ClaimsIdentity()));
-            return;
-        }
-
-        if (e.AuthenticationType != SshAuthenticationType.ClientPublicKey)
+        if (e.AuthenticationType is not (SshAuthenticationType.ClientPublicKeyQuery or SshAuthenticationType.ClientPublicKey))
         {
             e.AuthenticationTask = Task.FromResult<ClaimsPrincipal?>(null);
             return;
         }
 
-        // Phase 2: client provided signature; library has verified it. Return an authenticated principal.
-        _logger.LogInformation("Auth accepted (placeholder): user={User} algorithm={Algorithm} fingerprint={Fingerprint}",
-            e.Username, algorithm, fingerprint);
+        var session = sender as SshSession;
+        e.AuthenticationTask = AuthenticateAsync(e, session, fingerprint, algorithm, publicKeyBlob);
+    }
+
+    private async Task<ClaimsPrincipal?> AuthenticateAsync(
+        SshAuthenticatingEventArgs e,
+        SshSession? session,
+        string fingerprint,
+        string algorithm,
+        byte[] publicKeyBlob)
+    {
+        var query = new AuthQuery(fingerprint, algorithm, publicKeyBlob, e.Username);
+        var cancellation = e.Cancellation;
+        AuthDecision decision;
+        try
+        {
+            decision = await _options.AuthLookup(query, cancellation).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auth lookup failed for fingerprint={Fingerprint}", fingerprint);
+            return null;
+        }
+
+        if (decision is AuthDecision.Banned banned)
+        {
+            _logger.LogWarning("Auth rejected (banned): fingerprint={Fingerprint} reason={Reason}", fingerprint, banned.Reason);
+            return null;
+        }
+
+        if (e.AuthenticationType == SshAuthenticationType.ClientPublicKeyQuery)
+        {
+            // Phase 1 — return an UNauthenticated principal to signal "yes, this key is potentially
+            // acceptable; please proceed to actually sign". We re-run the lookup in phase 2.
+            _logger.LogDebug("Pubkey query OK: fingerprint={Fingerprint} decision={Decision}", fingerprint, decision.GetType().Name);
+            return new ClaimsPrincipal(new ClaimsIdentity());
+        }
+
+        // Phase 2 — record decision so OnChannelOpening can attach it to the BbsSession.
+        if (session is not null)
+        {
+            _pendingAuth[session] = new PendingAuth(decision, fingerprint, algorithm, publicKeyBlob);
+        }
 
         var identity = new ClaimsIdentity(authenticationType: "ssh-publickey");
-        identity.AddClaim(new Claim(ClaimTypes.Name, e.Username ?? "anonymous"));
         identity.AddClaim(new Claim("ssh:fingerprint", fingerprint));
         identity.AddClaim(new Claim("ssh:algorithm", algorithm));
+        if (decision is AuthDecision.Known known)
+        {
+            identity.AddClaim(new Claim(ClaimTypes.Name, known.Handle));
+            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, known.UserId.ToString()));
+            if (known.IsSysop) identity.AddClaim(new Claim(ClaimTypes.Role, "sysop"));
+            _logger.LogInformation("Auth accepted (known): handle={Handle} fingerprint={Fingerprint}", known.Handle, fingerprint);
+        }
+        else
+        {
+            identity.AddClaim(new Claim(ClaimTypes.Name, e.Username ?? "guest"));
+            _logger.LogInformation("Auth accepted (unknown — TOFU register flow): fingerprint={Fingerprint}", fingerprint);
+        }
 
-        e.AuthenticationTask = Task.FromResult<ClaimsPrincipal?>(new ClaimsPrincipal(identity));
+        return new ClaimsPrincipal(identity);
     }
 
     private void OnChannelOpening(object? sender, SshChannelOpeningEventArgs e)
@@ -116,13 +160,16 @@ public sealed class BbsSshServer : IAsyncDisposable
             return;
         }
 
-        var principal = e.Channel.Session.Principal as ClaimsPrincipal;
-        var fingerprint = principal?.FindFirst("ssh:fingerprint")?.Value ?? "<unknown>";
-        var algorithm = principal?.FindFirst("ssh:algorithm")?.Value ?? "<unknown>";
+        var principal = e.Channel.Session.Principal as ClaimsPrincipal ?? new ClaimsPrincipal();
+        _pendingAuth.TryRemove(e.Channel.Session, out var pending);
+        var decision = pending?.Decision ?? AuthDecision.Unknown.Instance;
+        var fingerprint = pending?.Fingerprint ?? principal.FindFirst("ssh:fingerprint")?.Value ?? "<unknown>";
+        var algorithm = pending?.KeyAlgorithm ?? principal.FindFirst("ssh:algorithm")?.Value ?? "<unknown>";
+        var publicKeyBlob = pending?.PublicKeyBlob ?? Array.Empty<byte>();
 
-        _logger.LogDebug("Session channel opening for fingerprint={Fingerprint}", fingerprint);
+        _logger.LogDebug("Session channel opening for fingerprint={Fingerprint} decision={Decision}", fingerprint, decision.GetType().Name);
 
-        var bbsSession = new BbsSession(e.Channel, principal ?? new ClaimsPrincipal(), fingerprint, algorithm, pty: null);
+        var bbsSession = new BbsSession(e.Channel, principal, fingerprint, algorithm, publicKeyBlob, decision, pty: null);
         e.Channel.Request += (s, args) => HandleChannelRequest(bbsSession, args);
     }
 

@@ -1,9 +1,15 @@
+using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Tui;
 using Night.Ms.SshTransport;
 
 namespace Night.Ms.SshServer.Hosting;
 
-public sealed class SshHost(IConfiguration configuration, ILoggerFactory loggerFactory, ILogger<SshHost> logger) : BackgroundService
+public sealed class SshHost(
+    IConfiguration configuration,
+    ILoggerFactory loggerFactory,
+    ILogger<SshHost> logger,
+    AuthLookupService authLookup,
+    IServiceProvider services) : BackgroundService
 {
     private BbsSshServer? _server;
 
@@ -11,7 +17,11 @@ public sealed class SshHost(IConfiguration configuration, ILoggerFactory loggerF
     {
         var port = ResolveListenerPort();
         _server = new BbsSshServer(
-            new BbsSshServerOptions { Port = port },
+            new BbsSshServerOptions
+            {
+                Port = port,
+                AuthLookup = authLookup.LookupAsync,
+            },
             loggerFactory.CreateLogger<BbsSshServer>());
 
         _server.SessionStarted += HandleSessionAsync;
@@ -56,7 +66,7 @@ public sealed class SshHost(IConfiguration configuration, ILoggerFactory loggerF
     {
         try
         {
-            await BbsSessionRunner.RunAsync(session, logger, cancellationToken);
+            await BbsSessionRunner.RunAsync(services, session, logger, cancellationToken);
         }
         finally
         {

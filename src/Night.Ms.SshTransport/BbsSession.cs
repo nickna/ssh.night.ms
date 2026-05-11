@@ -8,12 +8,14 @@ public sealed class BbsSession
 {
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal BbsSession(SshChannel channel, ClaimsPrincipal principal, string fingerprint, string keyAlgorithm, PtyInfo? pty)
+    internal BbsSession(SshChannel channel, ClaimsPrincipal principal, string fingerprint, string keyAlgorithm, byte[] publicKeyBlob, AuthDecision authDecision, PtyInfo? pty)
     {
         Channel = channel;
         Principal = principal;
         Fingerprint = fingerprint;
         KeyAlgorithm = keyAlgorithm;
+        PublicKeyBlob = publicKeyBlob;
+        AuthDecision = authDecision;
         Pty = pty;
         Stream = new SshStream(channel);
         channel.Closed += (_, _) => _closed.TrySetResult();
@@ -23,6 +25,8 @@ public sealed class BbsSession
     public ClaimsPrincipal Principal { get; }
     public string Fingerprint { get; }
     public string KeyAlgorithm { get; }
+    public byte[] PublicKeyBlob { get; }
+    public AuthDecision AuthDecision { get; internal set; }
     public PtyInfo? Pty { get; internal set; }
     public Stream Stream { get; }
 
