@@ -73,10 +73,12 @@ internal static class BbsSessionRunner
                 using var app = (IApplication)ApplicationImplCtor.Value.Invoke([factory, new SystemTimeProvider()]);
                 app.Init();
 
+                var loginArt = scope.ServiceProvider.GetRequiredService<LoginArtProvider>();
+
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
                     var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
-                    var registerResult = app.Run(new RegisterScreen(app, session, db, sysopBootstrap));
+                    var registerResult = app.Run(new RegisterScreen(app, session, db, sysopBootstrap, loginArt));
                     if (registerResult is User registered)
                     {
                         user = registered;
@@ -96,7 +98,7 @@ internal static class BbsSessionRunner
                     return;
                 }
 
-                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel);
+                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, loginArt);
             }
             catch (Exception ex)
             {
@@ -105,9 +107,9 @@ internal static class BbsSessionRunner
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel)
+    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, LoginArtProvider loginArt)
     {
-        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered));
+        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered, loginArt));
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
@@ -122,7 +124,7 @@ internal static class BbsSessionRunner
             {
                 app.Run(new AdminScreen(services, app, user));
             }
-            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false));
+            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false, loginArt));
         }
     }
 

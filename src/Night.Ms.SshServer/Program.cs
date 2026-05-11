@@ -3,6 +3,7 @@ using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Realtime;
+using Night.Ms.SshServer.Tui;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -15,6 +16,7 @@ builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<SysopBootstrap>();
+builder.Services.AddSingleton<LoginArtProvider>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.

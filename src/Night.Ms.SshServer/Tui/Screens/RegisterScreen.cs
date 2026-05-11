@@ -20,7 +20,7 @@ public sealed class RegisterScreen : Window
     private readonly AppDbContext _db;
     private readonly SysopBootstrap _sysopBootstrap;
 
-    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap)
+    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, LoginArtProvider loginArt)
     {
         _app = app;
         _session = session;
@@ -28,10 +28,18 @@ public sealed class RegisterScreen : Window
         _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
 
+        var art = new Label
+        {
+            X = 0,
+            Y = 0,
+            Text = loginArt.Art,
+        };
+        var contentTop = loginArt.LineCount + 1;
+
         var greeting = new Label
         {
             X = 2,
-            Y = 1,
+            Y = contentTop,
             Text =
                 "Welcome to ssh.night.ms. Your SSH key isn't on file here yet —\n" +
                 "pick a handle below and it'll be bound to this key forever.\n" +
@@ -41,28 +49,28 @@ public sealed class RegisterScreen : Window
         var fp = new Label
         {
             X = 2,
-            Y = 5,
+            Y = contentTop + 4,
             Text = $"key  {session.KeyAlgorithm}\nfp   {session.Fingerprint}",
         };
 
         var prompt = new Label
         {
             X = 2,
-            Y = 9,
+            Y = contentTop + 8,
             Text = "Pick a handle (3–32 chars, letters/digits/_/-):",
         };
 
         var handleField = new TextField
         {
             X = 2,
-            Y = 10,
+            Y = contentTop + 9,
             Width = 36,
         };
 
         var status = new Label
         {
             X = 2,
-            Y = 12,
+            Y = contentTop + 11,
             Width = Dim.Fill(2),
             Height = 2,
         };
@@ -70,7 +78,7 @@ public sealed class RegisterScreen : Window
         var submit = new Button
         {
             X = 2,
-            Y = 15,
+            Y = contentTop + 14,
             Text = "Register",
             IsDefault = true,
         };
@@ -78,7 +86,7 @@ public sealed class RegisterScreen : Window
         var cancel = new Button
         {
             X = Pos.Right(submit) + 2,
-            Y = 15,
+            Y = contentTop + 14,
             Text = "Disconnect",
         };
 
@@ -114,7 +122,7 @@ public sealed class RegisterScreen : Window
             _app.RequestStop();
         };
 
-        Add(greeting, fp, prompt, handleField, status, submit, cancel);
+        Add(art, greeting, fp, prompt, handleField, status, submit, cancel);
 
         KeyDown += (_, key) =>
         {

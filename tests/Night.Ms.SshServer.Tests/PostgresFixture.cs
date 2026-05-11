@@ -8,8 +8,7 @@ namespace Night.Ms.SshServer.Tests;
 // from migrations so data from one test can't leak into the next without explicit setup.
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("bbs_template")
         .WithUsername("postgres")
         .WithPassword("postgres")
