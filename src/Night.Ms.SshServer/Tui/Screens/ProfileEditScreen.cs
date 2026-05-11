@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.Net;
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
@@ -17,6 +19,7 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly IApplication _app;
     private readonly IServiceProvider _services;
     private readonly User _user;
+    private readonly IPAddress? _clientIp;
     private readonly TextField _realName;
     private readonly TextField _location;
     private readonly TextView _bio;
@@ -27,12 +30,13 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly OptionSelector<DateFormat> _dateFormat;
     private readonly Label _status;
 
-    public ProfileEditScreen(IApplication app, IServiceProvider services, User user)
+    public ProfileEditScreen(IApplication app, IServiceProvider services, User user, IPAddress? clientIp)
         : base(app, services, user)
     {
         _app = app;
         _services = services;
         _user = user;
+        _clientIp = clientIp;
         Title = $"profile — {user.Handle} — [Ctrl+S] save  [Esc] back to lobby";
 
         var blurb = new Label
@@ -200,6 +204,13 @@ public sealed class ProfileEditScreen : BbsWindow
 
             var profile = _services.GetRequiredService<ProfileService>();
             var result = await profile.UpdateAsync(_user.Id, update, default);
+
+            if (!result.Ok && result.Failure == ProfileUpdateFailure.LocationNotFound)
+            {
+                var applied = await TryApplyIpSuggestionAsync(profile, update);
+                if (applied) return;
+            }
+
             if (!result.Ok)
             {
                 _app.Invoke(() =>
@@ -209,15 +220,11 @@ public sealed class ProfileEditScreen : BbsWindow
                 });
                 return;
             }
-            // Reflect the new values onto the in-memory User so the status bar (clock, weather
-            // unit) and any open screens pick them up without a re-login.
-            _user.RealName = NullIfEmpty(_realName.Text);
-            _user.Location = NullIfEmpty(_location.Text);
-            _user.Bio = NullIfEmpty(_bio.Text);
-            _user.TimeZoneId = update.TimeZoneId;
-            _user.TemperatureUnit = update.TemperatureUnit;
-            _user.ClockFormat = update.ClockFormat;
-            _user.DateFormat = update.DateFormat;
+            ReflectSavedUser(update);
+            _user.LocationLatitude = result.LocationLatitude;
+            _user.LocationLongitude = result.LocationLongitude;
+            _user.LocationCanonical = result.LocationCanonical;
+            _user.LocationSource = result.LocationSource;
             _app.Invoke(() =>
             {
                 _status.Text = "Saved.";
@@ -232,6 +239,79 @@ public sealed class ProfileEditScreen : BbsWindow
                 _status.SetScheme(BbsTheme.Warning);
             });
         }
+    }
+
+    // When geocoding rejects the typed location, fall back to the client's IP. If we can place
+    // it on a map, prompt "use detected location: X?" — accepting writes through with the
+    // resolved coords so the typed label persists alongside known-good lat/lon (source=IpGuess).
+    private async Task<bool> TryApplyIpSuggestionAsync(ProfileService profile, ProfileUpdate originalUpdate)
+    {
+        if (_clientIp is null) return false;
+        var ipProvider = _services.GetService<IIpGeolocationProvider>();
+        if (ipProvider is null) return false;
+
+        var suggestion = await ipProvider.LookupAsync(_clientIp);
+        if (suggestion is null) return false;
+
+        int? choice = -1;
+        _app.Invoke(() =>
+        {
+            choice = Terminal.Gui.Views.MessageBox.Query(
+                _app,
+                title: "Location not found",
+                message: $"Couldn't find '{originalUpdate.Location}'.\nUse detected location instead?\n\n  {suggestion.DisplayName}",
+                "_Yes", "_No");
+        });
+        // MessageBox.Query is synchronous on the UI thread; choice is set before Invoke returns.
+        if (choice != 0) return false;
+
+        var ipUpdate = originalUpdate with
+        {
+            Location = suggestion.DisplayName,
+            PreResolvedLocation = new PreResolvedLocation(
+                suggestion.Latitude,
+                suggestion.Longitude,
+                suggestion.DisplayName,
+                LocationSource.IpGuess),
+        };
+        var ipResult = await profile.UpdateAsync(_user.Id, ipUpdate, default);
+        if (!ipResult.Ok)
+        {
+            _app.Invoke(() =>
+            {
+                _status.Text = $"[!] {ipResult.Error}";
+                _status.SetScheme(BbsTheme.Warning);
+            });
+            return false;
+        }
+        _app.Invoke(() =>
+        {
+            _location.Text = suggestion.DisplayName;
+        });
+        ReflectSavedUser(ipUpdate);
+        _user.LocationLatitude = suggestion.Latitude;
+        _user.LocationLongitude = suggestion.Longitude;
+        _user.LocationCanonical = suggestion.DisplayName;
+        _user.LocationSource = LocationSource.IpGuess;
+        _app.Invoke(() =>
+        {
+            _status.Text = $"Saved with detected location: {suggestion.DisplayName}";
+            _status.SetScheme(BbsTheme.Success_);
+        });
+        return true;
+    }
+
+    // Reflect the new values onto the in-memory User so the status bar (clock, weather unit)
+    // and any open screens pick them up without a re-login.
+    private void ReflectSavedUser(ProfileUpdate update)
+    {
+        _user.RealName = NullIfEmpty(update.RealName);
+        _user.Location = NullIfEmpty(update.Location);
+        _user.Bio = NullIfEmpty(update.Bio);
+        _user.TimeZoneId = update.TimeZoneId;
+        _user.TemperatureUnit = update.TemperatureUnit;
+        _user.ClockFormat = update.ClockFormat;
+        _user.DateFormat = update.DateFormat;
     }
 
     private static string FormatZone(TimeZoneInfo tz)

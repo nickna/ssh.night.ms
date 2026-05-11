@@ -98,7 +98,7 @@ internal static class BbsSessionRunner
                     return;
                 }
 
-                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, loginArt);
+                RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, loginArt, session);
             }
             catch (Exception ex)
             {
@@ -107,7 +107,7 @@ internal static class BbsSessionRunner
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, LoginArtProvider loginArt)
+    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, LoginArtProvider loginArt, BbsSession session)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, loginArt));
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Sysop)
@@ -122,7 +122,7 @@ internal static class BbsSessionRunner
             }
             else if (nav == LobbyNavigation.Profile)
             {
-                app.Run(new ProfileEditScreen(app, services, user));
+                app.Run(new ProfileEditScreen(app, services, user, session.RemoteIPAddress));
             }
             else if (nav == LobbyNavigation.News)
             {

@@ -27,6 +27,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(u => u.Handle).HasColumnType("citext").HasMaxLength(32);
             b.Property(u => u.Bio).HasMaxLength(500);
             b.Property(u => u.Location).HasMaxLength(64);
+            b.Property(u => u.LocationCanonical).HasMaxLength(160);
+            b.Property(u => u.LocationSource).HasDefaultValue(LocationSource.None);
             b.Property(u => u.RealName).HasMaxLength(64);
             b.Property(u => u.TimeZoneId).HasMaxLength(64).HasDefaultValue("UTC");
             b.Property(u => u.TemperatureUnit).HasDefaultValue(TemperatureUnit.Celsius);

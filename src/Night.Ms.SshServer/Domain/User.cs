@@ -14,6 +14,14 @@ public sealed class User
     public string? Location { get; set; }
     public string? RealName { get; set; }
 
+    // Resolved geocoded location, populated when Location validates against the geocoder.
+    // Drives per-user weather. LocationCanonical is what the geocoder echoed back; the user's
+    // typed Location is kept verbatim for display.
+    public double? LocationLatitude { get; set; }
+    public double? LocationLongitude { get; set; }
+    public string? LocationCanonical { get; set; }
+    public LocationSource LocationSource { get; set; }
+
     // Display preferences. Defaults match the neutral globals applied to every existing row
     // by the AddUserDisplayPreferences migration: UTC, °C, 24-hour, ISO date.
     public string TimeZoneId { get; set; } = "UTC";

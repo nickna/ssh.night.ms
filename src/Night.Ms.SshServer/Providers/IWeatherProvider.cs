@@ -11,8 +11,13 @@ public sealed record WeatherSnapshot(
 
 public interface IWeatherProvider
 {
-    // Returns the current weather for the provider's configured location, or null if the
-    // upstream call failed. Implementations are expected to cache results so the UI can
-    // call this on every screen open without hammering the external API.
-    Task<WeatherSnapshot?> GetCurrentAsync(CancellationToken cancellationToken = default);
+    // Returns current weather for the given coordinates, or for the provider's configured
+    // default (env-var fallback) when all of latitude/longitude/label are null. Null on
+    // upstream failure. Implementations cache per coordinate so multiple sessions sharing a
+    // location only hit the upstream API once per cache window.
+    Task<WeatherSnapshot?> GetCurrentAsync(
+        double? latitude = null,
+        double? longitude = null,
+        string? label = null,
+        CancellationToken cancellationToken = default);
 }

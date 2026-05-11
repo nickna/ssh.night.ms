@@ -1,64 +1,74 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Night.Ms.SshServer.Providers;
 
-// Free, key-less weather provider backed by https://api.open-meteo.com. Configure via env
-// vars:
+// Free, key-less weather provider backed by https://api.open-meteo.com. Per-user coords
+// flow in from the caller (User.LocationLatitude/Longitude); when not supplied the
+// configured fallback (env vars below, default NYC) is used. Results are cached per
+// rounded coordinate for 10 minutes so multiple sessions sharing a location share a
+// single upstream call inside that window.
 //   NIGHTMS_WEATHER_LAT     (decimal degrees, default 40.7128 = NYC)
 //   NIGHTMS_WEATHER_LON     (decimal degrees, default -74.0060)
 //   NIGHTMS_WEATHER_LABEL   (display name, default "New York")
-// Results are cached for 10 minutes — open-meteo's terms allow generous traffic but a TUI
-// session opening the news screen shouldn't trigger a fresh call every time.
 public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<OpenMeteoWeatherProvider> logger)
     : IWeatherProvider
 {
     public static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
     public const string HttpClientName = "open-meteo";
 
-    private readonly object _gate = new();
-    private WeatherSnapshot? _cached;
+    private readonly ConcurrentDictionary<(double lat, double lon), WeatherSnapshot> _cache = new();
 
-    public string LocationLabel => configuration["NIGHTMS_WEATHER_LABEL"] ?? "New York";
-    public double Latitude => TryParse(configuration["NIGHTMS_WEATHER_LAT"], fallback: 40.7128);
-    public double Longitude => TryParse(configuration["NIGHTMS_WEATHER_LON"], fallback: -74.0060);
+    public string FallbackLabel => configuration["NIGHTMS_WEATHER_LABEL"] ?? "New York";
+    public double FallbackLatitude => TryParse(configuration["NIGHTMS_WEATHER_LAT"], fallback: 40.7128);
+    public double FallbackLongitude => TryParse(configuration["NIGHTMS_WEATHER_LON"], fallback: -74.0060);
 
-    public async Task<WeatherSnapshot?> GetCurrentAsync(CancellationToken cancellationToken = default)
+    public async Task<WeatherSnapshot?> GetCurrentAsync(
+        double? latitude = null,
+        double? longitude = null,
+        string? label = null,
+        CancellationToken cancellationToken = default)
     {
-        lock (_gate)
+        var lat = latitude ?? FallbackLatitude;
+        var lon = longitude ?? FallbackLongitude;
+        var displayLabel = !string.IsNullOrEmpty(label) ? label : FallbackLabel;
+        var cacheKey = (Math.Round(lat, 3), Math.Round(lon, 3));
+
+        if (_cache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.UtcNow - cached.FetchedAt < CacheTtl)
         {
-            if (_cached is { } cached && DateTimeOffset.UtcNow - cached.FetchedAt < CacheTtl)
-            {
-                return cached;
-            }
+            // Refresh the label so a user editing their location sees the new name even when
+            // we serve a cached temperature; coords haven't changed so the reading is valid.
+            return cached.LocationLabel == displayLabel ? cached : cached with { LocationLabel = displayLabel };
         }
 
         try
         {
-            var fresh = await FetchAsync(cancellationToken).ConfigureAwait(false);
+            var fresh = await FetchAsync(lat, lon, displayLabel, cancellationToken).ConfigureAwait(false);
             if (fresh is not null)
             {
-                lock (_gate) { _cached = fresh; }
+                _cache[cacheKey] = fresh;
             }
-            return fresh ?? CachedFallback();
+            return fresh ?? CachedFallback(cacheKey, displayLabel);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Open-Meteo fetch failed; falling back to last cached snapshot if any.");
-            return CachedFallback();
+            logger.LogWarning(ex, "Open-Meteo fetch failed for {Lat},{Lon}; falling back to last cached snapshot if any.", lat, lon);
+            return CachedFallback(cacheKey, displayLabel);
         }
     }
 
-    private WeatherSnapshot? CachedFallback()
+    private WeatherSnapshot? CachedFallback((double lat, double lon) key, string label)
     {
-        lock (_gate) { return _cached; }
+        if (!_cache.TryGetValue(key, out var cached)) return null;
+        return cached.LocationLabel == label ? cached : cached with { LocationLabel = label };
     }
 
-    private async Task<WeatherSnapshot?> FetchAsync(CancellationToken ct)
+    private async Task<WeatherSnapshot?> FetchAsync(double latitude, double longitude, string label, CancellationToken ct)
     {
-        var lat = Latitude.ToString(CultureInfo.InvariantCulture);
-        var lon = Longitude.ToString(CultureInfo.InvariantCulture);
+        var lat = latitude.ToString(CultureInfo.InvariantCulture);
+        var lon = longitude.ToString(CultureInfo.InvariantCulture);
         var uri = $"v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code&temperature_unit=celsius";
 
         var http = httpClientFactory.CreateClient(HttpClientName);
@@ -75,9 +85,9 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
 
         var celsius = payload.Current.Temperature2m;
         return new WeatherSnapshot(
-            LocationLabel: LocationLabel,
-            LatitudeDegrees: Latitude,
-            LongitudeDegrees: Longitude,
+            LocationLabel: label,
+            LatitudeDegrees: latitude,
+            LongitudeDegrees: longitude,
             TemperatureCelsius: celsius,
             TemperatureFahrenheit: celsius * 9 / 5 + 32,
             Conditions: WmoCode(payload.Current.WeatherCode),

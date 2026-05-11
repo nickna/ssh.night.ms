@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Providers;
 
 namespace Night.Ms.SshServer.Realtime;
 
@@ -18,7 +19,30 @@ public sealed record ProfileSnapshot(
     int TopicCount,
     int PostCount);
 
-public sealed record ProfileUpdateResult(bool Ok, string? Error);
+// Returned alongside an UpdateAsync failure when the typed Location couldn't be geocoded.
+// The screen uses this to decide whether to offer the "use IP-detected location" prompt.
+public enum ProfileUpdateFailure
+{
+    None = 0,
+    LocationNotFound = 1,
+    LocationServiceUnavailable = 2,
+}
+
+public sealed record ProfileUpdateResult(
+    bool Ok,
+    string? Error,
+    ProfileUpdateFailure Failure = ProfileUpdateFailure.None,
+    // Populated on success when the user has a geocoded location, so the screen can refresh
+    // the in-memory User without re-querying the database.
+    double? LocationLatitude = null,
+    double? LocationLongitude = null,
+    string? LocationCanonical = null,
+    LocationSource LocationSource = LocationSource.None);
+
+// A coords-already-resolved location to apply without re-geocoding. Used by the
+// "accept IP suggestion" flow on profile-save failure so the screen can submit a typed
+// label plus its known-good coords in one round-trip.
+public sealed record PreResolvedLocation(double Latitude, double Longitude, string Canonical, LocationSource Source);
 
 // Bundles the editable profile fields so UpdateAsync doesn't sprout an 8-arg signature.
 // Any string property left null clears the column; the display-preference fields are
@@ -30,7 +54,8 @@ public sealed record ProfileUpdate(
     string TimeZoneId,
     TemperatureUnit TemperatureUnit,
     ClockFormat ClockFormat,
-    DateFormat DateFormat);
+    DateFormat DateFormat,
+    PreResolvedLocation? PreResolvedLocation = null);
 
 public sealed class ProfileService(IServiceProvider services)
 {
@@ -95,6 +120,43 @@ public sealed class ProfileService(IServiceProvider services)
         if (user is null)
             return new(false, "User not found.");
 
+        // Resolve the new geocoded fields. Only re-geocode when the typed Location actually
+        // changed; this keeps an existing IP-guess source intact across unrelated profile
+        // saves (e.g. user edits their bio but didn't touch location).
+        var locationChanged = !string.Equals(user.Location, location, StringComparison.Ordinal);
+        if (locationChanged)
+        {
+            if (string.IsNullOrEmpty(location))
+            {
+                user.LocationLatitude = null;
+                user.LocationLongitude = null;
+                user.LocationCanonical = null;
+                user.LocationSource = LocationSource.None;
+            }
+            else if (update.PreResolvedLocation is { } pre)
+            {
+                user.LocationLatitude = pre.Latitude;
+                user.LocationLongitude = pre.Longitude;
+                user.LocationCanonical = pre.Canonical;
+                user.LocationSource = pre.Source;
+            }
+            else
+            {
+                var geocoder = scope.ServiceProvider.GetRequiredService<IGeocodingProvider>();
+                var matches = await geocoder.SearchAsync(location, ct);
+                if (matches is null)
+                    return new(false, "Couldn't reach the geocoding service — try again in a moment.", ProfileUpdateFailure.LocationServiceUnavailable);
+                if (matches.Count == 0)
+                    return new(false, $"Couldn't find '{location}'. Try 'City, Country'.", ProfileUpdateFailure.LocationNotFound);
+
+                var top = matches[0];
+                user.LocationLatitude = top.Latitude;
+                user.LocationLongitude = top.Longitude;
+                user.LocationCanonical = top.CanonicalName;
+                user.LocationSource = LocationSource.Manual;
+            }
+        }
+
         user.RealName = string.IsNullOrEmpty(realName) ? null : realName;
         user.Location = string.IsNullOrEmpty(location) ? null : location;
         user.Bio = string.IsNullOrEmpty(bio) ? null : bio;
@@ -103,7 +165,14 @@ public sealed class ProfileService(IServiceProvider services)
         user.ClockFormat = update.ClockFormat;
         user.DateFormat = update.DateFormat;
         await db.SaveChangesAsync(ct);
-        return new(true, null);
+        return new ProfileUpdateResult(
+            Ok: true,
+            Error: null,
+            Failure: ProfileUpdateFailure.None,
+            LocationLatitude: user.LocationLatitude,
+            LocationLongitude: user.LocationLongitude,
+            LocationCanonical: user.LocationCanonical,
+            LocationSource: user.LocationSource);
     }
 
     // Renders the snapshot as the multi-line text /finger prints into the chat log. The viewer

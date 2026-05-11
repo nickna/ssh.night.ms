@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 
 namespace Night.Ms.SshServer.Tests;
@@ -20,8 +21,23 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
         var services = new ServiceCollection();
         services.AddScoped(_ => new AppDbContext(_dbOptions));
+        services.AddSingleton<IGeocodingProvider, StubGeocodingProvider>();
         _serviceProvider = services.BuildServiceProvider();
         _sut = new ProfileService(_serviceProvider);
+    }
+
+    // Geocoder stub that returns a single fixed hit for any non-empty query. Tests that
+    // care about geocoding behavior end-to-end live in their own file; these tests only
+    // care that ProfileService writes through fields correctly when geocoding succeeds.
+    private sealed class StubGeocodingProvider : IGeocodingProvider
+    {
+        public Task<IReadOnlyList<GeocodingMatch>?> SearchAsync(string query, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<GeocodingMatch>?>(string.IsNullOrEmpty(query)
+                ? Array.Empty<GeocodingMatch>()
+                : [new GeocodingMatch(query, 40.0, -74.0, "United States", "New York")]);
+
+        public Task<GeocodingMatch?> ReverseAsync(double latitude, double longitude, CancellationToken cancellationToken = default) =>
+            Task.FromResult<GeocodingMatch?>(new GeocodingMatch($"{latitude},{longitude}", latitude, longitude, null, null));
     }
 
     public Task DisposeAsync()

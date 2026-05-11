@@ -114,7 +114,11 @@ public sealed class BbsStatusBar : View
 
         try
         {
-            var snap = await _weather.GetCurrentAsync(_shutdown.Token).ConfigureAwait(false);
+            var snap = await _weather.GetCurrentAsync(
+                latitude: _user?.LocationLatitude,
+                longitude: _user?.LocationLongitude,
+                label: _user?.LocationCanonical ?? _user?.Location,
+                cancellationToken: _shutdown.Token).ConfigureAwait(false);
             _app.Invoke(() =>
             {
                 _weatherLabel.Text = snap is null

@@ -113,7 +113,10 @@ public sealed class NewsScreen : BbsWindow
         try
         {
             var provider = _services.GetRequiredService<IWeatherProvider>();
-            var snap = await provider.GetCurrentAsync();
+            var snap = await provider.GetCurrentAsync(
+                latitude: _user.LocationLatitude,
+                longitude: _user.LocationLongitude,
+                label: _user.LocationCanonical ?? _user.Location);
             _app.Invoke(() =>
             {
                 if (snap is null)

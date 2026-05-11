@@ -9,7 +9,6 @@ using Microsoft.DevTunnels.Ssh.Events;
 using Microsoft.DevTunnels.Ssh.Messages;
 using Microsoft.Extensions.Logging;
 using Night.Ms.SshTransport.Crypto;
-using TcpSshServer = Microsoft.DevTunnels.Ssh.Tcp.SshServer;
 
 namespace Night.Ms.SshTransport;
 
@@ -19,7 +18,9 @@ public sealed class BbsSshServer : IAsyncDisposable
     private readonly ILogger<BbsSshServer> _logger;
     private readonly IReadOnlyList<IKeyPair> _hostKeys;
     private readonly ConcurrentDictionary<SshSession, PendingAuth> _pendingAuth = new();
-    private TcpSshServer? _server;
+    // Peer IP captured by IpCapturingTcpSshServer at TCP accept, looked up at channel-open time.
+    private readonly ConcurrentDictionary<SshSession, IPAddress> _remoteIPs = new();
+    private IpCapturingTcpSshServer? _server;
     private Task? _acceptLoop;
 
     private sealed record PendingAuth(AuthDecision Decision, string Fingerprint, string KeyAlgorithm, byte[] PublicKeyBlob);
@@ -50,11 +51,12 @@ public sealed class BbsSshServer : IAsyncDisposable
         // config.KeyExchangeAlgorithms.Add(new Curve25519KeyExchangeAlgorithm());
 
         var trace = new TraceSource(nameof(BbsSshServer));
-        _server = new TcpSshServer(config, trace)
+        _server = new IpCapturingTcpSshServer(config, trace)
         {
             Credentials = new SshServerCredentials(_hostKeys.ToArray()),
         };
 
+        _server.SessionOpened += OnSessionOpened;
         _server.SessionAuthenticating += OnSessionAuthenticating;
         _server.ChannelOpening += OnChannelOpening;
         _server.ExceptionRaised += (_, ex) => _logger.LogError(ex, "Unhandled exception in SSH server");
@@ -73,6 +75,19 @@ public sealed class BbsSshServer : IAsyncDisposable
             // Re-throw the underlying exception (AddressAlreadyInUse, AccessDenied, etc.).
             await _acceptLoop.ConfigureAwait(false);
         }
+    }
+
+    private void OnSessionOpened(object? sender, SshServerSession session)
+    {
+        // Fires synchronously after IpCapturingTcpSshServer.AcceptConnectionAsync returns and
+        // before the session begins its handshake — pair the latest pending endpoint with it.
+        var endpoint = _server?.ConsumePendingRemoteEndpoint();
+        if (endpoint?.Address is { } ip)
+        {
+            _remoteIPs[session] = ip;
+            _logger.LogDebug("Session opened from {Address}:{Port}", ip, endpoint.Port);
+        }
+        session.Closed += (_, _) => _remoteIPs.TryRemove(session, out _);
     }
 
     private void OnSessionAuthenticating(object? sender, SshAuthenticatingEventArgs e)
@@ -178,7 +193,8 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         _logger.LogDebug("Session channel opening for fingerprint={Fingerprint} decision={Decision}", fingerprint, decision.GetType().Name);
 
-        var bbsSession = new BbsSession(e.Channel, principal, fingerprint, algorithm, publicKeyBlob, decision, pty: null);
+        _remoteIPs.TryGetValue(e.Channel.Session, out var remoteIp);
+        var bbsSession = new BbsSession(e.Channel, principal, fingerprint, algorithm, publicKeyBlob, decision, pty: null, remoteIPAddress: remoteIp);
         e.Channel.Request += (s, args) => HandleChannelRequest(bbsSession, args);
     }
 

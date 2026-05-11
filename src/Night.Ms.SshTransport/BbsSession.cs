@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using Microsoft.DevTunnels.Ssh;
 using Microsoft.DevTunnels.Ssh.Algorithms;
@@ -8,7 +9,7 @@ public sealed class BbsSession
 {
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal BbsSession(SshChannel channel, ClaimsPrincipal principal, string fingerprint, string keyAlgorithm, byte[] publicKeyBlob, AuthDecision authDecision, PtyInfo? pty)
+    internal BbsSession(SshChannel channel, ClaimsPrincipal principal, string fingerprint, string keyAlgorithm, byte[] publicKeyBlob, AuthDecision authDecision, PtyInfo? pty, IPAddress? remoteIPAddress)
     {
         Channel = channel;
         Principal = principal;
@@ -17,6 +18,7 @@ public sealed class BbsSession
         PublicKeyBlob = publicKeyBlob;
         AuthDecision = authDecision;
         Pty = pty;
+        RemoteIPAddress = remoteIPAddress;
         Stream = new SshStream(channel);
         channel.Closed += (_, _) => _closed.TrySetResult();
     }
@@ -29,6 +31,9 @@ public sealed class BbsSession
     public AuthDecision AuthDecision { get; internal set; }
     public PtyInfo? Pty { get; internal set; }
     public Stream Stream { get; }
+    // Peer IP as captured by IpCapturingTcpSshServer at TCP accept time. Null only for
+    // unusual transports (e.g. Unix sockets) — for any inbound TCP connection this is set.
+    public IPAddress? RemoteIPAddress { get; }
 
     public event EventHandler<WindowChange>? WindowChanged;
     internal void RaiseWindowChanged(WindowChange change) => WindowChanged?.Invoke(this, change);
