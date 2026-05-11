@@ -107,15 +107,58 @@ internal static class BbsSessionRunner
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered));
-        while (nav == LobbyNavigation.Chat)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards)
         {
-            if (lobbyChannel is null)
+            if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
-                // DatabaseInitializer always seeds #lobby, so this is defensive only.
-                break;
+                app.Run(new ChatScreen(services, app, user, lobbyChannel));
             }
-            app.Run(new ChatScreen(services, app, user, lobbyChannel));
+            else if (nav == LobbyNavigation.Boards)
+            {
+                RunForumLoop(services, app, user);
+            }
             nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false));
+        }
+    }
+
+    private static void RunForumLoop(IServiceProvider services, IApplication app, User user)
+    {
+        while (true)
+        {
+            Forum? forum;
+            using (var scope = services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                forum = app.Run(new ForumListScreen(app, db)) as Forum;
+            }
+            if (forum is null) return;
+
+            while (true)
+            {
+                TopicListScreen topicListScreen;
+                using (var scope = services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    topicListScreen = new TopicListScreen(app, db, user, forum);
+                }
+                var listResult = (TopicListResult?)app.Run(topicListScreen);
+                if (listResult == TopicListResult.Back) break;
+
+                Topic? topic = null;
+                if (listResult == TopicListResult.OpenTopic)
+                {
+                    topic = topicListScreen.SelectedTopic;
+                }
+                else if (listResult == TopicListResult.NewTopic)
+                {
+                    using var scope = services.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    topic = app.Run(new NewTopicScreen(app, db, user, forum)) as Topic;
+                }
+                if (topic is null) continue; // back to topic list
+
+                app.Run(new ThreadScreen(services, app, user, topic));
+            }
         }
     }
 

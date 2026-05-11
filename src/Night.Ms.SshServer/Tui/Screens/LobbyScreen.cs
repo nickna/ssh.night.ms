@@ -6,7 +6,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Logout }
+public enum LobbyNavigation { Chat, Boards, Logout }
 
 public sealed class LobbyScreen : Window
 {
@@ -51,9 +51,14 @@ public sealed class LobbyScreen : Window
         {
             X = Pos.Right(chat) + 2,
             Y = 5,
-            Text = "_Boards (M8)",
+            Text = "_Boards",
         };
-        boards.Enabled = false;
+        boards.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Boards;
+            _app.RequestStop();
+        };
 
         var logout = new Button
         {
@@ -89,6 +94,12 @@ public sealed class LobbyScreen : Window
             {
                 // Enter from anywhere on the lobby jumps into chat — saves a Tab dance.
                 Result = LobbyNavigation.Chat;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.B || key == Key.B.WithShift)
+            {
+                Result = LobbyNavigation.Boards;
                 _app.RequestStop();
                 key.Handled = true;
             }
