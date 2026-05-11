@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -17,6 +18,7 @@ public sealed class ForumListScreen : Window
     {
         _app = app;
         Title = "ssh.night.ms — boards — [Esc] back to lobby";
+        BbsTheme.ApplyWindow(this);
 
         _forums = db.Forums.OrderBy(f => f.SortOrder).ThenBy(f => f.Name).ToList();
 

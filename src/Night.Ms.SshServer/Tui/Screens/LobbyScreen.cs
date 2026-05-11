@@ -1,4 +1,5 @@
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -16,6 +17,7 @@ public sealed class LobbyScreen : Window
     {
         _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";
+        BbsTheme.ApplyWindow(this);
 
         var art = new Label
         {
@@ -23,6 +25,7 @@ public sealed class LobbyScreen : Window
             Y = 0,
             Text = loginArt.Art,
         };
+        art.SetScheme(BbsTheme.Hint);
 
         // Push the rest of the lobby below the art (with a one-row gap).
         var contentTop = loginArt.LineCount + 1;
@@ -35,6 +38,7 @@ public sealed class LobbyScreen : Window
                 ? $"Welcome aboard, {user.Handle}. Your key is bound to this account."
                 : $"Welcome back, {user.Handle}.",
         };
+        welcome.SetScheme(justRegistered ? BbsTheme.Success_ : BbsTheme.Header_);
 
         var hint = new Label
         {
@@ -42,6 +46,7 @@ public sealed class LobbyScreen : Window
             Y = contentTop + 2,
             Text = "Choose where to go:",
         };
+        hint.SetScheme(BbsTheme.Hint);
 
         var chat = new Button
         {
@@ -130,6 +135,7 @@ public sealed class LobbyScreen : Window
             Y = contentTop + 7,
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
+        sysopBadge.SetScheme(BbsTheme.Success_);
 
         Add(art, welcome, hint, chat, boards, profile, news, sysopButton, logout, sysopBadge);
 

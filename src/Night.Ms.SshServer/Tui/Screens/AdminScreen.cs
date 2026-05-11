@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -25,6 +26,7 @@ public sealed class AdminScreen : Window
         _app = app;
         _actor = actor;
         Title = $"sysop console — {actor.Handle} — type 'help' + Enter — [Esc] back to lobby";
+        BbsTheme.ApplyWindow(this);
 
         var leftHeader = new Label
         {
@@ -33,6 +35,7 @@ public sealed class AdminScreen : Window
             Width = Dim.Percent(50),
             Text = "users (S=sysop, B=banned):",
         };
+        leftHeader.SetScheme(BbsTheme.Header_);
 
         _userPane = new TextView
         {
@@ -52,6 +55,7 @@ public sealed class AdminScreen : Window
             Width = Dim.Fill(),
             Text = "audit log (recent 50):",
         };
+        rightHeader.SetScheme(BbsTheme.Header_);
 
         _audit = new TextView
         {
@@ -71,6 +75,7 @@ public sealed class AdminScreen : Window
             Width = Dim.Fill(),
             Text = "Commands: ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh",
         };
+        _status.SetScheme(BbsTheme.Hint);
 
         _command = new TextField
         {
@@ -78,6 +83,7 @@ public sealed class AdminScreen : Window
             Y = Pos.AnchorEnd(1),
             Width = Dim.Fill(),
         };
+        _command.SetScheme(BbsTheme.Input);
         _command.KeyDown += (_, key) =>
         {
             if (key == Key.Enter)
@@ -225,7 +231,11 @@ public sealed class AdminScreen : Window
         }
     }
 
-    private void SetStatus(string text) => _app.Invoke(() => _status.Text = text);
+    private void SetStatus(string text) => _app.Invoke(() =>
+    {
+        _status.Text = text;
+        _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Hint);
+    });
 
     private static string FormatUser(User u)
     {

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshTransport;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
@@ -27,6 +28,7 @@ public sealed class RegisterScreen : Window
         _db = db;
         _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
+        BbsTheme.ApplyWindow(this);
 
         var art = new Label
         {
@@ -34,6 +36,7 @@ public sealed class RegisterScreen : Window
             Y = 0,
             Text = loginArt.Art,
         };
+        art.SetScheme(BbsTheme.Hint);
         var contentTop = loginArt.LineCount + 1;
 
         var greeting = new Label
@@ -45,6 +48,7 @@ public sealed class RegisterScreen : Window
                 "pick a handle below and it'll be bound to this key forever.\n" +
                 "(Lose the key, lose the account. There's no email recovery.)",
         };
+        greeting.SetScheme(BbsTheme.Header_);
 
         var fp = new Label
         {
@@ -52,6 +56,7 @@ public sealed class RegisterScreen : Window
             Y = contentTop + 4,
             Text = $"key  {session.KeyAlgorithm}\nfp   {session.Fingerprint}",
         };
+        fp.SetScheme(BbsTheme.Faint_);
 
         var prompt = new Label
         {
@@ -59,6 +64,7 @@ public sealed class RegisterScreen : Window
             Y = contentTop + 8,
             Text = "Pick a handle (3–32 chars, letters/digits/_/-):",
         };
+        prompt.SetScheme(BbsTheme.Hint);
 
         var handleField = new TextField
         {
@@ -66,6 +72,7 @@ public sealed class RegisterScreen : Window
             Y = contentTop + 9,
             Width = 36,
         };
+        handleField.SetScheme(BbsTheme.Input);
 
         var status = new Label
         {
@@ -74,6 +81,7 @@ public sealed class RegisterScreen : Window
             Width = Dim.Fill(2),
             Height = 2,
         };
+        status.SetScheme(BbsTheme.Warning);
 
         var submit = new Button
         {

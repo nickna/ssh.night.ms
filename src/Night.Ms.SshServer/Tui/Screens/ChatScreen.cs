@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Realtime;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -30,6 +31,7 @@ public sealed class ChatScreen : Window
         _app = app;
         _user = user;
         _currentChannel = initialChannel;
+        BbsTheme.ApplyWindow(this);
 
         _log = new TextView
         {
@@ -47,6 +49,7 @@ public sealed class ChatScreen : Window
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
         };
+        _status.SetScheme(BbsTheme.Status);
 
         _input = new TextField
         {
@@ -54,6 +57,7 @@ public sealed class ChatScreen : Window
             Y = Pos.Bottom(_status),
             Width = Dim.Fill(),
         };
+        _input.SetScheme(BbsTheme.Input);
 
         _input.KeyDown += (_, key) =>
         {
@@ -330,7 +334,11 @@ public sealed class ChatScreen : Window
         SetStatus($"in {label}  topic: {_currentChannel.Topic ?? "(none)"}");
     }
 
-    private void SetStatus(string text) => _app.Invoke(() => _status.Text = text);
+    private void SetStatus(string text) => _app.Invoke(() =>
+    {
+        _status.Text = text;
+        _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Status);
+    });
 
     private void AppendOnUiThread(string text)
     {

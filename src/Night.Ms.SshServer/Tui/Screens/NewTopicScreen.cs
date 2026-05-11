@@ -1,5 +1,6 @@
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -24,11 +25,17 @@ public sealed class NewTopicScreen : Window
         _user = user;
         _forum = forum;
         Title = $"new topic in #{forum.Name} — [Ctrl+S] submit — [Esc] cancel";
+        BbsTheme.ApplyWindow(this);
 
-        Add(new Label { X = 2, Y = 1, Text = "Title:" });
+        var titleLabel = new Label { X = 2, Y = 1, Text = "Title:" };
+        titleLabel.SetScheme(BbsTheme.Hint);
+        Add(titleLabel);
         _title = new TextField { X = 2, Y = 2, Width = Dim.Fill(2) };
+        _title.SetScheme(BbsTheme.Input);
 
-        Add(new Label { X = 2, Y = 4, Text = "Body:" });
+        var bodyLabel = new Label { X = 2, Y = 4, Text = "Body:" };
+        bodyLabel.SetScheme(BbsTheme.Hint);
+        Add(bodyLabel);
         _body = new TextView
         {
             X = 2,
@@ -36,6 +43,7 @@ public sealed class NewTopicScreen : Window
             Width = Dim.Fill(2),
             Height = Dim.Fill(4),
         };
+        _body.SetScheme(BbsTheme.Input);
 
         _status = new Label
         {
@@ -43,6 +51,7 @@ public sealed class NewTopicScreen : Window
             Y = Pos.Bottom(_body),
             Width = Dim.Fill(2),
         };
+        _status.SetScheme(BbsTheme.Status);
 
         var submit = new Button
         {
@@ -95,12 +104,12 @@ public sealed class NewTopicScreen : Window
         var body = (_body.Text ?? string.Empty).Trim();
         if (title.Length is < 3 or > 120)
         {
-            _status.Text = "[!] Title must be 3–120 characters.";
+            SetStatusError("[!] Title must be 3–120 characters.");
             return;
         }
         if (body.Length < 1)
         {
-            _status.Text = "[!] Body cannot be empty.";
+            SetStatusError("[!] Body cannot be empty.");
             return;
         }
 
@@ -138,7 +147,13 @@ public sealed class NewTopicScreen : Window
         }
         catch (Exception ex)
         {
-            _status.Text = $"[!] Failed to create topic: {ex.Message}";
+            SetStatusError($"[!] Failed to create topic: {ex.Message}");
         }
+    }
+
+    private void SetStatusError(string text)
+    {
+        _status.Text = text;
+        _status.SetScheme(BbsTheme.Warning);
     }
 }

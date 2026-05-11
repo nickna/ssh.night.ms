@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -20,6 +21,7 @@ public sealed class TopicListScreen : Window
     {
         _app = app;
         Title = $"boards/{forum.Name} — [N]ew topic — [Esc] back";
+        BbsTheme.ApplyWindow(this);
 
         var topics = db.Topics
             .Where(t => t.ForumId == forum.Id)

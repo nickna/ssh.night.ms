@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text;
 using Night.Ms.SshServer.Providers;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -22,6 +23,7 @@ public sealed class NewsScreen : Window
         _services = services;
         _app = app;
         Title = "ssh.night.ms — news — [R] refresh — [Enter] copy url — [Esc] back to lobby";
+        BbsTheme.ApplyWindow(this);
 
         _weather = new Label
         {
@@ -30,6 +32,7 @@ public sealed class NewsScreen : Window
             Width = Dim.Fill(),
             Text = "weather: (loading...)",
         };
+        _weather.SetScheme(BbsTheme.Header_);
 
         var headlinesHeader = new Label
         {
@@ -37,6 +40,7 @@ public sealed class NewsScreen : Window
             Y = 2,
             Text = "headlines (Hacker News top stories):",
         };
+        headlinesHeader.SetScheme(BbsTheme.Hint);
 
         _headlines = new ListView
         {
@@ -53,6 +57,7 @@ public sealed class NewsScreen : Window
             Width = Dim.Fill(),
             Text = "loading...",
         };
+        _status.SetScheme(BbsTheme.Status);
 
         _headlines.KeyDown += (_, key) =>
         {
@@ -105,13 +110,27 @@ public sealed class NewsScreen : Window
         {
             var provider = _services.GetRequiredService<IWeatherProvider>();
             var snap = await provider.GetCurrentAsync();
-            _app.Invoke(() => _weather.Text = snap is null
-                ? "weather: (unavailable)"
-                : FormatWeather(snap));
+            _app.Invoke(() =>
+            {
+                if (snap is null)
+                {
+                    _weather.Text = "weather: (unavailable)";
+                    _weather.SetScheme(BbsTheme.Faint_);
+                }
+                else
+                {
+                    _weather.Text = FormatWeather(snap);
+                    _weather.SetScheme(BbsTheme.Header_);
+                }
+            });
         }
         catch (Exception ex)
         {
-            _app.Invoke(() => _weather.Text = $"weather: error — {ex.Message}");
+            _app.Invoke(() =>
+            {
+                _weather.Text = $"weather: error — {ex.Message}";
+                _weather.SetScheme(BbsTheme.Warning);
+            });
         }
     }
 
