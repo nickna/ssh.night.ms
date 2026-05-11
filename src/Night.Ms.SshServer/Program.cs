@@ -13,9 +13,12 @@ builder.AddRedisClient("redis");
 
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
+builder.Services.AddSingleton<SysopBootstrap>();
 
-// DatabaseInitializer must run before SshHost so the schema and seed data are ready.
+// DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
+// SysopBootstrap must run before SshHost so a re-promotion lands before the first login.
 builder.Services.AddHostedService<DatabaseInitializer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SysopBootstrap>());
 builder.Services.AddHostedService<SshHost>();
 
 var host = builder.Build();

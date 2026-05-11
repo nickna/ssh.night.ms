@@ -6,7 +6,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Logout }
+public enum LobbyNavigation { Chat, Boards, Sysop, Logout }
 
 public sealed class LobbyScreen : Window
 {
@@ -60,9 +60,24 @@ public sealed class LobbyScreen : Window
             _app.RequestStop();
         };
 
-        var logout = new Button
+        var sysopButton = new Button
         {
             X = Pos.Right(boards) + 2,
+            Y = 5,
+            Text = "_Sysop",
+            Visible = user.IsSysop,
+            Enabled = user.IsSysop,
+        };
+        sysopButton.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Sysop;
+            _app.RequestStop();
+        };
+
+        var logout = new Button
+        {
+            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(boards) + 2,
             Y = 5,
             Text = "_Logout",
         };
@@ -73,14 +88,14 @@ public sealed class LobbyScreen : Window
             _app.RequestStop();
         };
 
-        var sysop = new Label
+        var sysopBadge = new Label
         {
             X = 2,
             Y = 8,
-            Text = user.IsSysop ? "[ sysop access granted ]" : string.Empty,
+            Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
 
-        Add(welcome, hint, chat, boards, logout, sysop);
+        Add(welcome, hint, chat, boards, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
@@ -100,6 +115,12 @@ public sealed class LobbyScreen : Window
             else if (key == Key.B || key == Key.B.WithShift)
             {
                 Result = LobbyNavigation.Boards;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (user.IsSysop && (key == Key.S || key == Key.S.WithShift))
+            {
+                Result = LobbyNavigation.Sysop;
                 _app.RequestStop();
                 key.Handled = true;
             }

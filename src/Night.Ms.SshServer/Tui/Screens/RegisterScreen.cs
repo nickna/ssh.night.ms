@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshTransport;
@@ -17,12 +18,14 @@ public sealed class RegisterScreen : Window
     private readonly IApplication _app;
     private readonly BbsSession _session;
     private readonly AppDbContext _db;
+    private readonly SysopBootstrap _sysopBootstrap;
 
-    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db)
+    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap)
     {
         _app = app;
         _session = session;
         _db = db;
+        _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
 
         var greeting = new Label
@@ -127,11 +130,13 @@ public sealed class RegisterScreen : Window
     private async Task<User> CreateUserAsync(string handle)
     {
         var now = DateTimeOffset.UtcNow;
+        var promoteToSysop = _sysopBootstrap.IsBootstrapHandle(handle);
         var user = new User
         {
             Handle = handle,
             CreatedAt = now,
             LastSeenAt = now,
+            IsSysop = promoteToSysop,
         };
         var key = new SshKey
         {
@@ -145,6 +150,20 @@ public sealed class RegisterScreen : Window
         _db.Users.Add(user);
         _db.SshKeys.Add(key);
         await _db.SaveChangesAsync();
+
+        if (promoteToSysop)
+        {
+            // Add the audit row AFTER SaveChanges so user.Id is populated.
+            _db.AuditLogs.Add(new AuditLog
+            {
+                ActorId = null,
+                Action = "sysop.bootstrap",
+                TargetType = "user",
+                TargetId = user.Id,
+                CreatedAt = now,
+            });
+            await _db.SaveChangesAsync();
+        }
         return user;
     }
 }

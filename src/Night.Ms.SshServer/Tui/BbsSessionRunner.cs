@@ -75,7 +75,8 @@ internal static class BbsSessionRunner
 
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
-                    var registerResult = app.Run(new RegisterScreen(app, session, db));
+                    var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
+                    var registerResult = app.Run(new RegisterScreen(app, session, db, sysopBootstrap));
                     if (registerResult is User registered)
                     {
                         user = registered;
@@ -107,7 +108,7 @@ internal static class BbsSessionRunner
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered));
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -116,6 +117,10 @@ internal static class BbsSessionRunner
             else if (nav == LobbyNavigation.Boards)
             {
                 RunForumLoop(services, app, user);
+            }
+            else if (nav == LobbyNavigation.Sysop && user.IsSysop)
+            {
+                app.Run(new AdminScreen(services, app, user));
             }
             nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false));
         }
