@@ -110,6 +110,7 @@ public sealed class ChatScreen : Window
                     "Commands:\n" +
                     "  /join #channel    switch to (or auto-create) a public channel\n" +
                     "  /dm <handle>      open a direct message with another user\n" +
+                    "  /finger <handle>  print a user's profile inline\n" +
                     "  /quit             leave chat (back to lobby)\n" +
                     "  /help             show this help\n");
                 return;
@@ -138,6 +139,15 @@ public sealed class ChatScreen : Window
                 await SwitchToDmAsync(arg);
                 return;
 
+            case "/finger":
+                if (string.IsNullOrEmpty(arg))
+                {
+                    SetStatus("[!] /finger requires a handle (e.g. /finger alice).");
+                    return;
+                }
+                await FingerAsync(arg);
+                return;
+
             default:
                 SetStatus($"[!] unknown command: {verb} — type /help for the list.");
                 return;
@@ -156,6 +166,26 @@ public sealed class ChatScreen : Window
         var chat = _services.GetRequiredService<ChatService>();
         var result = await chat.JoinDmAsync(_user, handle, _shutdown.Token);
         await ApplyJoinResultAsync(result);
+    }
+
+    private async Task FingerAsync(string handle)
+    {
+        try
+        {
+            var profile = _services.GetRequiredService<ProfileService>();
+            var snap = await profile.GetByHandleAsync(handle.Trim(), _shutdown.Token);
+            if (snap is null)
+            {
+                AppendOnUiThread($"── finger {handle} ──\n   no such user.\n");
+                return;
+            }
+            AppendOnUiThread(ProfileService.FormatFinger(snap));
+        }
+        catch (OperationCanceledException) { /* expected on close */ }
+        catch (Exception ex)
+        {
+            AppendOnUiThread($"[!] /finger failed: {ex.Message}\n");
+        }
     }
 
     private async Task ApplyJoinResultAsync(ChatService.JoinResult result)

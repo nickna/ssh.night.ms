@@ -25,6 +25,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             b.ToTable("users");
             b.Property(u => u.Handle).HasColumnType("citext").HasMaxLength(32);
+            b.Property(u => u.Bio).HasMaxLength(500);
+            b.Property(u => u.Location).HasMaxLength(64);
+            b.Property(u => u.RealName).HasMaxLength(64);
             b.HasIndex(u => u.Handle).IsUnique();
         });
 

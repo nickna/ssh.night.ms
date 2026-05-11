@@ -15,6 +15,7 @@ builder.AddRedisClient("redis");
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
 builder.Services.AddSingleton<ChatService>();
+builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 builder.Services.AddSingleton<LoginArtProvider>();
 

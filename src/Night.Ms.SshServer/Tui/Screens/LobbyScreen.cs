@@ -6,7 +6,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, Sysop, Logout }
 
 public sealed class LobbyScreen : Window
 {
@@ -70,9 +70,22 @@ public sealed class LobbyScreen : Window
             _app.RequestStop();
         };
 
-        var sysopButton = new Button
+        var profile = new Button
         {
             X = Pos.Right(boards) + 2,
+            Y = contentTop + 4,
+            Text = "_Profile",
+        };
+        profile.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Profile;
+            _app.RequestStop();
+        };
+
+        var sysopButton = new Button
+        {
+            X = Pos.Right(profile) + 2,
             Y = contentTop + 4,
             Text = "_Sysop",
             Visible = user.IsSysop,
@@ -87,7 +100,7 @@ public sealed class LobbyScreen : Window
 
         var logout = new Button
         {
-            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(boards) + 2,
+            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(profile) + 2,
             Y = contentTop + 4,
             Text = "_Logout",
         };
@@ -105,7 +118,7 @@ public sealed class LobbyScreen : Window
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
 
-        Add(art, welcome, hint, chat, boards, sysopButton, logout, sysopBadge);
+        Add(art, welcome, hint, chat, boards, profile, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
@@ -125,6 +138,12 @@ public sealed class LobbyScreen : Window
             else if (key == Key.B || key == Key.B.WithShift)
             {
                 Result = LobbyNavigation.Boards;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.P || key == Key.P.WithShift)
+            {
+                Result = LobbyNavigation.Profile;
                 _app.RequestStop();
                 key.Handled = true;
             }
