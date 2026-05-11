@@ -14,21 +14,21 @@ namespace Night.Ms.SshServer.Tui.Screens;
 // TOFU register flow shown to clients whose fingerprint isn't on file. Sets Result to the
 // newly-created User on success; Result remains null if the user closes the screen without
 // registering (we then disconnect from BbsSessionRunner).
-public sealed class RegisterScreen : Window
+public sealed class RegisterScreen : BbsWindow
 {
     private readonly IApplication _app;
     private readonly BbsSession _session;
     private readonly AppDbContext _db;
     private readonly SysopBootstrap _sysopBootstrap;
 
-    public RegisterScreen(IApplication app, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, LoginArtProvider loginArt)
+    public RegisterScreen(IApplication app, IServiceProvider services, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, LoginArtProvider loginArt)
+        : base(app, services)
     {
         _app = app;
         _session = session;
         _db = db;
         _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
-        BbsTheme.ApplyWindow(this);
 
         var art = new Label
         {

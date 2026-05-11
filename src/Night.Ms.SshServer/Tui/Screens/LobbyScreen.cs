@@ -9,15 +9,15 @@ namespace Night.Ms.SshServer.Tui.Screens;
 
 public enum LobbyNavigation { Chat, Boards, Profile, News, Sysop, Logout }
 
-public sealed class LobbyScreen : Window
+public sealed class LobbyScreen : BbsWindow
 {
     private readonly IApplication _app;
 
-    public LobbyScreen(IApplication app, User user, bool justRegistered, LoginArtProvider loginArt)
+    public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, LoginArtProvider loginArt)
+        : base(app, services)
     {
         _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";
-        BbsTheme.ApplyWindow(this);
 
         var art = new Label
         {

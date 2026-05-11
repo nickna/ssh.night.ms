@@ -78,7 +78,7 @@ internal static class BbsSessionRunner
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
                     var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
-                    var registerResult = app.Run(new RegisterScreen(app, session, db, sysopBootstrap, loginArt));
+                    var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider, session, db, sysopBootstrap, loginArt));
                     if (registerResult is User registered)
                     {
                         user = registered;
@@ -109,7 +109,7 @@ internal static class BbsSessionRunner
 
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, LoginArtProvider loginArt)
     {
-        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered, loginArt));
+        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, loginArt));
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
@@ -132,7 +132,7 @@ internal static class BbsSessionRunner
             {
                 app.Run(new AdminScreen(services, app, user));
             }
-            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, user, justRegistered: false, loginArt));
+            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered: false, loginArt));
         }
     }
 
@@ -144,7 +144,7 @@ internal static class BbsSessionRunner
             using (var scope = services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                forum = app.Run(new ForumListScreen(app, db)) as Forum;
+                forum = app.Run(new ForumListScreen(app, services, db)) as Forum;
             }
             if (forum is null) return;
 
@@ -154,7 +154,7 @@ internal static class BbsSessionRunner
                 using (var scope = services.CreateScope())
                 {
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    topicListScreen = new TopicListScreen(app, db, user, forum);
+                    topicListScreen = new TopicListScreen(app, services, db, user, forum);
                 }
                 var listResult = (TopicListResult?)app.Run(topicListScreen);
                 if (listResult == TopicListResult.Back) break;
@@ -168,7 +168,7 @@ internal static class BbsSessionRunner
                 {
                     using var scope = services.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    topic = app.Run(new NewTopicScreen(app, db, user, forum)) as Topic;
+                    topic = app.Run(new NewTopicScreen(app, services, db, user, forum)) as Topic;
                 }
                 if (topic is null) continue; // back to topic list
 

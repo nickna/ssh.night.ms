@@ -8,7 +8,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class NewTopicScreen : Window
+public sealed class NewTopicScreen : BbsWindow
 {
     private readonly IApplication _app;
     private readonly AppDbContext _db;
@@ -18,14 +18,14 @@ public sealed class NewTopicScreen : Window
     private readonly TextView _body;
     private readonly Label _status;
 
-    public NewTopicScreen(IApplication app, AppDbContext db, User user, Forum forum)
+    public NewTopicScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
+        : base(app, services)
     {
         _app = app;
         _db = db;
         _user = user;
         _forum = forum;
         Title = $"new topic in #{forum.Name} — [Ctrl+S] submit — [Esc] cancel";
-        BbsTheme.ApplyWindow(this);
 
         var titleLabel = new Label { X = 2, Y = 1, Text = "Title:" };
         titleLabel.SetScheme(BbsTheme.Hint);

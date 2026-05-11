@@ -12,7 +12,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class ChatScreen : Window
+public sealed class ChatScreen : BbsWindow
 {
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
@@ -26,18 +26,19 @@ public sealed class ChatScreen : Window
     private Task? _subscriber;
 
     public ChatScreen(IServiceProvider services, IApplication app, User user, Channel initialChannel)
+        : base(app, services)
     {
         _services = services;
         _app = app;
         _user = user;
         _currentChannel = initialChannel;
-        BbsTheme.ApplyWindow(this);
 
         _log = new TextView
         {
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
+            // Leaves 3 rows: status, input, footer.
             Height = Dim.Fill(3),
             ReadOnly = true,
             WordWrap = true,

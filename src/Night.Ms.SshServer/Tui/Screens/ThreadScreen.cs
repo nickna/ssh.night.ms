@@ -10,7 +10,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class ThreadScreen : Window
+public sealed class ThreadScreen : BbsWindow
 {
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
@@ -21,13 +21,13 @@ public sealed class ThreadScreen : Window
     private readonly Label _status;
 
     public ThreadScreen(IServiceProvider services, IApplication app, User user, Topic topic)
+        : base(app, services)
     {
         _services = services;
         _app = app;
         _user = user;
         _topic = topic;
         Title = $"thread — {topic.Title} — [Esc] back";
-        BbsTheme.ApplyWindow(this);
 
         _log = new TextView
         {

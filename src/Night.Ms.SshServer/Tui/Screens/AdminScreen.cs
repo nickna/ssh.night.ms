@@ -10,7 +10,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class AdminScreen : Window
+public sealed class AdminScreen : BbsWindow
 {
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
@@ -21,12 +21,12 @@ public sealed class AdminScreen : Window
     private readonly TextField _command;
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
+        : base(app, services)
     {
         _services = services;
         _app = app;
         _actor = actor;
         Title = $"sysop console — {actor.Handle} — type 'help' + Enter — [Esc] back to lobby";
-        BbsTheme.ApplyWindow(this);
 
         var leftHeader = new Label
         {
@@ -71,7 +71,7 @@ public sealed class AdminScreen : Window
         _status = new Label
         {
             X = 0,
-            Y = Pos.AnchorEnd(2),
+            Y = Pos.AnchorEnd(3),
             Width = Dim.Fill(),
             Text = "Commands: ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh",
         };
@@ -80,7 +80,7 @@ public sealed class AdminScreen : Window
         _command = new TextField
         {
             X = 0,
-            Y = Pos.AnchorEnd(1),
+            Y = Pos.AnchorEnd(2),
             Width = Dim.Fill(),
         };
         _command.SetScheme(BbsTheme.Input);

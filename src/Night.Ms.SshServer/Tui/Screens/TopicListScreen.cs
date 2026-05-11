@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
-using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -12,16 +11,16 @@ namespace Night.Ms.SshServer.Tui.Screens;
 
 public enum TopicListResult { Back, OpenTopic, NewTopic }
 
-public sealed class TopicListScreen : Window
+public sealed class TopicListScreen : BbsWindow
 {
     private readonly IApplication _app;
     public Topic? SelectedTopic { get; private set; }
 
-    public TopicListScreen(IApplication app, AppDbContext db, User user, Forum forum)
+    public TopicListScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
+        : base(app, services)
     {
         _app = app;
         Title = $"boards/{forum.Name} — [N]ew topic — [Esc] back";
-        BbsTheme.ApplyWindow(this);
 
         var topics = db.Topics
             .Where(t => t.ForumId == forum.Id)
@@ -50,7 +49,7 @@ public sealed class TopicListScreen : Window
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill(),
+            Height = Dim.Fill(1),
         };
         listView.SetSource<string>(new ObservableCollection<string>(rows));
 

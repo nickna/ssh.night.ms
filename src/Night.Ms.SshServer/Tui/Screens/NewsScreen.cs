@@ -9,7 +9,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class NewsScreen : Window
+public sealed class NewsScreen : BbsWindow
 {
     private readonly IServiceProvider _services;
     private readonly IApplication _app;
@@ -19,11 +19,11 @@ public sealed class NewsScreen : Window
     private List<NewsHeadline> _items = [];
 
     public NewsScreen(IServiceProvider services, IApplication app)
+        : base(app, services)
     {
         _services = services;
         _app = app;
         Title = "ssh.night.ms — news — [R] refresh — [Enter] copy url — [Esc] back to lobby";
-        BbsTheme.ApplyWindow(this);
 
         _weather = new Label
         {
@@ -47,13 +47,14 @@ public sealed class NewsScreen : Window
             X = 0,
             Y = 3,
             Width = Dim.Fill(),
-            Height = Dim.Fill(2),
+            // Leaves 3 rows: status, footer (1 row each) + 1 spacer above status.
+            Height = Dim.Fill(3),
         };
 
         _status = new Label
         {
             X = 0,
-            Y = Pos.AnchorEnd(1),
+            Y = Pos.AnchorEnd(2),
             Width = Dim.Fill(),
             Text = "loading...",
         };

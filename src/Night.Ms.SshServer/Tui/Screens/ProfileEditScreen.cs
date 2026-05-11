@@ -8,7 +8,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public sealed class ProfileEditScreen : Window
+public sealed class ProfileEditScreen : BbsWindow
 {
     private readonly IApplication _app;
     private readonly IServiceProvider _services;
@@ -19,12 +19,12 @@ public sealed class ProfileEditScreen : Window
     private readonly Label _status;
 
     public ProfileEditScreen(IApplication app, IServiceProvider services, User user)
+        : base(app, services)
     {
         _app = app;
         _services = services;
         _user = user;
         Title = $"profile — {user.Handle} — [Ctrl+S] save  [Esc] back to lobby";
-        BbsTheme.ApplyWindow(this);
 
         var blurb = new Label
         {
