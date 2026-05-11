@@ -192,8 +192,36 @@ public sealed class BbsSshServer : IAsyncDisposable
                 _ = Task.Run(() => RaiseSessionStartedAsync(session));
                 break;
 
-            // window-change has no typed message in DevTunnels; M4 will handle it when the
-            // Terminal.Gui driver actually needs to react to resize.
+            case WindowChangeRequestMessage.RequestTypeName:
+                try
+                {
+                    var wc = args.Request.ConvertTo<WindowChangeRequestMessage>();
+                    var change = new WindowChange(wc.Columns, wc.Rows, wc.PixelWidth, wc.PixelHeight);
+                    // Update the shared Pty record so SshChannelOutput.GetSize() returns the new
+                    // dimensions on the next main-loop iteration. Reference assignment is atomic.
+                    if (session.Pty is { } prev)
+                    {
+                        session.Pty = prev with
+                        {
+                            Cols = wc.Columns,
+                            Rows = wc.Rows,
+                            PixelWidth = wc.PixelWidth,
+                            PixelHeight = wc.PixelHeight,
+                        };
+                    }
+                    else
+                    {
+                        session.Pty = new PtyInfo("xterm-256color", wc.Columns, wc.Rows, wc.PixelWidth, wc.PixelHeight);
+                    }
+                    session.RaiseWindowChanged(change);
+                    _logger.LogDebug("window-change: cols={Cols} rows={Rows}", wc.Columns, wc.Rows);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse window-change payload; ignoring.");
+                }
+                args.IsAuthorized = true;
+                break;
 
             default:
                 args.IsAuthorized = false;

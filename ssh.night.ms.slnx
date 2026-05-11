@@ -5,4 +5,7 @@
     <Project Path="src/Night.Ms.SshServer/Night.Ms.SshServer.csproj" />
     <Project Path="src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Night.Ms.SshTransport.Tests/Night.Ms.SshTransport.Tests.csproj" />
+  </Folder>
 </Solution>

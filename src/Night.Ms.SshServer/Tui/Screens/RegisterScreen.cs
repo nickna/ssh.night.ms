@@ -32,34 +32,37 @@ public sealed class RegisterScreen : Window
         {
             X = 2,
             Y = 1,
-            Text = "Welcome, stranger. This key isn't on file.",
+            Text =
+                "Welcome to ssh.night.ms. Your SSH key isn't on file here yet —\n" +
+                "pick a handle below and it'll be bound to this key forever.\n" +
+                "(Lose the key, lose the account. There's no email recovery.)",
         };
 
         var fp = new Label
         {
             X = 2,
-            Y = 2,
+            Y = 5,
             Text = $"key  {session.KeyAlgorithm}\nfp   {session.Fingerprint}",
         };
 
         var prompt = new Label
         {
             X = 2,
-            Y = 6,
+            Y = 9,
             Text = "Pick a handle (3–32 chars, letters/digits/_/-):",
         };
 
         var handleField = new TextField
         {
             X = 2,
-            Y = 7,
+            Y = 10,
             Width = 36,
         };
 
         var status = new Label
         {
             X = 2,
-            Y = 9,
+            Y = 12,
             Width = Dim.Fill(2),
             Height = 2,
         };
@@ -67,7 +70,7 @@ public sealed class RegisterScreen : Window
         var submit = new Button
         {
             X = 2,
-            Y = 12,
+            Y = 15,
             Text = "Register",
             IsDefault = true,
         };
@@ -75,7 +78,7 @@ public sealed class RegisterScreen : Window
         var cancel = new Button
         {
             X = Pos.Right(submit) + 2,
-            Y = 12,
+            Y = 15,
             Text = "Disconnect",
         };
 
