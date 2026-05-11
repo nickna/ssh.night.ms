@@ -33,7 +33,7 @@ public sealed class BbsSshServer : IAsyncDisposable
 
     public event Func<BbsSession, CancellationToken, Task>? SessionStarted;
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         if (_server is not null) throw new InvalidOperationException("Already started.");
 
@@ -63,7 +63,16 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         var localAddress = IPAddress.TryParse(_options.ListenAddress, out var addr) ? addr : IPAddress.Any;
         _acceptLoop = _server.AcceptSessionsAsync(_options.Port, localAddress);
-        return Task.CompletedTask;
+
+        // AcceptSessionsAsync runs forever in the success case — it only completes (faulted) on
+        // bind errors like AddressAlreadyInUse. Give it a short window to surface those before
+        // returning success, so a port collision is loud instead of silent.
+        var settled = await Task.WhenAny(_acceptLoop, Task.Delay(250, cancellationToken)).ConfigureAwait(false);
+        if (settled == _acceptLoop)
+        {
+            // Re-throw the underlying exception (AddressAlreadyInUse, AccessDenied, etc.).
+            await _acceptLoop.ConfigureAwait(false);
+        }
     }
 
     private void OnSessionAuthenticating(object? sender, SshAuthenticatingEventArgs e)

@@ -17,13 +17,29 @@ clients to install a CP437 font.
 
 ## Running locally with Aspire
 
-Requires Docker Desktop running.
+Requires Docker Desktop running. Aspire spawns its own Postgres + Redis +
+pgAdmin containers (separate from anything `run.ps1` started) and launches
+SshServer with the right connection strings injected.
 
 ```sh
 dotnet run --project src/Night.Ms.AppHost
 ```
 
-Then `ssh nick@localhost -p 2222` from another terminal.
+The dashboard URL with login token is printed at startup. SSH listener defaults
+to `:2223` under Aspire (override via `BBS_SSH_PORT` env on the project).
+Connect with:
+
+```sh
+ssh -p 2223 nick@localhost
+```
+
+Note: SshServer binds the SSH port directly — we deliberately don't declare it
+as an Aspire endpoint, because `WithEndpoint(scheme: "tcp", port: …)` causes
+DCP (Aspire's launcher) to also bind the port for proxying, and connections
+land on DCP instead of the SSH server (the kernel routes the more-specific
+loopback bind ahead of the project's `0.0.0.0` bind). The trade-off is that
+the SSH service doesn't show up as a clickable endpoint on the Aspire
+dashboard; everything else does.
 
 ## Running standalone (no Aspire)
 
