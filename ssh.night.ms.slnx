@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Night.Ms.AppHost/Night.Ms.AppHost.csproj" />
+    <Project Path="src/Night.Ms.ServiceDefaults/Night.Ms.ServiceDefaults.csproj" />
+    <Project Path="src/Night.Ms.SshServer/Night.Ms.SshServer.csproj" />
+    <Project Path="src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj" />
+  </Folder>
+</Solution>

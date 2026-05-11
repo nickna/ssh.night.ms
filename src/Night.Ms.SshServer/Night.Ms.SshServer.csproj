@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Night.Ms.SshServer-63c7d6f1-89bb-4373-9a4d-dc3456fbc247</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Npgsql" Version="13.3.0" />
+    <PackageReference Include="Aspire.StackExchange.Redis" Version="13.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Include="Terminal.Gui" Version="2.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Night.Ms.ServiceDefaults\Night.Ms.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Night.Ms.SshTransport\Night.Ms.SshTransport.csproj" />
+  </ItemGroup>
+</Project>
