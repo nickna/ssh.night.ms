@@ -3,6 +3,7 @@ using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
+using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
 
@@ -28,10 +29,19 @@ builder.Services.AddHttpClient(OpenMeteoWeatherProvider.HttpClientName);
 builder.Services.AddHttpClient(HackerNewsProvider.HttpClientName);
 builder.Services.AddHttpClient(OpenMeteoGeocodingProvider.HttpClientName);
 builder.Services.AddHttpClient(IpApiCoGeolocationProvider.HttpClientName);
+builder.Services.AddHttpClient(SmartReaderArticleReader.HttpClientName, c =>
+{
+    // Identify ourselves so site operators can trace traffic back to a known BBS rather
+    // than seeing an unbranded HttpClient. AutoRedirect is on by default — articles often
+    // sit behind one or two 301 hops.
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
+    c.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
+});
 builder.Services.AddSingleton<IWeatherProvider, OpenMeteoWeatherProvider>();
 builder.Services.AddSingleton<INewsProvider, HackerNewsProvider>();
 builder.Services.AddSingleton<IGeocodingProvider, OpenMeteoGeocodingProvider>();
 builder.Services.AddSingleton<IIpGeolocationProvider, IpApiCoGeolocationProvider>();
+builder.Services.AddSingleton<IArticleReader, SmartReaderArticleReader>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.

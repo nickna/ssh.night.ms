@@ -26,7 +26,7 @@ public sealed class NewsScreen : BbsWindow
         _services = services;
         _app = app;
         _user = user;
-        Title = "ssh.night.ms — news — [R] refresh — [Enter] copy url — [Esc] back to lobby";
+        Title = "ssh.night.ms — news — [R] refresh — [Enter] read — [Esc] back to lobby";
 
         _weather = new Label
         {
@@ -70,8 +70,7 @@ public sealed class NewsScreen : BbsWindow
                 var idx = _headlines.SelectedItem ?? -1;
                 if (idx >= 0 && idx < _items.Count)
                 {
-                    var item = _items[idx];
-                    _app.Invoke(() => _status.Text = item.Url ?? "(no url for this story)");
+                    OpenStory(_items[idx]);
                     key.Handled = true;
                 }
             }
@@ -95,6 +94,21 @@ public sealed class NewsScreen : BbsWindow
         };
 
         _ = ReloadAsync();
+    }
+
+    private void OpenStory(NewsHeadline item)
+    {
+        if (Uri.TryCreate(item.Url, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            // Nested Application.Run — control returns here when ReaderScreen calls
+            // RequestStop, with the news list's selection and scroll position intact.
+            _app.Run(new ReaderScreen(_app, _services, _user, uri));
+        }
+        else
+        {
+            _app.Invoke(() => _status.Text = "(no url for this story — Ask HN / Show HN are text-only)");
+        }
     }
 
     private async Task ReloadAsync()
