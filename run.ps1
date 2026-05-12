@@ -4,9 +4,8 @@
     the solution, and runs Night.Ms.SshServer with the right connection strings.
 
 .DESCRIPTION
-    This is the standalone mode that the project's milestones were validated against.
-    For the Aspire orchestrator path, run `dotnet run --project src/Night.Ms.AppHost`
-    directly (also requires Docker Desktop).
+    Single-host dev loop: this is the only supported way to run the server. Requires
+    Docker Desktop.
 
 .PARAMETER SysopHandle
     Handle that gets auto-promoted to sysop on first registration (or at startup if it
@@ -170,6 +169,7 @@ Write-Host ""
 $env:Logging__LogLevel__Default = 'Information'
 $env:NIGHTMS_BOOTSTRAP_SYSOP_HANDLE = $SysopHandle
 $env:NIGHTMS_HOST_KEY_DIR = $HostKeyDir
+$env:BBS_SSH_PORT = $SshPort
 $env:ConnectionStrings__bbs = "Host=127.0.0.1;Port=$PostgresPort;Database=bbs;Username=postgres;Password=postgres"
 $env:ConnectionStrings__redis = "127.0.0.1:$RedisPort,abortConnect=false"
 

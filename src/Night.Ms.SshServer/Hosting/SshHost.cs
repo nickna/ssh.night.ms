@@ -52,23 +52,12 @@ public sealed class SshHost(
 
     private int ResolveListenerPort()
     {
-        // Highest priority: explicit BBS_SSH_PORT env var (set by AppHost.cs for the Aspire
-        // path; also overridable by anyone running standalone).
+        // BBS_SSH_PORT env var (or appsettings key) overrides the default. run.ps1 sets
+        // it from its -SshPort parameter; otherwise we fall back to 2222.
         if (int.TryParse(configuration["BBS_SSH_PORT"], out var explicitPort) && explicitPort is > 0 and <= 65535)
         {
             return explicitPort;
         }
-
-        // Fallback: parse Aspire's auto-injected service-endpoint URL if present.
-        foreach (var key in new[] { "services:ssh:ssh-listener:0", "Services:ssh:ssh-listener:0" })
-        {
-            var value = configuration[key];
-            if (!string.IsNullOrWhiteSpace(value) && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Port > 0)
-            {
-                return uri.Port;
-            }
-        }
-
         return 2222;
     }
 

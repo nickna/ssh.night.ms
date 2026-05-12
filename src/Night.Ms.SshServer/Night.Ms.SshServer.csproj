@@ -9,23 +9,23 @@
 
   <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.4.0" />
-    <PackageReference Include="Aspire.Npgsql" Version="13.3.0" />
-    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.3.0" />
-    <PackageReference Include="Aspire.StackExchange.Redis" Version="13.3.0" />
     <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.7" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.7">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.7" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.10" />
     <PackageReference Include="SmartReader" Version="0.11.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.11.0" />
     <PackageReference Include="Terminal.Gui" Version="2.1.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Night.Ms.Imaging\Night.Ms.Imaging.csproj" />
-    <ProjectReference Include="..\Night.Ms.ServiceDefaults\Night.Ms.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Night.Ms.SshTransport\Night.Ms.SshTransport.csproj" />
   </ItemGroup>
 

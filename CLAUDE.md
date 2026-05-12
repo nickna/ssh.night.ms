@@ -14,12 +14,9 @@ dotnet test --filter "FullyQualifiedName~ChatServiceTests"   # one class
 dotnet test --filter "FullyQualifiedName~ChatServiceTests.JoinPublicChannelAsync_CreatesChannel"  # one test
 ```
 
-Two ways to run the server:
+Run the server via **`run.ps1`** — starts bare Postgres + Redis containers (`nightms-pg` / `nightms-redis`), builds, and runs SshServer on `:2222`. Use `-Reset` to drop+recreate the `bbs` database; `-Stop` to tear containers down; `-SshPort` to override the listener port (also honored as `BBS_SSH_PORT` env var).
 
-- **Aspire orchestrator** (default for full-stack work — spawns its own Postgres + Redis + pgAdmin containers): `dotnet run --project src/Night.Ms.AppHost`. SSH lands on `:2223`.
-- **Standalone via `run.ps1`** (faster iterate cycle — starts bare Postgres + Redis containers `nightms-pg` / `nightms-redis`, builds, and runs SshServer on `:2222`). Use `-Reset` to drop+recreate the `bbs` database; `-Stop` to tear containers down.
-
-Both paths require Docker Desktop running. Server connections: `ssh -p <port> <handle>@localhost`. First connection from an unknown key lands on the TOFU `RegisterScreen`.
+Requires Docker Desktop running. Server connections: `ssh -p 2222 <handle>@localhost`. First connection from an unknown key lands on the TOFU `RegisterScreen`.
 
 EF Core migrations target `AppDbContext`. The project uses `AppDbContextDesignFactory` (hardcoded localhost:5432), so design-time commands need a local Postgres reachable there:
 
@@ -116,6 +113,5 @@ ImageSharp 3.1.x carries one open moderate-severity CVE (decode-time DoS). Accep
 
 ## Project-specific conventions worth knowing
 
-- **Don't add an Aspire endpoint for the SSH port.** `WithEndpoint(scheme: "tcp", port: …)` makes Aspire's DCP launcher bind the same port for proxying, which collides with SshServer's own bind (loopback bind wins, connections land on DCP and hang during banner exchange). The current setup passes `BBS_SSH_PORT` via env and lets SshServer bind directly — `SshHost.ResolveListenerPort` prefers that env var, falls back to parsing Aspire's auto-injected service URL, then `2222`. The trade-off is the SSH service has no clickable endpoint on the Aspire dashboard.
 - `MouseClick` is wired but not exercised in interactive testing.
 - DM channels and `/join #private` are designed-for-but-deferred — only the default `#lobby` is exposed today.

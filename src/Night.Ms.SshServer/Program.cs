@@ -6,13 +6,22 @@ using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
+using StackExchange.Redis;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.AddServiceDefaults();
+// Postgres + EF Core. Connection string lives under ConnectionStrings:bbs (set by
+// run.ps1, or via appsettings in production). Snake-case convention matches the
+// existing migrations.
+builder.Services.AddDbContext<AppDbContext>(opt =>
+    opt.UseNpgsql(builder.Configuration.GetConnectionString("bbs"))
+       .UseSnakeCaseNamingConvention());
 
-builder.AddNpgsqlDbContext<AppDbContext>("bbs", configureDbContextOptions: o => o.UseSnakeCaseNamingConvention());
-builder.AddRedisClient("redis");
+// Redis. ConnectionMultiplexer is thread-safe and intended to be shared as a
+// singleton across the whole app.
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("redis")
+        ?? throw new InvalidOperationException("ConnectionStrings:redis is not configured.")));
 
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
