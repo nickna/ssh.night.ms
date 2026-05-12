@@ -90,6 +90,17 @@ EF Core 10 + `EFCore.NamingConventions` (snake_case) against Postgres. The `cite
 
 The art types (`Cell`, `CellGrid`, `ArtColor`, `ArtStyle`) deliberately do **not** reference Terminal.Gui — TG's `ConfigurationManager` module initializer crashes inside the xUnit process, and `SgrParserTests` would not run otherwise. `AnsiArtView` is the one place that bridges `ArtColor` → `Terminal.Gui.Drawing.Color`.
 
+### Gallery — `Tui/Screens/GalleryScreen.cs`, `Tui/Art/*ArtGalleryProvider.cs`
+
+The lobby's `_Gallery` button (or `G`) opens a curated browser over `.ans` files in `NIGHTMS_ART_DIR` (or the `ArtGallery:Path` config key; default `{AppContext.BaseDirectory}/art/gallery/`). Sysop-curated — drop files in, no user upload flow.
+
+- **Filename = title.** A numeric ordering prefix is stripped: `010-welcome.ans` shows as "welcome". Separator after the prefix can be `-`, `_`, or space.
+- **Discovery is filesystem-each-time.** `List()` re-enumerates on construction and on the user pressing Enter, so a sysop can drop a file in mid-session without restarting the server.
+- **Malformed files are skipped silently** (logged once each) at list time so the screen never sees a piece it can't render.
+- **Navigation**: arrows / `h`-`l` for prev/next (wraps), digit `1`-`9` for direct jump, `Enter` to re-list, `Q`/`Esc` back to lobby.
+- **Sizing**: pieces render anchored at `(0, 2)` and clip if larger than the viewport — no scroll in v1. Target 80×24 or smaller when authoring.
+- Behind `IArtGalleryProvider` so the screen is decoupled from storage; a DB-backed gallery can swap in later without touching `GalleryScreen`.
+
 ### Adding new art — `Night.Ms.Tools.AnsiConvert/`
 
 Offline CLI that converts PNG/JPEG to a `.ans` file using half-block rendering (`▀` U+2580, foreground = top source pixel, background = bottom). Each output cell covers two source pixels vertically, so the effective resolution is `(cols × 2*rows)` source pixels.
