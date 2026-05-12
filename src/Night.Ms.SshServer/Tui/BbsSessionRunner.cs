@@ -110,7 +110,7 @@ internal static class BbsSessionRunner
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, BbsSession session)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, art));
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Gallery or LobbyNavigation.Sysop)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -127,6 +127,13 @@ internal static class BbsSessionRunner
             else if (nav == LobbyNavigation.News)
             {
                 app.Run(new NewsScreen(services, app, user));
+            }
+            else if (nav == LobbyNavigation.Browser)
+            {
+                if (app.Run(new BrowserPromptScreen(app, services, user)) is Uri uri)
+                {
+                    app.Run(new ReaderScreen(app, services, user, uri));
+                }
             }
             else if (nav == LobbyNavigation.Gallery)
             {

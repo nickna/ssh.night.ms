@@ -1,5 +1,6 @@
 using System.Text;
 using Night.Ms.SshServer.Reader;
+using Night.Ms.SshServer.Tui.Art;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -25,6 +26,7 @@ internal sealed class RichArticleView : View
     private IReadOnlyList<BlockLayout.RenderedLine> _lines = Array.Empty<BlockLayout.RenderedLine>();
     private int _layoutWidth = -1;
     private int _topLine;
+    private Func<Uri, CellGrid?> _imageResolver = _ => null;
 
     public RichArticleView()
     {
@@ -47,6 +49,30 @@ internal sealed class RichArticleView : View
             _topLine = 0;
             SetNeedsDraw();
         }
+    }
+
+    // Resolver consulted at layout time for each ImageBlock — returns the rendered CellGrid
+    // when the image has been fetched and rendered, or null while the fetch is still in
+    // flight (or has failed). Setting this triggers a re-layout so that arriving images
+    // replace their placeholder rows.
+    public Func<Uri, CellGrid?> ImageResolver
+    {
+        get => _imageResolver;
+        set
+        {
+            _imageResolver = value ?? (_ => null);
+            _layoutWidth = -1;
+            SetNeedsDraw();
+        }
+    }
+
+    // Force re-layout from the outside without changing Blocks/ImageResolver — used when an
+    // image arrives and the resolver's underlying state has changed but the delegate itself
+    // is the same instance.
+    public void InvalidateLayout()
+    {
+        _layoutWidth = -1;
+        SetNeedsDraw();
     }
 
     public int LineCount => _lines.Count;
@@ -122,11 +148,14 @@ internal sealed class RichArticleView : View
         var lineIdx = viewY + _topLine;
         if (lineIdx < 0 || lineIdx >= _lines.Count) return 0;
 
+        // Image rows are not link-bearing — skip hit-testing on them.
+        if (_lines[lineIdx] is not BlockLayout.TextLine textLine) return 0;
+
         var col = viewX - LeftPadding;
         if (col < 0) return 0;
 
         var cursor = 0;
-        foreach (var run in _lines[lineIdx].Runs)
+        foreach (var run in textLine.Runs)
         {
             var width = run.Text.Length;
             if (col < cursor + width)
@@ -146,7 +175,7 @@ internal sealed class RichArticleView : View
 
         if (width != _layoutWidth)
         {
-            _lines = BlockLayout.Layout(_blocks, width);
+            _lines = BlockLayout.Layout(_blocks, width, _imageResolver);
             _layoutWidth = width;
             if (_topLine > MaxTop) _topLine = MaxTop;
         }
@@ -163,21 +192,53 @@ internal sealed class RichArticleView : View
         var pad = LeftPadding;
         for (var row = 0; row < height && row + _topLine < _lines.Count; row++)
         {
-            var line = _lines[row + _topLine];
-            var col = pad;
-            foreach (var run in line.Runs)
+            switch (_lines[row + _topLine])
             {
-                SetAttribute(StyleToAttribute(run.Style));
-                foreach (var rune in run.Text.EnumerateRunes())
-                {
-                    if (col >= Viewport.Width) break;
-                    AddRune(col, row, rune);
-                    col += 1;
-                }
-                if (col >= Viewport.Width) break;
+                case BlockLayout.TextLine text:
+                    PaintTextLine(text, row, pad);
+                    break;
+                case BlockLayout.ImageRowLine image:
+                    PaintImageRow(image, row, pad);
+                    break;
             }
         }
         return true;
+    }
+
+    private void PaintTextLine(BlockLayout.TextLine line, int row, int pad)
+    {
+        var col = pad;
+        foreach (var run in line.Runs)
+        {
+            SetAttribute(StyleToAttribute(run.Style));
+            foreach (var rune in run.Text.EnumerateRunes())
+            {
+                if (col >= Viewport.Width) break;
+                AddRune(col, row, rune);
+                col += 1;
+            }
+            if (col >= Viewport.Width) break;
+        }
+    }
+
+    private void PaintImageRow(BlockLayout.ImageRowLine line, int row, int pad)
+    {
+        // Center the image inside the content column when it's narrower than the body. A
+        // 31-cell album thumbnail in an 80-cell body sits ~24 cells from the left, which
+        // reads more "figure" than "left-flushed wall." Wider-than-body images skip the
+        // centering and rely on the per-row clip in BlockLayout.LayoutImageBlock.
+        var imageWidth = line.Cells.Count;
+        var contentExtra = Math.Max(0, (ContentWidth - imageWidth) / 2);
+        var col = pad + contentExtra;
+        foreach (var cell in line.Cells)
+        {
+            if (col >= Viewport.Width) break;
+            SetAttribute(new Attribute(
+                new Color(cell.Foreground.R, cell.Foreground.G, cell.Foreground.B),
+                new Color(cell.Background.R, cell.Background.G, cell.Background.B)));
+            AddRune(col, row, cell.Glyph);
+            col += 1;
+        }
     }
 
     // Style-to-attribute mapping. Heading wins over everything (whole heading line is
@@ -185,7 +246,15 @@ internal sealed class RichArticleView : View
     // of whatever else the run carries — so a Bold link inside a blockquote comes through
     // as cyan-on-black-underlined, but the gutter and unstyled body text dim. Inline
     // emphasis (Bold) and inline code share the body line color so they don't shout.
+    // Italic composes additively on top of any base — SGR 3, supported since PuTTY 0.71.
     private static Attribute StyleToAttribute(RunStyle style)
+    {
+        var baseAttr = ComputeBaseAttribute(style);
+        if (!style.HasFlag(RunStyle.Italic)) return baseAttr;
+        return new Attribute(baseAttr.Foreground, baseAttr.Background, baseAttr.Style | TextStyle.Italic);
+    }
+
+    private static Attribute ComputeBaseAttribute(RunStyle style)
     {
         if (style.HasFlag(RunStyle.Heading))
             return new Attribute(Color.BrightYellow, Color.Black, TextStyle.Bold);

@@ -1,11 +1,11 @@
-namespace Night.Ms.Tools.AnsiConvert;
+namespace Night.Ms.Imaging;
 
-internal readonly record struct Rgb(byte R, byte G, byte B);
-
-// Color tables used when quantizing source pixels. The 16-color palette mirrors the one in
-// SgrParser.cs in the server project — duplicated here so the converter has no dependency
-// on the server assembly.
-internal static class Palette
+// Color tables used when quantizing source pixels for the 16- and 256-color depths.
+// The 16-color palette mirrors the standard xterm colors and intentionally matches the
+// values that Night.Ms.SshServer.Tui.Art.SgrParser maps SGR 30-37/90-97 back to, so a
+// round-trip (rendered .ans → parsed CellGrid → painted via Terminal.Gui) preserves
+// chromatic intent.
+public static class Palette
 {
     // Standard xterm 16-color palette. Dark row first (0..7), bright row second (8..15).
     public static readonly Rgb[] Sixteen =

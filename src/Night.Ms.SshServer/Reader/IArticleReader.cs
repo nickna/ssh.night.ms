@@ -21,11 +21,19 @@ public sealed record ReaderArticle(
     int? ReadingTimeMinutes,
     DateTimeOffset? PublishedAt);
 
-// Fetches a URL, runs Mozilla Readability over it via SmartReader, and returns a stripped-
-// down article suitable for terminal rendering. Implementations are expected to enforce a
-// fetch timeout and a maximum response size, and to never throw on transport/parse failure
-// (return null instead) so the TUI can render a polite error.
+// How aggressively to filter the source HTML before extracting blocks.
+//   Reader — run Mozilla Readability (SmartReader) first, then walk the cleaned-up
+//            article body. Best for prose pages (news articles, blog posts, docs);
+//            strips nav/sidebar/footer/ads.
+//   Raw    — skip Readability and walk the full DOM. Best for forum threads, GitHub
+//            UI, dashboards, search results — pages where Readability over-strips and
+//            leaves nothing behind. Renders more chrome but at least shows content.
+public enum ReadMode { Reader, Raw }
+
+// Fetches a URL and returns a stripped-down article suitable for terminal rendering.
+// Implementations enforce a fetch timeout and a maximum response size, and never throw on
+// transport/parse failure (return null instead) so the TUI can render a polite error.
 public interface IArticleReader
 {
-    Task<ReaderArticle?> ReadAsync(Uri url, CancellationToken cancellationToken = default);
+    Task<ReaderArticle?> ReadAsync(Uri url, ReadMode mode = ReadMode.Reader, CancellationToken cancellationToken = default);
 }

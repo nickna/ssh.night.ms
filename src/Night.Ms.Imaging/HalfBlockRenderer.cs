@@ -3,15 +3,15 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
-namespace Night.Ms.Tools.AnsiConvert;
+namespace Night.Ms.Imaging;
 
-internal enum ColorDepth { Truecolor, TwoFiftySix, Sixteen }
-internal enum DitherMode { None, FloydSteinberg }
+public enum ColorDepth { Truecolor, TwoFiftySix, Sixteen }
+public enum DitherMode { None, FloydSteinberg }
 
 // Renders an image as ANSI half-block art: each terminal cell is "▀" (U+2580) with the
 // foreground = top pixel color and background = bottom pixel color. Doubles vertical
 // resolution and gives near-square effective pixels (terminal cells are ~2:1 tall).
-internal static class HalfBlockRenderer
+public static class HalfBlockRenderer
 {
     public static string Render(Image<Rgba32> source, int targetCols, ColorDepth depth, DitherMode dither)
     {

@@ -56,8 +56,7 @@ internal static class HtmlBlockExtractor
                     break;
 
                 case "P":
-                    var pRuns = CollectInline(el, RunStyle.Plain, ctx);
-                    if (pRuns.Count > 0) output.Add(new ParagraphBlock(pRuns));
+                    EmitBlocksLiftingImages(el, output, ctx);
                     break;
 
                 case "PRE":
@@ -101,6 +100,31 @@ internal static class HtmlBlockExtractor
                     output.Add(new HorizontalRuleBlock());
                     break;
 
+                case "IMG":
+                    var img = TryBuildImageBlock(el, ctx);
+                    if (img is not null) output.Add(img);
+                    break;
+
+                case "TABLE":
+                    // Wikipedia infoboxes (and many CMS templates) use <table> as a layout
+                    // container with an image cell + metadata cells. Lift any images out as
+                    // peer ImageBlocks first — they're the table's real content — then build
+                    // the metadata table from what's left. Without this lift, infobox images
+                    // get stranded as "[image: alt]" placeholder text inside cells.
+                    ExtractImagesFromDescendants(el, output, ctx);
+                    var table = BuildTableBlock(el, ctx);
+                    if (table is not null) output.Add(table);
+                    break;
+
+                // Wrapper elements that almost-always carry inline content but occasionally
+                // wrap a buried image (Wikipedia's `<span><a><img/></a></span>` pattern, or
+                // bare `<a><img/></a>` blog images). When an image is buried inside, lift it
+                // out via the recursive splitter instead of letting the inline path collapse
+                // it to "[image: alt]" placeholder text.
+                case "A" or "STRONG" or "B" or "EM" or "I" or "CODE" or "SPAN" when ContainsImg(el):
+                    EmitBlocksLiftingImages(el, output, ctx);
+                    break;
+
                 // Inline-only at block level — wrap whole element as a paragraph if non-empty.
                 case "A": case "STRONG": case "B": case "EM": case "I": case "CODE": case "SPAN":
                     var aRuns = CollectInline(el, RunStyle.Plain, ctx);
@@ -116,6 +140,174 @@ internal static class HtmlBlockExtractor
                     break;
             }
         }
+    }
+
+    // Walk `parent`'s children and emit a sequence of blocks: text-only spans become
+    // ParagraphBlocks, IMG descendants become standalone ImageBlocks (recursing through
+    // wrapper elements like <a>, <span>, <picture>, <figure> to find them), and everything
+    // else stays inline within the surrounding paragraph. Used for <p> (the canonical blog
+    // hero image pattern `<p><img/></p>` works because the IMG splits the paragraph) and
+    // for inline wrappers like <a><img/></a> where the image needs to be lifted out of the
+    // anchor's inline content. Recursion handles deeply-nested wrappers like Wikipedia's
+    // `<span><a><img/></a></span>` chain.
+    private static void EmitBlocksLiftingImages(IElement parent, List<ArticleBlock> output, ExtractCtx ctx)
+    {
+        var pendingRuns = new List<Run>();
+
+        void FlushRuns()
+        {
+            if (pendingRuns.Count == 0) return;
+            var coalesced = Coalesce(pendingRuns);
+            if (coalesced.Count > 0) output.Add(new ParagraphBlock(coalesced));
+            pendingRuns = new List<Run>();
+        }
+
+        foreach (var child in parent.ChildNodes)
+        {
+            switch (child)
+            {
+                case IText t:
+                    var text = NormalizeWhitespace(t.TextContent);
+                    if (text.Length > 0) pendingRuns.Add(new Run(text, RunStyle.Plain));
+                    break;
+
+                case IElement el when string.Equals(el.TagName, "IMG", StringComparison.Ordinal):
+                    FlushRuns();
+                    var img = TryBuildImageBlock(el, ctx);
+                    if (img is not null) output.Add(img);
+                    break;
+
+                case IElement el when ContainsImg(el):
+                    // A wrapper element with a buried IMG — recurse to lift it. The image's
+                    // wrapper (anchor, span, etc.) is discarded; surrounding text content of
+                    // the wrapper is collected as a paragraph alongside the image.
+                    FlushRuns();
+                    EmitBlocksLiftingImages(el, output, ctx);
+                    break;
+
+                case IElement el:
+                    // No image in this subtree — collect inline runs from it (preserves
+                    // bold/italic/code/link style cascade via WalkInlineSingleElement).
+                    WalkInlineSingleElement(el, RunStyle.Plain, pendingRuns, ctx);
+                    break;
+            }
+        }
+        FlushRuns();
+    }
+
+    // Recursively walk `parent` and emit an ImageBlock for every <img> descendant that has
+    // a usable absolute http(s) src. Used by the TABLE case to lift infobox/layout-table
+    // images out as peer blocks before the table itself is extracted. Order is DOM order.
+    private static void ExtractImagesFromDescendants(INode parent, List<ArticleBlock> output, ExtractCtx ctx)
+    {
+        foreach (var child in parent.ChildNodes)
+        {
+            if (child is not IElement el) continue;
+            if (string.Equals(el.TagName, "IMG", StringComparison.Ordinal))
+            {
+                var img = TryBuildImageBlock(el, ctx);
+                if (img is not null) output.Add(img);
+            }
+            else
+            {
+                ExtractImagesFromDescendants(el, output, ctx);
+            }
+        }
+    }
+
+    // Walk a <table> into a TableBlock. Rows live directly under <table> or under any of
+    // <thead>, <tbody>, <tfoot> — flatten by recursion. Each <tr>'s direct <td>/<th>
+    // children become TableCells; cell contents are inline-only for now (nested blocks
+    // collapse to flat runs). Returns null if the table is structurally empty so we don't
+    // emit "[]" placeholders into the layout.
+    private static TableBlock? BuildTableBlock(IElement table, ExtractCtx ctx)
+    {
+        var rows = new List<TableRow>();
+        CollectRows(table, rows, ctx);
+        if (rows.Count == 0) return null;
+        return new TableBlock(rows);
+    }
+
+    private static void CollectRows(IElement node, List<TableRow> rows, ExtractCtx ctx)
+    {
+        foreach (var child in node.ChildNodes)
+        {
+            if (child is not IElement el) continue;
+            switch (el.TagName)
+            {
+                case "TR":
+                    var cells = new List<TableCell>();
+                    foreach (var cellNode in el.ChildNodes)
+                    {
+                        if (cellNode is not IElement c) continue;
+                        if (c.TagName != "TD" && c.TagName != "TH") continue;
+                        // Image-only cells: the TABLE case already lifted these images to
+                        // peer ImageBlocks above the table. Skip the cell so the table
+                        // doesn't show "[image: alt]" placeholder text where the image was.
+                        if (IsImageOnlyCell(c)) continue;
+                        var runs = CollectInline(c, RunStyle.Plain, ctx);
+                        cells.Add(new TableCell(runs, IsHeader: c.TagName == "TH"));
+                    }
+                    if (cells.Count > 0) rows.Add(new TableRow(cells));
+                    break;
+
+                case "THEAD": case "TBODY": case "TFOOT":
+                    CollectRows(el, rows, ctx);
+                    break;
+            }
+        }
+    }
+
+    // Build an ImageBlock from an <img> element if it has a usable absolute http(s) src.
+    // Captures intrinsic width/height as integer hints when present and parseable; otherwise
+    // null and the layout pass picks dimensions from the source aspect ratio at fetch time.
+    private static ImageBlock? TryBuildImageBlock(IElement el, ExtractCtx ctx)
+    {
+        var rawSrc = el.GetAttribute("src");
+        if (string.IsNullOrWhiteSpace(rawSrc)) return null;
+        if (!Uri.TryCreate(ctx.BaseUrl, rawSrc, out var abs)) return null;
+        if (abs.Scheme != Uri.UriSchemeHttp && abs.Scheme != Uri.UriSchemeHttps) return null;
+
+        var alt = el.GetAttribute("alt");
+        if (string.IsNullOrWhiteSpace(alt)) alt = null;
+        else alt = alt.Trim();
+
+        return new ImageBlock(abs, alt, ParsePxAttribute(el, "width"), ParsePxAttribute(el, "height"));
+    }
+
+    private static int? ParsePxAttribute(IElement el, string name)
+    {
+        var raw = el.GetAttribute(name);
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        // Strip "px" suffix, ignore percentages / em / etc. — only intrinsic pixel hints help us.
+        var s = raw.Trim();
+        if (s.EndsWith("px", StringComparison.OrdinalIgnoreCase)) s = s[..^2];
+        return int.TryParse(s, out var n) && n > 0 ? n : null;
+    }
+
+    // Recursively look for an IMG anywhere under `parent`. Used by the WalkBlocks A-case
+    // to decide whether to lift an anchor's image content out instead of inlining it.
+    private static bool ContainsImg(INode parent)
+    {
+        foreach (var child in parent.ChildNodes)
+        {
+            if (child is IElement el)
+            {
+                if (string.Equals(el.TagName, "IMG", StringComparison.Ordinal)) return true;
+                if (ContainsImg(el)) return true;
+            }
+        }
+        return false;
+    }
+
+    // A cell that only carries an image (Wikipedia infobox image cell pattern): the
+    // recursive text content is all whitespace, and there's at least one <img> descendant.
+    // We use this to suppress empty placeholder cells in the table after the image has
+    // already been lifted to a peer ImageBlock above the table.
+    private static bool IsImageOnlyCell(IElement cell)
+    {
+        if (!string.IsNullOrWhiteSpace(cell.TextContent)) return false;
+        return ContainsImg(cell);
     }
 
     private static IEnumerable<IElement> DirectChildren(IElement parent, string tag)
@@ -146,47 +338,55 @@ internal static class HtmlBlockExtractor
                     break;
 
                 case IElement el:
-                    switch (el.TagName)
-                    {
-                        case "BR":
-                            output.Add(new Run("\n", style));
-                            break;
-
-                        case "STRONG": case "B":
-                            WalkInline(el, style | RunStyle.Bold, output, ctx);
-                            break;
-
-                        case "EM": case "I":
-                            // Italic is intentionally not surfaced — PuTTY doesn't render it
-                            // and we don't want meaning-bearing emphasis to disappear silently.
-                            // Render plain. (Bold-emphasized italics still get bold via parent.)
-                            WalkInline(el, style, output, ctx);
-                            break;
-
-                        case "CODE":
-                            WalkInline(el, style | RunStyle.Code, output, ctx);
-                            break;
-
-                        case "A":
-                            EmitAnchor(el, style, output, ctx);
-                            break;
-
-                        case "IMG":
-                            // Drop alt text inline as plain — better than silence.
-                            var alt = el.GetAttribute("alt");
-                            if (!string.IsNullOrWhiteSpace(alt))
-                                output.Add(new Run($"[image: {alt.Trim()}]", style));
-                            break;
-
-                        case "SCRIPT": case "STYLE": case "NOSCRIPT":
-                            break;
-
-                        default:
-                            WalkInline(el, style, output, ctx);
-                            break;
-                    }
+                    WalkInlineSingleElement(el, style, output, ctx);
                     break;
             }
+        }
+    }
+
+    // Per-element inline dispatcher — split out from WalkInline so that callers walking a
+    // parent's children one-by-one (e.g. the paragraph splitter that promotes <img> to its
+    // own block) can reuse the same per-tag style cascade without re-implementing the switch.
+    private static void WalkInlineSingleElement(IElement el, RunStyle style, List<Run> output, ExtractCtx ctx)
+    {
+        switch (el.TagName)
+        {
+            case "BR":
+                output.Add(new Run("\n", style));
+                break;
+
+            case "STRONG": case "B":
+                WalkInline(el, style | RunStyle.Bold, output, ctx);
+                break;
+
+            case "EM": case "I":
+                WalkInline(el, style | RunStyle.Italic, output, ctx);
+                break;
+
+            case "CODE":
+                WalkInline(el, style | RunStyle.Code, output, ctx);
+                break;
+
+            case "A":
+                EmitAnchor(el, style, output, ctx);
+                break;
+
+            case "IMG":
+                // Inline image inside a styled run (e.g. inside an <a> wrapping an icon):
+                // the paragraph splitter handles the common case of P > IMG by lifting it to
+                // a block. Here, just drop the alt as plain text — better than silence — so
+                // mid-prose icons don't disappear and a wrapping <a> still keeps its anchor.
+                var alt = el.GetAttribute("alt");
+                if (!string.IsNullOrWhiteSpace(alt))
+                    output.Add(new Run($"[image: {alt.Trim()}]", style));
+                break;
+
+            case "SCRIPT": case "STYLE": case "NOSCRIPT":
+                break;
+
+            default:
+                WalkInline(el, style, output, ctx);
+                break;
         }
     }
 

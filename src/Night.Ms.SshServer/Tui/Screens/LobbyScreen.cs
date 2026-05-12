@@ -8,7 +8,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Profile, News, Gallery, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Sysop, Logout }
 
 public sealed class LobbyScreen : BbsWindow
 {
@@ -106,9 +106,22 @@ public sealed class LobbyScreen : BbsWindow
             _app.RequestStop();
         };
 
-        var gallery = new Button
+        var browser = new Button
         {
             X = Pos.Right(news) + 2,
+            Y = contentTop + 4,
+            Text = "Bro_wser",
+        };
+        browser.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Browser;
+            _app.RequestStop();
+        };
+
+        var gallery = new Button
+        {
+            X = Pos.Right(browser) + 2,
             Y = contentTop + 4,
             Text = "_Gallery",
         };
@@ -155,7 +168,7 @@ public sealed class LobbyScreen : BbsWindow
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
 
-        Add(artView, welcome, hint, chat, boards, profile, news, gallery, sysopButton, logout, sysopBadge);
+        Add(artView, welcome, hint, chat, boards, profile, news, browser, gallery, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
@@ -193,6 +206,12 @@ public sealed class LobbyScreen : BbsWindow
             else if (key == Key.G || key == Key.G.WithShift)
             {
                 Result = LobbyNavigation.Gallery;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.W || key == Key.W.WithShift)
+            {
+                Result = LobbyNavigation.Browser;
                 _app.RequestStop();
                 key.Handled = true;
             }

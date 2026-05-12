@@ -18,11 +18,13 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.10" />
     <PackageReference Include="SmartReader" Version="0.11.0" />
     <PackageReference Include="Terminal.Gui" Version="2.1.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Night.Ms.Imaging\Night.Ms.Imaging.csproj" />
     <ProjectReference Include="..\Night.Ms.ServiceDefaults\Night.Ms.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Night.Ms.SshTransport\Night.Ms.SshTransport.csproj" />
   </ItemGroup>

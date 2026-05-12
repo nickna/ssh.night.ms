@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.DependencyInjection;
+using Night.Ms.Imaging;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Reader;
+using Night.Ms.SshServer.Tui.Art;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
@@ -33,8 +36,19 @@ public sealed class ReaderScreen : BbsWindow
     private readonly Label _hint;
 
     private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<Uri, CellGrid> _imageCells = new();
     private ReaderArticle? _article;
     private bool _showingLinks;
+    private ReadMode _mode = ReadMode.Reader;
+
+    // Cap on cell-columns when rendering a fetched image. The actual render width is chosen
+    // per-image from the source pixel width (see ChooseImageRenderCols) so a 250px album
+    // thumbnail doesn't blow up to fill an 80-cell body — it lands at ~30 cells and reads
+    // like a real thumbnail. The cap matches the typical reader-mode body column.
+    private const int ImageRenderColsCap = 80;
+    private const int ImageRenderColsFloor = 8;
+    private const int ImageSourcePixelsPerCell = 8;
+    private const int ImageFetchConcurrency = 4;
 
     public ReaderScreen(IApplication app, IServiceProvider services, User user, Uri url)
         : base(app, services, user)
@@ -70,6 +84,7 @@ public sealed class ReaderScreen : BbsWindow
             Y = 3,
             Width = Dim.Fill(),
             Height = Dim.Fill(2),
+            ImageResolver = u => _imageCells.TryGetValue(u, out var g) ? g : null,
         };
 
         _linksView = new ListView
@@ -164,6 +179,21 @@ public sealed class ReaderScreen : BbsWindow
             key.Handled = true;
             return;
         }
+
+        if (key == Key.R || key == Key.R.WithShift)
+        {
+            _mode = _mode == ReadMode.Reader ? ReadMode.Raw : ReadMode.Reader;
+            _title.Text = _mode == ReadMode.Raw ? "fetching (raw mode)..." : "fetching...";
+            _title.SetScheme(BbsTheme.Header_);
+            _meta.Text = _url.ToString();
+            _body.Blocks = Array.Empty<ArticleBlock>();
+            _imageCells.Clear();
+            _article = null;
+            if (_showingLinks) ShowBody();
+            _ = LoadAsync();
+            key.Handled = true;
+            return;
+        }
     }
 
     private void OpenSelectedLink()
@@ -244,16 +274,17 @@ public sealed class ReaderScreen : BbsWindow
             _hint.Text = "[Esc] cancel";
             return;
         }
+        var modeTag = _mode == ReadMode.Raw ? "[raw] " : string.Empty;
         var n = _article.Links.Count;
         if (n == 0)
         {
-            _hint.Text = "[Esc/Q] back    [O] show url    [↑/↓/PgUp/PgDn or wheel] scroll";
+            _hint.Text = $"{modeTag}[Esc/Q] back    [R] toggle reader/raw    [O] show url    [↑/↓/PgUp/PgDn or wheel] scroll";
             return;
         }
         // 1-9 are direct shortcuts in the body view; the L pane is the only way to reach
         // [10] and beyond, so we mention it conditionally to avoid noise on short articles.
         var digitHint = n >= 10 ? "[1-9] open    [L] all links" : "[1-9] open    [L] links";
-        _hint.Text = $"[Esc/Q] back    {digitHint}    [O] show url    [↑/↓/PgUp/PgDn or wheel] scroll";
+        _hint.Text = $"{modeTag}[Esc/Q] back    {digitHint}    [R] reader/raw    [O] show url    [↑/↓/PgUp/PgDn or wheel] scroll";
     }
 
     private async Task LoadAsync()
@@ -263,7 +294,7 @@ public sealed class ReaderScreen : BbsWindow
         {
             using var scope = _services.CreateScope();
             var reader = scope.ServiceProvider.GetRequiredService<IArticleReader>();
-            article = await reader.ReadAsync(_url, _cts.Token).ConfigureAwait(false);
+            article = await reader.ReadAsync(_url, _mode, _cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -306,7 +337,113 @@ public sealed class ReaderScreen : BbsWindow
             _meta.Text = FormatMeta(article, _url);
             _body.Blocks = article.Blocks;
             ApplyHint();
+
+            // Kick off parallel image fetches now that the article is on-screen with
+            // placeholders. Each completion paints into _imageCells and triggers a re-layout.
+            _ = LoadImagesAsync(article.Blocks);
         });
+    }
+
+    private async Task LoadImagesAsync(IReadOnlyList<ArticleBlock> blocks)
+    {
+        var imageBlocks = CollectImageBlocks(blocks);
+        if (imageBlocks.Count == 0) return;
+
+        IImageFetcher fetcher;
+        try
+        {
+            // Singleton service — resolve through a scope just to keep the DI pattern
+            // consistent with the rest of the screen, even though the cache is process-wide.
+            using var scope = _services.CreateScope();
+            fetcher = scope.ServiceProvider.GetRequiredService<IImageFetcher>();
+        }
+        catch
+        {
+            return; // No image fetcher registered — leave placeholders as-is.
+        }
+
+        using var sem = new SemaphoreSlim(ImageFetchConcurrency, ImageFetchConcurrency);
+        var distinct = imageBlocks
+            .Select(b => b.Source)
+            .Where(u => !_imageCells.ContainsKey(u))
+            .Distinct()
+            .ToList();
+
+        var tasks = distinct.Select(async url =>
+        {
+            await sem.WaitAsync(_cts.Token).ConfigureAwait(false);
+            try
+            {
+                if (_cts.IsCancellationRequested) return;
+                var image = await fetcher.FetchAsync(url, _cts.Token).ConfigureAwait(false);
+                if (image is null || _cts.IsCancellationRequested) return;
+
+                // String roundtrip via SgrParser: the renderer emits ANSI (SGR + half-block
+                // ▀) and the parser turns that into a CellGrid of (rune, fg, bg) cells. Less
+                // efficient than direct cell emission but reuses code and keeps the imaging
+                // library decoupled from the server's CellGrid type.
+                var targetCols = ChooseImageRenderCols(image.Width);
+                var ansi = HalfBlockRenderer.Render(image, targetCols, ColorDepth.Truecolor, DitherMode.None);
+                var grid = SgrParser.Parse(ansi);
+                _imageCells[url] = grid;
+
+                _app.Invoke(() => _body.InvalidateLayout());
+            }
+            catch (OperationCanceledException)
+            {
+                // Screen disposed while we were in flight — drop quietly.
+            }
+            catch
+            {
+                // Any other failure: leave the placeholder in place. The fetcher already
+                // logs at info level; a per-image swallow here keeps one bad URL from
+                // tearing down the whole article view.
+            }
+            finally
+            {
+                sem.Release();
+            }
+        });
+
+        try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+        catch { /* aggregated above */ }
+    }
+
+    // Choose how wide to render an image (in cell columns) given its source pixel width.
+    // 8 source pixels per cell is a reasonable thumbnail ratio: a 250px image lands at
+    // ~31 cells (which becomes ~16 cell rows after the half-block 2x vertical doubling),
+    // a 1200px hero caps at the body width, and tiny icons floor at 8 cells so they
+    // remain visible. Hard cap at the body column avoids hot-page jitter when a 4000px
+    // image arrives.
+    private static int ChooseImageRenderCols(int sourcePixelWidth)
+    {
+        var raw = sourcePixelWidth / ImageSourcePixelsPerCell;
+        if (raw < ImageRenderColsFloor) raw = ImageRenderColsFloor;
+        if (raw > ImageRenderColsCap) raw = ImageRenderColsCap;
+        return raw;
+    }
+
+    private static List<ImageBlock> CollectImageBlocks(IReadOnlyList<ArticleBlock> blocks)
+    {
+        var result = new List<ImageBlock>();
+        Walk(blocks);
+        return result;
+
+        void Walk(IReadOnlyList<ArticleBlock> bs)
+        {
+            foreach (var b in bs)
+            {
+                switch (b)
+                {
+                    case ImageBlock i:
+                        result.Add(i);
+                        break;
+                    case BlockquoteBlock bq:
+                        Walk(bq.Children);
+                        break;
+                }
+            }
+        }
     }
 
     private static string FormatMeta(ReaderArticle a, Uri url)

@@ -21,7 +21,7 @@ public sealed class SmartReaderArticleReader(
     private const int MaxBytes = 4 * 1024 * 1024;
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(12);
 
-    public async Task<ReaderArticle?> ReadAsync(Uri url, CancellationToken cancellationToken = default)
+    public async Task<ReaderArticle?> ReadAsync(Uri url, ReadMode mode = ReadMode.Reader, CancellationToken cancellationToken = default)
     {
         if (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps)
         {
@@ -36,38 +36,76 @@ public sealed class SmartReaderArticleReader(
 
         try
         {
-            var article = SmartReader.Reader.ParseArticle(url.ToString(), text: html);
-            if (article is null || string.IsNullOrWhiteSpace(article.Content))
+            var result = mode == ReadMode.Reader
+                ? ParseAsReader(url, html)
+                : ParseAsRaw(url, html);
+            if (result is not null)
             {
-                return null;
+                var imageCount = result.Blocks.Count(b => b is ImageBlock);
+                logger.LogInformation(
+                    "Article extracted: {BlockCount} blocks, {ImageCount} images, {LinkCount} links (mode={Mode}): {Url}",
+                    result.Blocks.Count, imageCount, result.Links.Count, mode, url);
             }
-
-            var doc = new HtmlParser().ParseDocument(article.Content);
-            var (blocks, links) = HtmlBlockExtractor.Extract(doc, url);
-            if (blocks.Count == 0)
-            {
-                return null;
-            }
-
-            return new ReaderArticle(
-                SourceUrl: url.ToString(),
-                Title: NullIfBlank(article.Title),
-                Byline: NullIfBlank(article.Byline ?? article.Author),
-                SiteName: NullIfBlank(article.SiteName),
-                Blocks: blocks,
-                Links: links,
-                ReadingTimeMinutes: article.TimeToRead.TotalMinutes >= 1
-                    ? (int)Math.Ceiling(article.TimeToRead.TotalMinutes)
-                    : null,
-                PublishedAt: article.PublicationDate is { } d
-                    ? new DateTimeOffset(d.Ticks, TimeSpan.Zero)
-                    : null);
+            return result;
         }
         catch (Exception ex)
         {
-            logger.LogInformation(ex, "Article parse failed: {Url}", url);
+            logger.LogInformation(ex, "Article parse failed (mode={Mode}): {Url}", mode, url);
             return null;
         }
+    }
+
+    private static ReaderArticle? ParseAsReader(Uri url, string html)
+    {
+        var article = SmartReader.Reader.ParseArticle(url.ToString(), text: html);
+        if (article is null || string.IsNullOrWhiteSpace(article.Content))
+        {
+            return null;
+        }
+
+        var doc = new HtmlParser().ParseDocument(article.Content);
+        var (blocks, links) = HtmlBlockExtractor.Extract(doc, url);
+        if (blocks.Count == 0)
+        {
+            return null;
+        }
+
+        return new ReaderArticle(
+            SourceUrl: url.ToString(),
+            Title: NullIfBlank(article.Title),
+            Byline: NullIfBlank(article.Byline ?? article.Author),
+            SiteName: NullIfBlank(article.SiteName),
+            Blocks: blocks,
+            Links: links,
+            ReadingTimeMinutes: article.TimeToRead.TotalMinutes >= 1
+                ? (int)Math.Ceiling(article.TimeToRead.TotalMinutes)
+                : null,
+            PublishedAt: article.PublicationDate is { } d
+                ? new DateTimeOffset(d.Ticks, TimeSpan.Zero)
+                : null);
+    }
+
+    private static ReaderArticle? ParseAsRaw(Uri url, string html)
+    {
+        // Skip Readability — feed the full HTML to AngleSharp directly. Useful for forum
+        // threads, GitHub repo views, search results, and other pages where Readability's
+        // strip-to-prose heuristic leaves nothing meaningful behind.
+        var doc = new HtmlParser().ParseDocument(html);
+        var (blocks, links) = HtmlBlockExtractor.Extract(doc, url);
+        if (blocks.Count == 0)
+        {
+            return null;
+        }
+
+        return new ReaderArticle(
+            SourceUrl: url.ToString(),
+            Title: NullIfBlank(doc.Title),
+            Byline: null,
+            SiteName: url.Host,
+            Blocks: blocks,
+            Links: links,
+            ReadingTimeMinutes: null,
+            PublishedAt: null);
     }
 
     private async Task<string?> TryDownloadAsync(Uri url, CancellationToken cancellationToken)

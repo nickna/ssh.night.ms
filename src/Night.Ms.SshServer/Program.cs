@@ -37,11 +37,17 @@ builder.Services.AddHttpClient(SmartReaderArticleReader.HttpClientName, c =>
     c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
     c.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
 });
+builder.Services.AddHttpClient(HttpImageFetcher.HttpClientName, c =>
+{
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
+    c.DefaultRequestHeaders.Accept.ParseAdd("image/*");
+});
 builder.Services.AddSingleton<IWeatherProvider, OpenMeteoWeatherProvider>();
 builder.Services.AddSingleton<INewsProvider, HackerNewsProvider>();
 builder.Services.AddSingleton<IGeocodingProvider, OpenMeteoGeocodingProvider>();
 builder.Services.AddSingleton<IIpGeolocationProvider, IpApiCoGeolocationProvider>();
 builder.Services.AddSingleton<IArticleReader, SmartReaderArticleReader>();
+builder.Services.AddSingleton<IImageFetcher, HttpImageFetcher>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.
