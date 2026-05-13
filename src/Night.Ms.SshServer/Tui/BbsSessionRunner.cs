@@ -110,7 +110,7 @@ internal static class BbsSessionRunner
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, BbsSession session)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, art));
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Sysop)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -139,6 +139,13 @@ internal static class BbsSessionRunner
             {
                 var gallery = services.GetRequiredService<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider>();
                 app.Run(new GalleryScreen(app, services, user, gallery));
+            }
+            else if (nav == LobbyNavigation.Map)
+            {
+                var rasterTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IOsmTileFetcher>();
+                var vectorTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IVectorTileFetcher>();
+                var logger = services.GetRequiredService<ILogger<MapScreen>>();
+                app.Run(new MapScreen(app, services, user, rasterTiles, vectorTiles, logger));
             }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {

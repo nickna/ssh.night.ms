@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Hosting;
@@ -54,12 +55,32 @@ builder.Services.AddHttpClient(HttpImageFetcher.HttpClientName, c =>
     c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
     c.DefaultRequestHeaders.Accept.ParseAdd("image/*");
 });
+builder.Services.AddHttpClient(Night.Ms.SshServer.Tui.Map.OsmTileFetcher.HttpClientName, c =>
+{
+    // OSM Tile Usage Policy requires a project-identifying User-Agent. Without one, the
+    // tile server may rate-limit or block; with one, sysadmins can reach us if our usage
+    // becomes a problem. See https://operations.osmfoundation.org/policies/tiles/.
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-map/0.1 (+https://night.ms; contact=nick@night.ms)");
+    c.DefaultRequestHeaders.Accept.ParseAdd("image/png,image/*;q=0.8");
+});
+builder.Services.AddHttpClient(Night.Ms.SshServer.Tui.Map.OpenFreeMapVectorTileFetcher.HttpClientName, c =>
+{
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-map/0.1 (+https://night.ms; contact=nick@night.ms)");
+    c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.mapbox-vector-tile,application/x-protobuf;q=0.9,application/json;q=0.5");
+}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    // OpenFreeMap serves .pbf with Content-Encoding: gzip by default; HttpClient won't
+    // transparently decompress unless we opt in here. Brotli covers the TileJSON manifest.
+    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Brotli,
+});
 builder.Services.AddSingleton<IWeatherProvider, OpenMeteoWeatherProvider>();
 builder.Services.AddSingleton<INewsProvider, HackerNewsProvider>();
 builder.Services.AddSingleton<IGeocodingProvider, OpenMeteoGeocodingProvider>();
 builder.Services.AddSingleton<IIpGeolocationProvider, IpApiCoGeolocationProvider>();
 builder.Services.AddSingleton<IArticleReader, SmartReaderArticleReader>();
 builder.Services.AddSingleton<IImageFetcher, HttpImageFetcher>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Map.IOsmTileFetcher, Night.Ms.SshServer.Tui.Map.OsmTileFetcher>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Map.IVectorTileFetcher, Night.Ms.SshServer.Tui.Map.OpenFreeMapVectorTileFetcher>();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.

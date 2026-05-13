@@ -8,7 +8,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Map, Sysop, Logout }
 
 public sealed class LobbyScreen : BbsWindow
 {
@@ -132,9 +132,22 @@ public sealed class LobbyScreen : BbsWindow
             _app.RequestStop();
         };
 
-        var sysopButton = new Button
+        var map = new Button
         {
             X = Pos.Right(gallery) + 2,
+            Y = contentTop + 4,
+            Text = "_Map",
+        };
+        map.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            Result = LobbyNavigation.Map;
+            _app.RequestStop();
+        };
+
+        var sysopButton = new Button
+        {
+            X = Pos.Right(map) + 2,
             Y = contentTop + 4,
             Text = "_Sysop",
             Visible = user.IsSysop,
@@ -149,7 +162,7 @@ public sealed class LobbyScreen : BbsWindow
 
         var logout = new Button
         {
-            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(gallery) + 2,
+            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(map) + 2,
             Y = contentTop + 4,
             Text = "_Logout",
         };
@@ -168,7 +181,7 @@ public sealed class LobbyScreen : BbsWindow
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
 
-        Add(artView, welcome, hint, chat, boards, profile, news, browser, gallery, sysopButton, logout, sysopBadge);
+        Add(artView, welcome, hint, chat, boards, profile, news, browser, gallery, map, sysopButton, logout, sysopBadge);
 
         KeyDown += (_, key) =>
         {
@@ -206,6 +219,12 @@ public sealed class LobbyScreen : BbsWindow
             else if (key == Key.G || key == Key.G.WithShift)
             {
                 Result = LobbyNavigation.Gallery;
+                _app.RequestStop();
+                key.Handled = true;
+            }
+            else if (key == Key.M || key == Key.M.WithShift)
+            {
+                Result = LobbyNavigation.Map;
                 _app.RequestStop();
                 key.Handled = true;
             }
