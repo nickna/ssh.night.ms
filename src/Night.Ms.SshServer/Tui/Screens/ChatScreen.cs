@@ -58,9 +58,9 @@ public sealed class ChatScreen : BbsWindow
     private readonly ConcurrentDictionary<long, string> _drafts = new();
 
     // Tracks the messages we've displayed, newest-first, so /react /edit /del <n> can map a
-    // position to a real ChatMessage.Id. Also seeds the reactions map for snapshot rendering.
-    private readonly List<MessageRef> _recent = new();
-    private readonly Dictionary<long, Dictionary<string, HashSet<long>>> _reactions = new();
+    // position to a real ChatMessage.Id. Also owns the per-message reaction map.
+    private readonly ChatMessageLog _msgLog = new();
+    private readonly ChatEnvelopeDispatcher _dispatcher;
 
     // Per-session image cache. Keyed by URL so repeated postings of the same link don't
     // re-fetch / re-render. Bounded indirectly by the per-session HttpImageFetcher cache,
@@ -98,6 +98,19 @@ public sealed class ChatScreen : BbsWindow
         _app = app;
         _user = user;
         _currentChannel = initialChannel;
+
+        // Subscribe to the channel topic and route each envelope through screen-side
+        // handlers. The dispatcher owns deserialization + the type switch; OnMessage et al.
+        // hold the channel-specific glue (image fetches, mark-read, reply-count badges).
+        _dispatcher = new ChatEnvelopeDispatcher
+        {
+            OnMessage = OnMessageEvent,
+            OnEdit = OnEditEvent,
+            OnDelete = OnDeleteEvent,
+            OnPin = OnPinEvent,
+            OnReaction = OnReactionEvent,
+            OnTopic = OnTopicEvent,
+        };
 
         _channelsPane = new FrameView
         {
@@ -533,7 +546,7 @@ public sealed class ChatScreen : BbsWindow
     // /thread <n> — opens a focused view of the n-th most recent message + all its replies.
     // Runs as a nested app.Run (same pattern as NewsScreen → ReaderScreen); when the user
     // hits Esc, control returns here with our channel subscription intact. Background tasks
-    // here stay live during the nested loop — incoming events still mutate _recent so when
+    // here stay live during the nested loop — incoming events still mutate _msgLog so when
     // we redraw on return, state is current.
     private void OpenThread(string? arg)
     {
@@ -648,8 +661,8 @@ public sealed class ChatScreen : BbsWindow
     {
         msgRef = default!;
         var idx = positionOneBased - 1;
-        if (idx < 0 || idx >= _recent.Count) return false;
-        msgRef = _recent[idx];
+        if (idx < 0 || idx >= _msgLog.Count) return false;
+        msgRef = _msgLog.Messages[idx];
         return true;
     }
 
@@ -696,8 +709,7 @@ public sealed class ChatScreen : BbsWindow
         _channelCts = new CancellationTokenSource();
 
         _currentChannel = target;
-        _recent.Clear();
-        _reactions.Clear();
+        _msgLog.Clear();
         var label = LabelFor(target);
         _app.Invoke(() =>
         {
@@ -783,11 +795,11 @@ public sealed class ChatScreen : BbsWindow
                     ParentMessageId = msg.ParentMessageId,
                     ReplyCount = replyCounts.GetValueOrDefault(msg.Id),
                 };
-                _recent.Insert(0, msgRef);
+                _msgLog.Insert(0, msgRef);
                 AppendOnUiThread(RenderMessage(msgRef), msg.Id);
                 if (reactionMap.TryGetValue(msg.Id, out var rows))
                 {
-                    SeedReactions(msg.Id, rows);
+                    _msgLog.SeedReactions(msg.Id, rows);
                     PushReactionFooter(msg.Id);
                 }
                 if (!msgRef.Deleted) ScheduleImageFetches(msg.Id, msg.Body);
@@ -836,115 +848,56 @@ public sealed class ChatScreen : BbsWindow
         catch (OperationCanceledException) { /* expected on close/switch */ }
     }
 
-    private void DispatchChatEnvelope(byte[] payload)
-    {
-        ChatEnvelope? envelope;
-        try { envelope = JsonSerializer.Deserialize<ChatEnvelope>(payload); }
-        catch { return; }
-        if (envelope is null) return;
+    private void DispatchChatEnvelope(byte[] payload) => _dispatcher.Dispatch(payload);
 
-        switch (envelope.Kind)
+    private void OnMessageEvent(ChatMessageDto msg)
+    {
+        var newRef = new MessageRef
         {
-            case ChatEventKind.Message:
-                if (TryDeserialize<ChatMessageDto>(envelope.Payload, out var msg))
-                {
-                    var newRef = new MessageRef
-                    {
-                        MessageId = msg.Id,
-                        Handle = msg.Handle,
-                        At = msg.CreatedAt,
-                        Body = msg.Body,
-                        ParentMessageId = msg.ParentMessageId,
-                    };
-                    _recent.Insert(0, newRef);
-                    AppendOnUiThread(RenderMessage(newRef), msg.Id);
-                    ScheduleImageFetches(msg.Id, msg.Body);
-                    // If this message is a reply to one still on screen, bump that parent's
-                    // reply count and re-render its line so the "[N replies]" badge updates.
-                    BumpParentReplyCount(msg.ParentMessageId);
-                    // The sender is implicitly no longer typing — clear their hint so the
-                    // status bar doesn't say "alice is typing…" right after alice posts.
-                    ClearTyperOnUiThread(msg.Handle);
-                    // We're looking at the channel — bump the read pointer so the unread
-                    // badge stays at zero. Fire-and-forget to keep the envelope dispatcher
-                    // synchronous; failures are surfaced by the next refresh.
-                    if (msg.Id > _lastReadMessageId)
-                    {
-                        _lastReadMessageId = msg.Id;
-                        MarkReadSafelyAsync(_currentChannel.Id, msg.Id).FireAndLog(_services, nameof(MarkReadSafelyAsync));
-                    }
-                }
-                return;
-            case ChatEventKind.Edit:
-                if (TryDeserialize<ChatEditDto>(envelope.Payload, out var edit))
-                {
-                    ApplyEdit(edit);
-                }
-                return;
-            case ChatEventKind.Delete:
-                if (TryDeserialize<ChatDeleteDto>(envelope.Payload, out var del))
-                {
-                    ApplyDelete(del);
-                }
-                return;
-            case ChatEventKind.React:
-                if (TryDeserialize<ChatReactionDto>(envelope.Payload, out var react))
-                {
-                    ApplyReaction(react, add: true);
-                }
-                return;
-            case ChatEventKind.Unreact:
-                if (TryDeserialize<ChatReactionDto>(envelope.Payload, out var unreact))
-                {
-                    ApplyReaction(unreact, add: false);
-                }
-                return;
-            case ChatEventKind.Pin:
-            case ChatEventKind.Unpin:
-                if (TryDeserialize<ChatPinDto>(envelope.Payload, out var pin))
-                {
-                    ApplyPin(pin);
-                }
-                return;
-            case ChatEventKind.Topic:
-                if (TryDeserialize<ChatTopicDto>(envelope.Payload, out var topicEvt))
-                {
-                    ApplyTopic(topicEvt);
-                }
-                return;
+            MessageId = msg.Id,
+            Handle = msg.Handle,
+            At = msg.CreatedAt,
+            Body = msg.Body,
+            ParentMessageId = msg.ParentMessageId,
+        };
+        _msgLog.Insert(0, newRef);
+        AppendOnUiThread(RenderMessage(newRef), msg.Id);
+        ScheduleImageFetches(msg.Id, msg.Body);
+        // If this message is a reply to one still on screen, bump that parent's reply
+        // count and re-render its line so the "[N replies]" badge updates. Quietly no-ops
+        // when the parent has scrolled past the on-screen window — the count will be
+        // correct on next channel re-entry because LoadHistoryAndSubscribeAsync rehydrates.
+        var parent = _msgLog.BumpReplyCount(msg.ParentMessageId);
+        if (parent is not null)
+        {
+            var parentLine = RenderMessage(parent);
+            _app.Invoke(() => _log.TryReplace(parent.MessageId, parentLine));
+        }
+        // The sender is implicitly no longer typing — clear their hint so the status bar
+        // doesn't say "alice is typing…" right after alice posts.
+        ClearTyperOnUiThread(msg.Handle);
+        // We're looking at the channel — bump the read pointer so the unread badge stays
+        // at zero. Fire-and-forget to keep the envelope dispatcher synchronous; failures
+        // are surfaced by the next refresh.
+        if (msg.Id > _lastReadMessageId)
+        {
+            _lastReadMessageId = msg.Id;
+            MarkReadSafelyAsync(_currentChannel.Id, msg.Id).FireAndLog(_services, nameof(MarkReadSafelyAsync));
         }
     }
 
-    private static bool TryDeserialize<T>(JsonElement element, out T result) where T : class
+    private void OnEditEvent(ChatEditDto edit)
     {
-        try
-        {
-            var r = element.Deserialize<T>();
-            result = r!;
-            return r is not null;
-        }
-        catch
-        {
-            result = null!;
-            return false;
-        }
-    }
-
-    private void ApplyEdit(ChatEditDto edit)
-    {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == edit.MessageId);
+        var msgRef = _msgLog.ApplyEdit(edit);
         if (msgRef is null) return;
-        msgRef.Body = edit.Body;
-        msgRef.Edited = true;
         var newLine = RenderMessage(msgRef);
         _app.Invoke(() => _log.TryReplace(edit.MessageId, newLine));
     }
 
-    private void ApplyDelete(ChatDeleteDto del)
+    private void OnDeleteEvent(ChatDeleteDto del)
     {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == del.MessageId);
+        var msgRef = _msgLog.ApplyDelete(del);
         if (msgRef is null) return;
-        msgRef.Deleted = true;
         var line = MessageRenderer.RenderDeleted(_user.FormatClock(msgRef.At), msgRef.Handle);
         _app.Invoke(() =>
         {
@@ -953,31 +906,15 @@ public sealed class ChatScreen : BbsWindow
         });
     }
 
-    // Find the parent message on screen and bump its reply count + re-render in place.
-    // Quietly no-ops when the parent has scrolled past the on-screen window — the count
-    // will be correct on next channel re-entry because LoadHistoryAndSubscribeAsync hydrates
-    // counts from the DB.
-    private void BumpParentReplyCount(long? parentMessageId)
+    private void OnPinEvent(ChatPinDto pin)
     {
-        if (parentMessageId is not { } pid) return;
-        var parent = _recent.FirstOrDefault(r => r.MessageId == pid);
-        if (parent is null) return;
-        parent.ReplyCount += 1;
-        var line = RenderMessage(parent);
-        _app.Invoke(() => _log.TryReplace(pid, line));
-    }
-
-    private void ApplyPin(ChatPinDto pin)
-    {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == pin.MessageId);
-        if (msgRef is null) return;
-        msgRef.Pinned = pin.IsPinned;
-        if (msgRef.Deleted) return; // tombstones don't change pin glyphs
+        var msgRef = _msgLog.ApplyPin(pin);
+        if (msgRef is null || msgRef.Deleted) return; // tombstones don't change pin glyphs
         var line = RenderMessage(msgRef);
         _app.Invoke(() => _log.TryReplace(pin.MessageId, line));
     }
 
-    private void ApplyTopic(ChatTopicDto evt)
+    private void OnTopicEvent(ChatTopicDto evt)
     {
         if (evt.ChannelId != _currentChannel.Id) return;
         _currentChannel.Topic = evt.Topic;
@@ -985,56 +922,16 @@ public sealed class ChatScreen : BbsWindow
         AppendSystem($"─ topic set by {evt.ActorHandle}: {evt.Topic ?? "(cleared)"}");
     }
 
-    private void ApplyReaction(ChatReactionDto react, bool add)
+    private void OnReactionEvent(ChatReactionDto react, bool add)
     {
-        if (!_reactions.TryGetValue(react.MessageId, out var map))
-        {
-            if (!add) return;
-            map = new Dictionary<string, HashSet<long>>();
-            _reactions[react.MessageId] = map;
-        }
-        if (!map.TryGetValue(react.Emoji, out var users))
-        {
-            if (!add) return;
-            users = new HashSet<long>();
-            map[react.Emoji] = users;
-        }
-        if (add) users.Add(react.UserId); else users.Remove(react.UserId);
-        if (users.Count == 0) map.Remove(react.Emoji);
-        if (map.Count == 0) _reactions.Remove(react.MessageId);
-
+        _msgLog.ApplyReaction(react, add);
         PushReactionFooter(react.MessageId);
     }
 
     private void PushReactionFooter(long messageId)
     {
-        var summaries = BuildSummaries(messageId);
+        var summaries = _msgLog.BuildSummaries(messageId, _user.Id);
         _app.Invoke(() => _log.TrySetReactions(messageId, summaries));
-    }
-
-    private IReadOnlyList<ReactionSummary> BuildSummaries(long messageId)
-    {
-        if (!_reactions.TryGetValue(messageId, out var map) || map.Count == 0)
-            return Array.Empty<ReactionSummary>();
-        return map.Select(kv => new ReactionSummary(kv.Key, kv.Value.Count, kv.Value.Contains(_user.Id)))
-                  .OrderByDescending(s => s.Count)
-                  .ThenBy(s => s.Emoji, StringComparer.Ordinal)
-                  .ToArray();
-    }
-
-    private void SeedReactions(long messageId, IEnumerable<MessageReaction> rows)
-    {
-        var map = new Dictionary<string, HashSet<long>>();
-        foreach (var r in rows)
-        {
-            if (!map.TryGetValue(r.Emoji, out var set))
-            {
-                set = new HashSet<long>();
-                map[r.Emoji] = set;
-            }
-            set.Add(r.UserId);
-        }
-        if (map.Count > 0) _reactions[messageId] = map;
     }
 
     private async Task RunPresenceSubscribeAsync(long channelId, CancellationToken ct)
@@ -1430,12 +1327,12 @@ public sealed class ChatScreen : BbsWindow
             return MessageRenderer.RenderEmote(clock, msgRef.Handle, msgRef.Body[4..], _user.Handle);
         }
         // Resolve the parent (if any) to its handle so we can render "↳ @alice" — only
-        // works when the parent is still in the on-screen _recent window. If the parent
-        // has scrolled off the load, fall back to a generic "↳ @(earlier)" stub.
+        // works when the parent is still in the on-screen window. If the parent has
+        // scrolled off the load, fall back to a generic "↳ @(earlier)" stub.
         string? replyToHandle = null;
         if (msgRef.ParentMessageId is { } pid)
         {
-            var parent = _recent.FirstOrDefault(r => r.MessageId == pid);
+            var parent = _msgLog.Find(pid);
             replyToHandle = parent?.Handle ?? "(earlier)";
         }
         return MessageRenderer.RenderMessage(clock, msgRef.Handle, msgRef.Body ?? string.Empty, _user.Handle,
@@ -1473,22 +1370,4 @@ public sealed class ChatScreen : BbsWindow
         return null;
     }
 
-    // Snapshot of an on-screen message that the position-based commands resolve against
-    // and that envelope dispatchers update in place after edit/pin/delete events. Mutable
-    // so we don't have to swap entries in _recent for every state change.
-    private sealed class MessageRef
-    {
-        public required long MessageId { get; init; }
-        public required string Handle { get; init; }
-        public required DateTimeOffset At { get; init; }
-        public required string Body { get; set; }
-        public bool Edited { get; set; }
-        public bool Pinned { get; set; }
-        public bool Deleted { get; set; }
-        // ParentMessageId is set on /reply messages; it's used to find the parent in _recent
-        // for the "↳ @alice" prefix render. ReplyCount tracks how many children this message
-        // has shown on screen so far — bumped by incoming children, never decremented.
-        public long? ParentMessageId { get; set; }
-        public int ReplyCount { get; set; }
-    }
 }

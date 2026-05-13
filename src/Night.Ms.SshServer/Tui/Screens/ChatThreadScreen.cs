@@ -34,10 +34,8 @@ public sealed class ChatThreadScreen : BbsWindow
     private readonly BbsStatusLine _status;
     private readonly CancellationTokenSource _shutdown = new();
 
-    // Same MessageRef shape as ChatScreen — duplicated rather than shared because both
-    // screens own their own _recent and want different mutability semantics.
-    private readonly List<MessageRef> _recent = new();
-    private readonly Dictionary<long, Dictionary<string, HashSet<long>>> _reactions = new();
+    private readonly ChatMessageLog _msgLog = new();
+    private readonly ChatEnvelopeDispatcher _dispatcher;
     private Task? _subscriber;
 
     public ChatThreadScreen(IServiceProvider services, IApplication app, User user, long channelId, long rootMessageId)
@@ -48,6 +46,20 @@ public sealed class ChatThreadScreen : BbsWindow
         _user = user;
         _channelId = channelId;
         _rootMessageId = rootMessageId;
+
+        // Subscribe to the channel topic (same as ChatScreen) and filter events to those
+        // belonging to this thread. The dispatcher owns deserialization + the type switch;
+        // we hand it the per-event behaviour as delegates.
+        _dispatcher = new ChatEnvelopeDispatcher
+        {
+            OnMessage = OnMessageEvent,
+            OnEdit = OnEditEvent,
+            OnDelete = OnDeleteEvent,
+            OnPin = OnPinEvent,
+            OnReaction = OnReactionEvent,
+            // OnTopic intentionally omitted — topic events are channel-scoped chrome and
+            // the thread view doesn't render them.
+        };
 
         Title = $"thread — {_user.Handle} — [Esc] back to channel";
 
@@ -189,154 +201,75 @@ public sealed class ChatThreadScreen : BbsWindow
         catch (OperationCanceledException) { /* expected on close */ }
     }
 
-    // Returns true if a message id (root or parent) is part of this thread.
+    private void DispatchEnvelope(byte[] payload) => _dispatcher.Dispatch(payload);
+
+    // True for the thread root and any direct reply to it. Edit/delete/react/pin handlers
+    // additionally gate on the message already being in _msgLog — events for other messages
+    // in the same channel topic are simply ignored.
     private bool IsInThread(long messageId, long? parentMessageId) =>
         messageId == _rootMessageId || parentMessageId == _rootMessageId;
 
-    private void DispatchEnvelope(byte[] payload)
+    private void OnMessageEvent(ChatMessageDto msg)
     {
-        ChatEnvelope? envelope;
-        try { envelope = JsonSerializer.Deserialize<ChatEnvelope>(payload); }
-        catch { return; }
-        if (envelope is null) return;
-
-        switch (envelope.Kind)
+        if (!IsInThread(msg.Id, msg.ParentMessageId)) return;
+        AddMessage(new MessageRef
         {
-            case ChatEventKind.Message:
-                if (TryDeserialize<ChatMessageDto>(envelope.Payload, out var msg) && IsInThread(msg.Id, msg.ParentMessageId))
-                {
-                    AddMessage(new MessageRef
-                    {
-                        MessageId = msg.Id,
-                        Handle = msg.Handle,
-                        At = msg.CreatedAt,
-                        Body = msg.Body,
-                    });
-                }
-                return;
-            case ChatEventKind.Edit:
-                if (TryDeserialize<ChatEditDto>(envelope.Payload, out var edit) && IsKnownInThread(edit.MessageId))
-                {
-                    ApplyEdit(edit);
-                }
-                return;
-            case ChatEventKind.Delete:
-                if (TryDeserialize<ChatDeleteDto>(envelope.Payload, out var del) && IsKnownInThread(del.MessageId))
-                {
-                    ApplyDelete(del);
-                }
-                return;
-            case ChatEventKind.React:
-                if (TryDeserialize<ChatReactionDto>(envelope.Payload, out var react) && IsKnownInThread(react.MessageId))
-                {
-                    ApplyReaction(react, add: true);
-                }
-                return;
-            case ChatEventKind.Unreact:
-                if (TryDeserialize<ChatReactionDto>(envelope.Payload, out var unreact) && IsKnownInThread(unreact.MessageId))
-                {
-                    ApplyReaction(unreact, add: false);
-                }
-                return;
-            case ChatEventKind.Pin:
-            case ChatEventKind.Unpin:
-                if (TryDeserialize<ChatPinDto>(envelope.Payload, out var pin) && IsKnownInThread(pin.MessageId))
-                {
-                    ApplyPin(pin);
-                }
-                return;
-        }
+            MessageId = msg.Id,
+            Handle = msg.Handle,
+            At = msg.CreatedAt,
+            Body = msg.Body,
+        });
     }
 
-    // True only for messages already loaded into this thread view — protects us from acting
-    // on edit/delete/react events for other messages in the same channel.
-    private bool IsKnownInThread(long messageId) => _recent.Any(r => r.MessageId == messageId);
-
-    private void ApplyEdit(ChatEditDto edit)
+    private void OnEditEvent(ChatEditDto edit)
     {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == edit.MessageId);
+        var msgRef = _msgLog.ApplyEdit(edit);
         if (msgRef is null) return;
-        msgRef.Body = edit.Body;
-        msgRef.Edited = true;
         var newLine = RenderMessage(msgRef);
         _app.Invoke(() => _log.TryReplace(edit.MessageId, newLine));
     }
 
-    private void ApplyDelete(ChatDeleteDto del)
+    private void OnDeleteEvent(ChatDeleteDto del)
     {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == del.MessageId);
+        var msgRef = _msgLog.ApplyDelete(del);
         if (msgRef is null) return;
-        msgRef.Deleted = true;
         var line = MessageRenderer.RenderDeleted(_user.FormatClock(msgRef.At), msgRef.Handle);
         _app.Invoke(() => _log.TryReplace(del.MessageId, line));
     }
 
-    private void ApplyPin(ChatPinDto pin)
+    private void OnPinEvent(ChatPinDto pin)
     {
-        var msgRef = _recent.FirstOrDefault(r => r.MessageId == pin.MessageId);
+        var msgRef = _msgLog.ApplyPin(pin);
         if (msgRef is null || msgRef.Deleted) return;
-        msgRef.Pinned = pin.IsPinned;
         var line = RenderMessage(msgRef);
         _app.Invoke(() => _log.TryReplace(pin.MessageId, line));
     }
 
-    private void ApplyReaction(ChatReactionDto react, bool add)
+    private void OnReactionEvent(ChatReactionDto react, bool add)
     {
-        if (!_reactions.TryGetValue(react.MessageId, out var map))
-        {
-            if (!add) return;
-            map = new Dictionary<string, HashSet<long>>();
-            _reactions[react.MessageId] = map;
-        }
-        if (!map.TryGetValue(react.Emoji, out var users))
-        {
-            if (!add) return;
-            users = new HashSet<long>();
-            map[react.Emoji] = users;
-        }
-        if (add) users.Add(react.UserId); else users.Remove(react.UserId);
-        if (users.Count == 0) map.Remove(react.Emoji);
-        if (map.Count == 0) _reactions.Remove(react.MessageId);
+        // Filter to messages on screen in this thread view so we don't accumulate state
+        // for unrelated messages in the same channel.
+        if (!_msgLog.Contains(react.MessageId)) return;
+        _msgLog.ApplyReaction(react, add);
         PushReactionFooter(react.MessageId);
     }
 
     private void PushReactionFooter(long messageId)
     {
-        var summaries = BuildSummaries(messageId);
+        var summaries = _msgLog.BuildSummaries(messageId, _user.Id);
         _app.Invoke(() => _log.TrySetReactions(messageId, summaries));
-    }
-
-    private IReadOnlyList<ReactionSummary> BuildSummaries(long messageId)
-    {
-        if (!_reactions.TryGetValue(messageId, out var map) || map.Count == 0)
-            return Array.Empty<ReactionSummary>();
-        return map.Select(kv => new ReactionSummary(kv.Key, kv.Value.Count, kv.Value.Contains(_user.Id)))
-                  .OrderByDescending(s => s.Count)
-                  .ThenBy(s => s.Emoji, StringComparer.Ordinal)
-                  .ToArray();
     }
 
     private void ApplyReactionSnapshot(long messageId, IReadOnlyDictionary<long, List<MessageReaction>> snap)
     {
         if (!snap.TryGetValue(messageId, out var rows)) return;
-        var map = new Dictionary<string, HashSet<long>>();
-        foreach (var r in rows)
-        {
-            if (!map.TryGetValue(r.Emoji, out var set))
-            {
-                set = new HashSet<long>();
-                map[r.Emoji] = set;
-            }
-            set.Add(r.UserId);
-        }
-        if (map.Count == 0) return;
-        _reactions[messageId] = map;
+        _msgLog.SeedReactions(messageId, rows);
         PushReactionFooter(messageId);
     }
 
     private void AddMessage(MessageRef msgRef)
     {
-        _recent.Add(msgRef);
+        _msgLog.Add(msgRef);
         AppendOnUiThread(RenderMessage(msgRef), msgRef.MessageId);
     }
 
@@ -483,8 +416,8 @@ public sealed class ChatThreadScreen : BbsWindow
     {
         msgRef = default!;
         var idx = positionOneBased - 1;
-        if (idx < 0 || idx >= _recent.Count) return false;
-        msgRef = _recent[idx];
+        if (idx < 0 || idx >= _msgLog.Count) return false;
+        msgRef = _msgLog.Messages[idx];
         return true;
     }
 
@@ -540,21 +473,6 @@ public sealed class ChatThreadScreen : BbsWindow
         }
     }
 
-    private static bool TryDeserialize<T>(JsonElement element, out T result) where T : class
-    {
-        try
-        {
-            var r = element.Deserialize<T>();
-            result = r!;
-            return r is not null;
-        }
-        catch
-        {
-            result = null!;
-            return false;
-        }
-    }
-
     private ChatLine RenderMessage(MessageRef msgRef)
     {
         var clock = _user.FormatClock(msgRef.At);
@@ -593,14 +511,4 @@ public sealed class ChatThreadScreen : BbsWindow
         base.Dispose(disposing);
     }
 
-    private sealed class MessageRef
-    {
-        public required long MessageId { get; init; }
-        public required string Handle { get; init; }
-        public required DateTimeOffset At { get; init; }
-        public required string Body { get; set; }
-        public bool Edited { get; set; }
-        public bool Pinned { get; set; }
-        public bool Deleted { get; set; }
-    }
 }
