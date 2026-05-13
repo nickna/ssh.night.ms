@@ -49,7 +49,7 @@ internal sealed class ChatInputPreview : View
                 if (col >= width) return true;
                 if (rune.Value == '\n' || rune.Value == '\r') return true;
                 AddRune(col, 0, rune);
-                col += Math.Max(1, RuneWidth(rune));
+                col += Math.Max(1, RuneWidths.Of(rune));
             }
         }
         return true;
@@ -64,20 +64,6 @@ internal sealed class ChatInputPreview : View
         if (run.Style.HasFlag(ArtStyle.Italic))    ts |= TextStyle.Italic;
         if (run.Style.HasFlag(ArtStyle.Underline)) ts |= TextStyle.Underline;
         return new Attribute(fg, bg, ts);
-    }
-
-    // Matches ChatLogView's heuristic — keep them in lock-step so the preview's column
-    // accounting tracks the rendered message.
-    private static int RuneWidth(Rune r)
-    {
-        var v = r.Value;
-        if (v < 0x300) return 1;
-        if (v >= 0x1F300 && v <= 0x1FAFF) return 2;
-        if (v >= 0x2600 && v <= 0x27BF)   return 2;
-        if (v >= 0x3000 && v <= 0x9FFF)   return 2;
-        if (v >= 0xFE30 && v <= 0xFE4F)   return 2;
-        if (v >= 0xFF00 && v <= 0xFF60)   return 2;
-        return 1;
     }
 
     private static readonly Attribute Default = new(

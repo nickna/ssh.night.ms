@@ -182,7 +182,7 @@ internal sealed class ChatLogView : View
             {
                 if (col >= width) return;
                 AddRune(col, y, rune);
-                col += Math.Max(1, RuneWidth(rune));
+                col += Math.Max(1, RuneWidths.Of(rune));
             }
         }
     }
@@ -201,18 +201,6 @@ internal sealed class ChatLogView : View
             SetAttribute(new Attribute(fg, bg, style));
             AddRune(col, y, cell.Glyph);
         }
-    }
-
-    private static int RuneWidth(Rune r)
-    {
-        var v = r.Value;
-        if (v < 0x300) return 1;
-        if (v >= 0x1F300 && v <= 0x1FAFF) return 2;
-        if (v >= 0x2600 && v <= 0x27BF)   return 2;
-        if (v >= 0x3000 && v <= 0x9FFF)   return 2;
-        if (v >= 0xFE30 && v <= 0xFE4F)   return 2;
-        if (v >= 0xFF00 && v <= 0xFF60)   return 2;
-        return 1;
     }
 
     private void Relayout(int width)
@@ -362,7 +350,7 @@ internal sealed class ChatLogView : View
     {
         var total = 0;
         foreach (var r in s.EnumerateRunes())
-            total += Math.Max(1, RuneWidth(r));
+            total += Math.Max(1, RuneWidths.Of(r));
         return total;
     }
 
@@ -373,7 +361,7 @@ internal sealed class ChatLogView : View
         var idx = 0;
         foreach (var r in s.EnumerateRunes())
         {
-            var w = Math.Max(1, RuneWidth(r));
+            var w = Math.Max(1, RuneWidths.Of(r));
             if (col + w > maxColumns) return idx;
             col += w;
             idx += r.Utf16SequenceLength;

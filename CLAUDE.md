@@ -44,7 +44,7 @@ Order matters — schema must exist before bootstrap, and bootstrap must complet
 Built on `Microsoft.DevTunnels.Ssh` (NuGet). Two notable extensions live here:
 
 - `Crypto/Ed25519.cs` — adds ed25519 user-auth (DevTunnels ships RSA/ECDSA only). Built on `BouncyCastle.Cryptography`.
-- `Crypto/Curve25519KeyExchange.cs` — implemented but **disabled** at `BbsSshServer.cs:50`. DevTunnels' `KeyExchangeService.ComputeExchangeHash` wraps `Q_C`/`Q_S` as bigints, which breaks RFC 8731 for X25519 keys with the high bit set. Clients fall back to `ecdh-sha2-nistp256` cleanly. Re-enabling needs an upstream patch — don't toggle it back on without one.
+- `Crypto/Curve25519KeyExchange.cs` — implemented but gated behind `BbsSshServerOptions.EnableCurve25519KeyExchange` (off by default). DevTunnels' `KeyExchangeService.ComputeExchangeHash` wraps `Q_C`/`Q_S` as bigints, which breaks RFC 8731 for X25519 keys with the high bit set. Clients fall back to `ecdh-sha2-nistp256` cleanly. Re-enabling needs an upstream patch — don't flip the flag on without one.
 
 `BbsSshServer` exposes a `SessionStarted` event raised after `shell` is requested on a `session` channel. Other channel types and port forwarding are rejected (`OnChannelOpening`). Public-key auth flows through `_options.AuthLookup` (a delegate — `AuthLookupService.LookupAsync` provides the implementation).
 

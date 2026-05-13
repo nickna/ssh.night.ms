@@ -42,13 +42,15 @@ public sealed class BbsSshServer : IAsyncDisposable
         config.AuthenticationMethods.Clear();
         config.AuthenticationMethods.Add(AuthenticationMethods.PublicKey);
 
-        // Register ed25519 client-key support. DevTunnels' KeyExchangeService composes the
-        // exchange hash with all values (Q_C, Q_S, K) wrapped as bigints — that matches
-        // ECDH P-curve points but breaks RFC 8731 which requires Q_C/Q_S as strings for
-        // curve25519-sha256. Clients fall back to ecdh-sha2-nistp256 which works correctly.
-        // Re-enabling curve25519-sha256 needs an upstream fix in DevTunnels.
+        // Register ed25519 client-key support. Curve25519-sha256 key exchange is gated behind
+        // an opt-in flag because DevTunnels' KeyExchangeService composes the exchange hash
+        // with all values wrapped as bigints — breaks RFC 8731 for X25519. See
+        // BbsSshServerOptions.EnableCurve25519KeyExchange for the full caveat.
         config.PublicKeyAlgorithms.Add(new Ed25519PublicKeyAlgorithm());
-        // config.KeyExchangeAlgorithms.Add(new Curve25519KeyExchangeAlgorithm());
+        if (_options.EnableCurve25519KeyExchange)
+        {
+            config.KeyExchangeAlgorithms.Add(new Curve25519KeyExchangeAlgorithm());
+        }
 
         var trace = new TraceSource(nameof(BbsSshServer));
         _server = new IpCapturingTcpSshServer(config, trace, _logger)

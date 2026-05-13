@@ -18,4 +18,14 @@ public sealed class BbsSshServerOptions
     /// the decision is attached to <see cref="BbsSession.AuthDecision"/> for the TUI to dispatch on.
     /// </summary>
     public required Func<AuthQuery, CancellationToken, Task<AuthDecision>> AuthLookup { get; init; }
+
+    /// <summary>
+    /// Register curve25519-sha256 as a key exchange option. <b>OFF by default</b> because
+    /// DevTunnels' <c>KeyExchangeService.ComputeExchangeHash</c> wraps <c>Q_C</c>/<c>Q_S</c>
+    /// as bigints, which breaks RFC 8731 for X25519 keys with the high bit set. Clients fall
+    /// back to <c>ecdh-sha2-nistp256</c> cleanly. The Curve25519 math + tests are still in
+    /// the assembly so the implementation stays validated; only the algorithm registration is
+    /// gated. Do not flip this on without an upstream DevTunnels fix.
+    /// </summary>
+    public bool EnableCurve25519KeyExchange { get; init; }
 }

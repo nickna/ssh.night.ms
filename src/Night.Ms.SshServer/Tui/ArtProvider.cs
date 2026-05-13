@@ -18,8 +18,12 @@ public sealed class ArtProvider
         " ║                                                  ║\n" +
         " ╙──────────────────────────────────────────────────╜";
 
-    // Monochrome text fallback — always populated. Callers should prefer Grid when IsColor is true.
+    // Monochrome text fallback. Only meaningful when IsColor is false — when a .ans file
+    // parsed successfully, this is set to DefaultArt as a "if you ignore IsColor, here's a
+    // non-empty placeholder so you don't crash" safety net; the real content is in Grid.
+    // Branch on IsColor in the caller — every screen does.
     public string Art { get; }
+    // Display rows of the rendered banner — Grid.Height when IsColor, line count of Art otherwise.
     public int LineCount { get; }
 
     // Non-null when the configured asset parsed successfully as a colorful .ans file.

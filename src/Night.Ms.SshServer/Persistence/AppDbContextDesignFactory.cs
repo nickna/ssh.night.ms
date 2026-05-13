@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace Night.Ms.SshServer.Persistence;
 
 // Used only by `dotnet ef migrations add` / `dotnet ef database update` at design time.
-// Aspire wires the real connection string at runtime via AddNpgsqlDbContext.
+// The runtime app reads ConnectionStrings:bbs from configuration (set by run.ps1 / appsettings);
+// this hard-coded localhost connection only needs to point at any Postgres reachable for
+// scaffolding, not the production database.
 internal sealed class AppDbContextDesignFactory : IDesignTimeDbContextFactory<AppDbContext>
 {
     public AppDbContext CreateDbContext(string[] args)
