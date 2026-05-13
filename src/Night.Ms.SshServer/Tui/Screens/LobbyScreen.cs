@@ -14,6 +14,16 @@ public sealed class LobbyScreen : BbsWindow
 {
     private readonly IApplication _app;
 
+    // The button row + its key bindings used to live in two parallel hand-rolled lists. They're
+    // table-driven now so a tenth destination is one row and the layout-chain skip for invisible
+    // buttons (e.g. _Sysop for non-sysops) happens in one place.
+    private readonly record struct LobbyEntry(
+        string Label,
+        Key Hotkey,
+        LobbyNavigation Target,
+        bool Visible = true,
+        bool IsDefault = false);
+
     public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, ArtProvider art)
         : base(app, services, user)
     {
@@ -53,125 +63,38 @@ public sealed class LobbyScreen : BbsWindow
         };
         hint.SetScheme(BbsTheme.Hint);
 
-        var chat = new Button
+        Add(artView, welcome, hint);
+
+        var entries = new[]
         {
-            X = 2,
-            Y = contentTop + 4,
-            Text = "_Chat (#lobby)",
-            IsDefault = true,
-        };
-        chat.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Chat;
-            _app.RequestStop();
+            new LobbyEntry("_Chat (#lobby)", Key.C, LobbyNavigation.Chat, IsDefault: true),
+            new LobbyEntry("_Boards",        Key.B, LobbyNavigation.Boards),
+            new LobbyEntry("_Profile",       Key.P, LobbyNavigation.Profile),
+            new LobbyEntry("_News",          Key.N, LobbyNavigation.News),
+            new LobbyEntry("Bro_wser",       Key.W, LobbyNavigation.Browser),
+            new LobbyEntry("_Gallery",       Key.G, LobbyNavigation.Gallery),
+            new LobbyEntry("_Map",           Key.M, LobbyNavigation.Map),
+            new LobbyEntry("_Sysop",         Key.S, LobbyNavigation.Sysop, Visible: user.IsSysop),
+            new LobbyEntry("_Logout",        Key.L, LobbyNavigation.Logout),
         };
 
-        var boards = new Button
+        Button? prevVisible = null;
+        foreach (var entry in entries)
         {
-            X = Pos.Right(chat) + 2,
-            Y = contentTop + 4,
-            Text = "_Boards",
-        };
-        boards.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Boards;
-            _app.RequestStop();
-        };
-
-        var profile = new Button
-        {
-            X = Pos.Right(boards) + 2,
-            Y = contentTop + 4,
-            Text = "_Profile",
-        };
-        profile.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Profile;
-            _app.RequestStop();
-        };
-
-        var news = new Button
-        {
-            X = Pos.Right(profile) + 2,
-            Y = contentTop + 4,
-            Text = "_News",
-        };
-        news.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.News;
-            _app.RequestStop();
-        };
-
-        var browser = new Button
-        {
-            X = Pos.Right(news) + 2,
-            Y = contentTop + 4,
-            Text = "Bro_wser",
-        };
-        browser.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Browser;
-            _app.RequestStop();
-        };
-
-        var gallery = new Button
-        {
-            X = Pos.Right(browser) + 2,
-            Y = contentTop + 4,
-            Text = "_Gallery",
-        };
-        gallery.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Gallery;
-            _app.RequestStop();
-        };
-
-        var map = new Button
-        {
-            X = Pos.Right(gallery) + 2,
-            Y = contentTop + 4,
-            Text = "_Map",
-        };
-        map.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Map;
-            _app.RequestStop();
-        };
-
-        var sysopButton = new Button
-        {
-            X = Pos.Right(map) + 2,
-            Y = contentTop + 4,
-            Text = "_Sysop",
-            Visible = user.IsSysop,
-            Enabled = user.IsSysop,
-        };
-        sysopButton.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Sysop;
-            _app.RequestStop();
-        };
-
-        var logout = new Button
-        {
-            X = user.IsSysop ? Pos.Right(sysopButton) + 2 : Pos.Right(map) + 2,
-            Y = contentTop + 4,
-            Text = "_Logout",
-        };
-        logout.Accepting += (_, e) =>
-        {
-            e.Handled = true;
-            Result = LobbyNavigation.Logout;
-            _app.RequestStop();
-        };
+            var btn = new Button
+            {
+                X = prevVisible is null ? 2 : Pos.Right(prevVisible) + 2,
+                Y = contentTop + 4,
+                Text = entry.Label,
+                IsDefault = entry.IsDefault,
+                Visible = entry.Visible,
+                Enabled = entry.Visible,
+            };
+            var target = entry.Target;
+            btn.Accepting += (_, e) => { e.Handled = true; Choose(target); };
+            Add(btn);
+            if (entry.Visible) prevVisible = btn;
+        }
 
         var sysopBadge = new Label
         {
@@ -180,66 +103,30 @@ public sealed class LobbyScreen : BbsWindow
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
-
-        Add(artView, welcome, hint, chat, boards, profile, news, browser, gallery, map, sysopButton, logout, sysopBadge);
+        Add(sysopBadge);
 
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
+            if (key == Key.Esc)        { key.Handled = true; Choose(LobbyNavigation.Logout); return; }
+            // Enter from anywhere on the lobby jumps into chat — saves a Tab dance.
+            if (key == Key.Enter)      { key.Handled = true; Choose(LobbyNavigation.Chat); return; }
+
+            foreach (var entry in entries)
             {
-                Result = LobbyNavigation.Logout;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.Enter)
-            {
-                // Enter from anywhere on the lobby jumps into chat — saves a Tab dance.
-                Result = LobbyNavigation.Chat;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.B || key == Key.B.WithShift)
-            {
-                Result = LobbyNavigation.Boards;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.P || key == Key.P.WithShift)
-            {
-                Result = LobbyNavigation.Profile;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.N || key == Key.N.WithShift)
-            {
-                Result = LobbyNavigation.News;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.G || key == Key.G.WithShift)
-            {
-                Result = LobbyNavigation.Gallery;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.M || key == Key.M.WithShift)
-            {
-                Result = LobbyNavigation.Map;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.W || key == Key.W.WithShift)
-            {
-                Result = LobbyNavigation.Browser;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (user.IsSysop && (key == Key.S || key == Key.S.WithShift))
-            {
-                Result = LobbyNavigation.Sysop;
-                _app.RequestStop();
-                key.Handled = true;
+                if (!entry.Visible) continue;
+                if (key == entry.Hotkey || key == entry.Hotkey.WithShift)
+                {
+                    key.Handled = true;
+                    Choose(entry.Target);
+                    return;
+                }
             }
         };
+    }
+
+    private void Choose(LobbyNavigation target)
+    {
+        Result = target;
+        _app.RequestStop();
     }
 }
