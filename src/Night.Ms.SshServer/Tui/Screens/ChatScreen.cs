@@ -52,6 +52,7 @@ public sealed class ChatScreen : BbsWindow
     private readonly FrameView _channelsPane;
     private readonly ListView _channelsList;
     private readonly TextField _input;
+    private readonly ChatInputPreview _preview;
     private readonly Label _status;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<long, string> _drafts = new();
@@ -150,10 +151,21 @@ public sealed class ChatScreen : BbsWindow
         };
         _status.SetScheme(BbsTheme.Status);
 
-        _input = new TextField
+        // One-row preview shown above the input while the buffer is non-empty. Starts hidden
+        // with Height=0 so it doesn't reserve a row at chat-empty rest.
+        _preview = new ChatInputPreview
         {
             X = 0,
             Y = Pos.Bottom(_status),
+            Width = Dim.Fill(),
+            Height = 0,
+            Visible = false,
+        };
+
+        _input = new TextField
+        {
+            X = 0,
+            Y = Pos.Bottom(_preview),
             Width = Dim.Fill(),
         };
         _input.SetScheme(BbsTheme.Input);
@@ -168,6 +180,7 @@ public sealed class ChatScreen : BbsWindow
                 {
                     _input.Text = string.Empty;
                     _drafts.TryRemove(_currentChannel.Id, out string? _);
+                    UpdatePreview();
                     _ = HandleInputAsync(text);
                 }
                 return;
@@ -180,9 +193,11 @@ public sealed class ChatScreen : BbsWindow
             // Every non-scroll, non-Enter keystroke is a typing signal. Debounced inside
             // MaybePublishTypingAsync so we don't fan out 1 event per character.
             _ = MaybePublishTypingAsync();
+            // Defer so TextField has already applied the keystroke when we re-read Text.
+            _app.Invoke(UpdatePreview);
         };
 
-        Add(_channelsPane, _log, _sidebar, _status, _input);
+        Add(_channelsPane, _log, _sidebar, _status, _preview, _input);
         _input.SetFocus();
 
         KeyDown += (_, key) =>
@@ -658,7 +673,7 @@ public sealed class ChatScreen : BbsWindow
 
         var stashed = (_input.Text ?? string.Empty).ToString();
         if (!string.IsNullOrEmpty(stashed)) _drafts[_currentChannel.Id] = stashed;
-        _app.Invoke(() => _input.Text = string.Empty);
+        _app.Invoke(() => { _input.Text = string.Empty; UpdatePreview(); });
 
         // Let the prior channel's presence/message/heartbeat tasks know we're moving.
         await TeardownChannelTasksAsync();
@@ -677,6 +692,7 @@ public sealed class ChatScreen : BbsWindow
             _log.Clear();
             _log.Append(MessageRenderer.RenderSystem($"--- {verb} {label} ---"));
             if (_drafts.TryGetValue(target.Id, out var draft)) _input.Text = draft;
+            UpdatePreview();
         });
         UpdateChrome();
         await LoadHistoryAndSubscribeAsync();
@@ -1342,6 +1358,38 @@ public sealed class ChatScreen : BbsWindow
         _status.Text = text;
         _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Status);
     });
+
+    // Recomputes the preview row from the current buffer. Toggles the row's Height/Visible
+    // (and the log's Fill margin) so the row collapses entirely when the buffer is empty.
+    // Cheap — regex pass on a short string per keystroke.
+    private void UpdatePreview()
+    {
+        var text = _input.Text ?? string.Empty;
+        if (string.IsNullOrEmpty(text))
+        {
+            if (_preview.Visible)
+            {
+                _preview.SetLine(null);
+                _preview.Visible = false;
+                _preview.Height = 0;
+                _log.Height = Dim.Fill(3);
+                SetNeedsLayout();
+            }
+            return;
+        }
+
+        var line = text.StartsWith("/", StringComparison.Ordinal)
+            ? CommandHighlighter.Highlight(text, _user.Handle)
+            : MessageRenderer.PreviewBody(text, _user.Handle);
+        _preview.SetLine(line);
+        if (!_preview.Visible)
+        {
+            _preview.Visible = true;
+            _preview.Height = 1;
+            _log.Height = Dim.Fill(4);
+            SetNeedsLayout();
+        }
+    }
 
     private void AppendSystem(string text, bool isError = false) =>
         AppendOnUiThread(MessageRenderer.RenderSystem(text, isError));

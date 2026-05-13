@@ -124,6 +124,17 @@ internal static class MessageRenderer
     public static ChatLine RenderRaw(string text) =>
         new(new[] { ChatRun.Plain(text) });
 
+    // Body-only render with no chrome — used by the input-preview row so the user sees how
+    // *bold*/_italic_/`code`/@mention/:emoji: will paint before they press Enter. The
+    // returned ChatLine carries the same SelfMentioned flag as RenderMessage so the caller
+    // can wire mention feedback if it wants.
+    public static ChatLine PreviewBody(string text, string selfHandle)
+    {
+        var runs = new List<ChatRun>(4);
+        var selfMentioned = AppendBodyRuns(runs, text ?? string.Empty, selfHandle);
+        return new ChatLine(runs, selfMentioned);
+    }
+
     private static bool AppendBodyRuns(List<ChatRun> runs, string body, string selfHandle, ArtStyle baseStyle = ArtStyle.None)
     {
         var text = EmojiTable.Substitute(body ?? string.Empty);
