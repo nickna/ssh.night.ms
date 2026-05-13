@@ -31,15 +31,4 @@ internal sealed class SshChannelComponentFactory : ComponentFactoryImpl<char>
         => new AnsiInputProcessor(inputBuffer, timeProvider);
 
     public override IOutput CreateOutput() => new SshChannelOutput(_context.Output, _context.GetSize);
-
-    public static void EnsureRegistered()
-    {
-        if (DriverRegistry.IsRegistered(DriverName)) return;
-        DriverRegistry.Register(new DriverRegistry.DriverDescriptor(
-            DriverName,
-            "SSH Channel Driver",
-            "Renders Terminal.Gui to a Microsoft.DevTunnels.Ssh channel stream for ssh.night.ms BBS sessions.",
-            [PlatformID.Win32NT, PlatformID.Unix, PlatformID.MacOSX],
-            () => new SshChannelComponentFactory()));
-    }
 }

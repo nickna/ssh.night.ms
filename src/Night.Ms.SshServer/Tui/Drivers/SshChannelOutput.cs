@@ -12,17 +12,13 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
 {
     private readonly Stream _stream;
     private readonly Func<Size> _getSize;
-    private readonly StringBuilder _lastOutputCapture = new();
-    private bool _clearLastOutputPending;
     private Cursor _currentCursor = new();
-    private Size _lastReportedSize;
     private bool _disposed;
 
     public SshChannelOutput(Stream stream, Func<Size> getSize)
     {
         _stream = stream;
         _getSize = getSize;
-        _lastReportedSize = getSize();
 
         // SSH clients with a PTY always handle modern ANSI sequences; we don't need legacy console.
         IsLegacyConsole = false;
@@ -38,7 +34,10 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
 
     public Size GetSize() => _getSize();
 
-    public void SetSize(int width, int height) => _lastReportedSize = new Size(width, height);
+    public void SetSize(int width, int height)
+    {
+        // Driven by the SSH window-change request via _getSize; this hook is unused.
+    }
 
     public Cursor GetCursor() => _currentCursor;
 
@@ -71,24 +70,13 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         // SSH sessions don't suspend the way local terminals do.
     }
 
-    public void Write(ReadOnlySpan<char> text)
-    {
-        var sb = new StringBuilder();
-        sb.Append(text);
-        WriteToBuffer(sb);
-        WriteRawCore(text);
-    }
+    public void Write(ReadOnlySpan<char> text) => WriteRawCore(text);
 
     public override void Write(IOutputBuffer buffer)
     {
-        _clearLastOutputPending = true;
         base.Write(buffer);
         Flush();
     }
-
-    public override string GetLastOutput() => _lastOutputCapture.ToString();
-
-    public new string ToAnsi(IOutputBuffer buffer) => base.ToAnsi(buffer);
 
     protected override bool SetCursorPositionImpl(int screenPositionX, int screenPositionY)
     {
@@ -101,11 +89,7 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         return true;
     }
 
-    protected override void Write(StringBuilder output)
-    {
-        WriteToBuffer(output);
-        WriteRawCore(output.ToString().AsSpan());
-    }
+    protected override void Write(StringBuilder output) => WriteRawCore(output.ToString().AsSpan());
 
     private void WriteRaw(string text)
     {
@@ -125,16 +109,6 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         {
             // The channel may have closed under us — swallow so the main loop can shut down cleanly.
         }
-    }
-
-    private void WriteToBuffer(StringBuilder output)
-    {
-        if (_clearLastOutputPending)
-        {
-            _lastOutputCapture.Clear();
-            _clearLastOutputPending = false;
-        }
-        _lastOutputCapture.Append(output);
     }
 
     private void Flush()
