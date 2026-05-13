@@ -82,7 +82,9 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
         if (msg is null) return Result.NotFoundInstance;
-        if (msg.UserId != actorUserId) return new Result.Forbidden("You can only edit your own messages.");
+        var isSysop = await IsSysopAsync(db, actorUserId, ct);
+        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, isSysop))
+            return new Result.Forbidden("You can only edit your own messages.");
         if (msg.DeletedAt is not null) return new Result.Forbidden("This message was deleted.");
         if (msg.Body == newBody) return Result.OkInstance;
 
@@ -103,7 +105,9 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
         if (msg is null) return Result.NotFoundInstance;
-        if (msg.UserId != actorUserId) return new Result.Forbidden("You can only delete your own messages.");
+        var isSysop = await IsSysopAsync(db, actorUserId, ct);
+        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, isSysop))
+            return new Result.Forbidden("You can only delete your own messages.");
         if (msg.DeletedAt is not null) return Result.OkInstance;
 
         msg.DeletedAt = DateTimeOffset.UtcNow;
@@ -223,7 +227,8 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
         if (channel is null) return Result.NotFoundInstance;
-        if (channel.CreatedById is { } creatorId && creatorId != actorUserId)
+        var isSysop = await IsSysopAsync(db, actorUserId, ct);
+        if (!ChatAuthorization.CanSetChannelTopic(channel, actorUserId, isSysop))
         {
             return new Result.Forbidden("Only the channel creator can set the topic.");
         }
@@ -345,5 +350,17 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         var envelope = new ChatEnvelope(kind, JsonSerializer.SerializeToElement(payload));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
         await bus.PublishAsync(ChatTopics.Channel(channelId), bytes, ct);
+    }
+
+    // PK lookup of the sysop bit. One extra query per mutation method that does an authz
+    // check; cheap, and keeps the public surface taking `long actorUserId` so callers don't
+    // have to thread a User object through every call site.
+    private static async Task<bool> IsSysopAsync(AppDbContext db, long actorUserId, CancellationToken ct)
+    {
+        var row = await db.Users.AsNoTracking()
+            .Where(u => u.Id == actorUserId)
+            .Select(u => new { u.IsSysop })
+            .FirstOrDefaultAsync(ct);
+        return row?.IsSysop ?? false;
     }
 }
