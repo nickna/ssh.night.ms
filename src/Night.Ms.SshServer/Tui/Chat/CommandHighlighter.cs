@@ -1,4 +1,5 @@
 using Night.Ms.SshServer.Tui.Art;
+using ArgKind = Night.Ms.SshServer.Tui.Chat.SlashCommands.ArgKind;
 
 namespace Night.Ms.SshServer.Tui.Chat;
 
@@ -13,40 +14,6 @@ namespace Night.Ms.SshServer.Tui.Chat;
 // Pure data — no Terminal.Gui dependency — so the tests can assert on the run list directly.
 internal static class CommandHighlighter
 {
-    private enum ArgKind
-    {
-        Channel, // /join #lobby
-        Handle,  // /dm alice, /finger alice
-        Integer, // /react <n>, /pin <n>, /edit <n>, ...
-        Emoji,   // /react n :+1: or /react n 👍
-        Body,    // tail-of-line free text, inline-formatted
-        Term,    // tail-of-line search term, no inline format
-    }
-
-    private static readonly Dictionary<string, ArgKind[]> Verbs = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["/help"]    = Array.Empty<ArgKind>(),
-        ["/?"]       = Array.Empty<ArgKind>(),
-        ["/quit"]    = Array.Empty<ArgKind>(),
-        ["/exit"]    = Array.Empty<ArgKind>(),
-        ["/who"]     = Array.Empty<ArgKind>(),
-        ["/pins"]    = Array.Empty<ArgKind>(),
-        ["/join"]    = new[] { ArgKind.Channel },
-        ["/dm"]      = new[] { ArgKind.Handle },
-        ["/finger"]  = new[] { ArgKind.Handle },
-        ["/me"]      = new[] { ArgKind.Body },
-        ["/topic"]   = new[] { ArgKind.Body },
-        ["/search"]  = new[] { ArgKind.Term },
-        ["/react"]   = new[] { ArgKind.Integer, ArgKind.Emoji },
-        ["/unreact"] = new[] { ArgKind.Integer, ArgKind.Emoji },
-        ["/pin"]     = new[] { ArgKind.Integer },
-        ["/unpin"]   = new[] { ArgKind.Integer },
-        ["/del"]     = new[] { ArgKind.Integer },
-        ["/delete"]  = new[] { ArgKind.Integer },
-        ["/edit"]    = new[] { ArgKind.Integer, ArgKind.Body },
-        ["/reply"]   = new[] { ArgKind.Integer, ArgKind.Body },
-    };
-
     // Cyan accents match MessageRenderer's mention color so the eye groups command-mode
     // and chat-mode highlighting into one palette.
     private static readonly ArtColor VerbKnownFg   = new(0x6C, 0xC0, 0xFF);
@@ -67,7 +34,7 @@ internal static class CommandHighlighter
         // Carve off the verb (up to first space or EOL).
         var spaceIdx = text.IndexOf(' ');
         var verbText = spaceIdx < 0 ? text : text[..spaceIdx];
-        var known = Verbs.TryGetValue(verbText, out var argKinds);
+        var known = SlashCommands.Verbs.TryGetValue(verbText, out var argKinds);
         runs.Add(new ChatRun(verbText, known ? VerbKnownFg : VerbUnknownFg, ArtStyle.Bold));
 
         var i = spaceIdx < 0 ? text.Length : spaceIdx;

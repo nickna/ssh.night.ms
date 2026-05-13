@@ -22,6 +22,57 @@ public sealed class ChatMutationService(IServiceProvider services)
         public static readonly NotFound NotFoundInstance = new();
     }
 
+    // Insert a new chat message and fan it out to the channel topic. The screen used to do
+    // both halves inline; centralizing keeps the body length / channel-access invariants in
+    // one place and eliminates the direct DbContext write from the UI layer.
+    public async Task<PostResult> PostAsync(
+        long channelId,
+        long actorUserId,
+        string actorHandle,
+        string body,
+        long? parentMessageId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return new PostResult.Invalid("Empty message.");
+        if (body.Length > 2000)              return new PostResult.Invalid("Message too long.");
+
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        if (channel is null) return new PostResult.NotFound();
+        if (channel.IsPrivate)
+        {
+            var isMember = await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserId == actorUserId, ct);
+            if (!isMember) return new PostResult.Forbidden("You no longer have access to this channel.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var msg = new ChatMessage
+        {
+            ChannelId = channelId,
+            UserId = actorUserId,
+            Body = body,
+            CreatedAt = now,
+            ParentMessageId = parentMessageId,
+        };
+        db.ChatMessages.Add(msg);
+        await db.SaveChangesAsync(ct);
+
+        var bus = scope.ServiceProvider.GetRequiredService<IRealtimeBus>();
+        await PublishEnvelopeAsync(bus, channelId, ChatEventKind.Message,
+            new ChatMessageDto(msg.Id, channelId, actorUserId, actorHandle, body, now, parentMessageId), ct);
+        return new PostResult.Posted(msg.Id, now);
+    }
+
+    public abstract record PostResult
+    {
+        public sealed record Posted(long MessageId, DateTimeOffset At) : PostResult;
+        public sealed record Forbidden(string Reason) : PostResult;
+        public sealed record Invalid(string Reason) : PostResult;
+        public sealed record NotFound : PostResult;
+    }
+
     // Edit the body of an existing message. Author-only — sysop override is intentionally
     // not modeled here yet; the moderation surface is separate (audit_log + bans). A no-op
     // edit (body unchanged) returns Ok without writing to keep the audit signal clean.

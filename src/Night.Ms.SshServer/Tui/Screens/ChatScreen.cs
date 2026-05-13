@@ -247,29 +247,7 @@ public sealed class ChatScreen : BbsWindow
         {
             case "/help":
             case "/?":
-                AppendSystem(
-                    "Commands:\n" +
-                    "  /join #channel       switch to (or auto-create) a public channel\n" +
-                    "  /dm <handle>         open a direct message with another user\n" +
-                    "  /me <action>         emote in third-person (italic)\n" +
-                    "  /react <n> :emoji:   add a reaction to message n (1 = most recent)\n" +
-                    "  /unreact <n> :emoji: remove your reaction from message n\n" +
-                    "  /reply <n> <body>    post a threaded reply to message n\n" +
-                    "  /thread <n>          open a focused view of message n + its replies\n" +
-                    "  /edit <n> <body>     edit your message at position n\n" +
-                    "  /del <n>             delete your message at position n\n" +
-                    "  /pin <n>             pin message n (★ marker, listed by /pins)\n" +
-                    "  /unpin <n>           remove the pin marker\n" +
-                    "  /pins                list all pinned messages in this channel\n" +
-                    "  /topic <text>        set the channel topic (channel creator only)\n" +
-                    "  /search <term>       search recent messages in this channel\n" +
-                    "  /who                 show who's in this channel\n" +
-                    "  /finger <handle>     print a user's profile inline\n" +
-                    "  /quit                leave chat (back to lobby)\n" +
-                    "  /help                show this help\n" +
-                    "Formatting: *bold*  _italic_  `code`  @mention  :emoji:\n" +
-                    "Scrollback: PgUp / PgDn   |   jump to ends: Ctrl+Home / Ctrl+End\n" +
-                    "Switch channel: Alt+1..Alt+9 (slot number in left sidebar; Alt+0 = 10)");
+                AppendSystem(SlashCommands.HelpText);
                 return;
 
             case "/quit":
@@ -1336,36 +1314,16 @@ public sealed class ChatScreen : BbsWindow
 
     private async Task SendMessageAsync(string body, long? parentMessageId = null)
     {
-        var chat = _services.GetRequiredService<ChatService>();
-        if (!await chat.CanAccessAsync(_currentChannel.Id, _user.Id, _shutdown.Token))
-        {
-            SetStatus("[!] You no longer have access to this channel.");
-            return;
-        }
-
         try
         {
-            var now = DateTimeOffset.UtcNow;
-            await using var scope = _services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var msg = new ChatMessage
+            var muts = _services.GetRequiredService<ChatMutationService>();
+            var result = await muts.PostAsync(_currentChannel.Id, _user.Id, _user.Handle, body, parentMessageId, _shutdown.Token);
+            switch (result)
             {
-                ChannelId = _currentChannel.Id,
-                UserId = _user.Id,
-                Body = body,
-                CreatedAt = now,
-                ParentMessageId = parentMessageId,
-            };
-            db.ChatMessages.Add(msg);
-            await db.SaveChangesAsync(_shutdown.Token);
-
-            var bus = scope.ServiceProvider.GetRequiredService<IRealtimeBus>();
-            var dto = new ChatMessageDto(msg.Id, _currentChannel.Id, _user.Id, _user.Handle, body, now, parentMessageId);
-            var envelope = new ChatEnvelope(ChatEventKind.Message, JsonSerializer.SerializeToElement(dto));
-            await bus.PublishAsync(
-                ChatTopics.Channel(_currentChannel.Id),
-                JsonSerializer.SerializeToUtf8Bytes(envelope),
-                _shutdown.Token);
+                case ChatMutationService.PostResult.Forbidden f: SetStatus($"[!] {f.Reason}"); break;
+                case ChatMutationService.PostResult.Invalid i:   SetStatus($"[!] {i.Reason}"); break;
+                case ChatMutationService.PostResult.NotFound:    SetStatus("[!] Channel no longer exists."); break;
+            }
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
