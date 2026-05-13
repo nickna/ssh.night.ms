@@ -20,10 +20,17 @@ var builder = Host.CreateApplicationBuilder(args);
 //    (DatabaseInitializer, NewTopicScreen, etc.).
 //  - AddDbContextFactory (singleton) — for stateless realtime services that previously
 //    opened a fresh scope on every public method just to resolve AppDbContext.
+//
+// The factory must be a singleton (it has no scope to live in) — which means the shared
+// DbContextOptions<AppDbContext> must also be Singleton. The optionsLifetime arg below
+// bumps it from the default Scoped to Singleton; runtime DI validation rejects the dual
+// registration otherwise.
 void ConfigureDb(DbContextOptionsBuilder opt) =>
     opt.UseNpgsql(builder.Configuration.GetConnectionString("bbs"))
        .UseSnakeCaseNamingConvention();
-builder.Services.AddDbContext<AppDbContext>(ConfigureDb);
+builder.Services.AddDbContext<AppDbContext>(ConfigureDb,
+    contextLifetime: ServiceLifetime.Scoped,
+    optionsLifetime: ServiceLifetime.Singleton);
 builder.Services.AddDbContextFactory<AppDbContext>(ConfigureDb, lifetime: ServiceLifetime.Singleton);
 
 // Redis. ConnectionMultiplexer is thread-safe and intended to be shared as a
