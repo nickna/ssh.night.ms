@@ -12,7 +12,6 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
 {
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
-    private IServiceProvider? _serviceProvider;
     private AuthLookupService? _sut;
 
     public AuthLookupServiceTests(PostgresFixture fixture) => _fixture = fixture;
@@ -20,19 +19,10 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     public async Task InitializeAsync()
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
-        // AuthLookupService opens a DI scope per call and resolves AppDbContext from it.
-        // Register the context directly with our pre-built options — no need for AddDbContext.
-        var services = new ServiceCollection();
-        services.AddScoped(_ => new AppDbContext(_dbOptions));
-        _serviceProvider = services.BuildServiceProvider();
-        _sut = new AuthLookupService(_serviceProvider, NullLogger<AuthLookupService>.Instance);
+        _sut = new AuthLookupService(new TestDbContextFactory(_dbOptions), NullLogger<AuthLookupService>.Instance);
     }
 
-    public Task DisposeAsync()
-    {
-        (_serviceProvider as IDisposable)?.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private static AuthQuery Query(string fingerprint, string handle = "guest", string algorithm = "ssh-ed25519") =>
         new(fingerprint, algorithm, PublicKeyBlob: [0xDE, 0xAD, 0xBE, 0xEF], Username: handle);

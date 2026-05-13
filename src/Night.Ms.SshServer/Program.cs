@@ -14,9 +14,17 @@ var builder = Host.CreateApplicationBuilder(args);
 // Postgres + EF Core. Connection string lives under ConnectionStrings:bbs (set by
 // run.ps1, or via appsettings in production). Snake-case convention matches the
 // existing migrations.
-builder.Services.AddDbContext<AppDbContext>(opt =>
+//
+// Register both:
+//  - AddDbContext (scoped) — for hosted services + screens that open their own scope
+//    (DatabaseInitializer, NewTopicScreen, etc.).
+//  - AddDbContextFactory (singleton) — for stateless realtime services that previously
+//    opened a fresh scope on every public method just to resolve AppDbContext.
+void ConfigureDb(DbContextOptionsBuilder opt) =>
     opt.UseNpgsql(builder.Configuration.GetConnectionString("bbs"))
-       .UseSnakeCaseNamingConvention());
+       .UseSnakeCaseNamingConvention();
+builder.Services.AddDbContext<AppDbContext>(ConfigureDb);
+builder.Services.AddDbContextFactory<AppDbContext>(ConfigureDb, lifetime: ServiceLifetime.Singleton);
 
 // Redis. ConnectionMultiplexer is thread-safe and intended to be shared as a
 // singleton across the whole app.

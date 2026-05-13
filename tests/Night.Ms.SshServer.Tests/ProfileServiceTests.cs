@@ -11,7 +11,6 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
 {
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
-    private IServiceProvider? _serviceProvider;
     private ProfileService? _sut;
 
     public ProfileServiceTests(PostgresFixture fixture) => _fixture = fixture;
@@ -19,11 +18,7 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
     public async Task InitializeAsync()
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
-        var services = new ServiceCollection();
-        services.AddScoped(_ => new AppDbContext(_dbOptions));
-        services.AddSingleton<IGeocodingProvider, StubGeocodingProvider>();
-        _serviceProvider = services.BuildServiceProvider();
-        _sut = new ProfileService(_serviceProvider);
+        _sut = new ProfileService(new TestDbContextFactory(_dbOptions), new StubGeocodingProvider());
     }
 
     // Geocoder stub that returns a single fixed hit for any non-empty query. Tests that
@@ -40,11 +35,7 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
             Task.FromResult<GeocodingMatch?>(new GeocodingMatch($"{latitude},{longitude}", latitude, longitude, null, null));
     }
 
-    public Task DisposeAsync()
-    {
-        (_serviceProvider as IDisposable)?.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private async Task<User> SeedUserAsync(string handle, bool isSysop = false)
     {

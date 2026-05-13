@@ -10,7 +10,6 @@ public class ReadStateServiceTests : IClassFixture<PostgresFixture>, IAsyncLifet
 {
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
-    private ServiceProvider? _services;
     private ReadStateService? _sut;
 
     public ReadStateServiceTests(PostgresFixture fixture) => _fixture = fixture;
@@ -18,17 +17,10 @@ public class ReadStateServiceTests : IClassFixture<PostgresFixture>, IAsyncLifet
     public async Task InitializeAsync()
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
-        var services = new ServiceCollection();
-        services.AddScoped(_ => new AppDbContext(_dbOptions));
-        _services = services.BuildServiceProvider();
-        _sut = new ReadStateService(_services);
+        _sut = new ReadStateService(new TestDbContextFactory(_dbOptions));
     }
 
-    public Task DisposeAsync()
-    {
-        _services?.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private async Task<User> SeedUserAsync(string handle)
     {

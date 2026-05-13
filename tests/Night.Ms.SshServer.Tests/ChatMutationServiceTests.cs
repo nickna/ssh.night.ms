@@ -11,7 +11,6 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
 {
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
-    private ServiceProvider? _services;
     private InMemoryRealtimeBus? _bus;
     private ChatMutationService? _sut;
 
@@ -21,18 +20,10 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
         _bus = new InMemoryRealtimeBus();
-        var services = new ServiceCollection();
-        services.AddScoped(_ => new AppDbContext(_dbOptions));
-        services.AddSingleton<IRealtimeBus>(_bus);
-        _services = services.BuildServiceProvider();
-        _sut = new ChatMutationService(_services);
+        _sut = new ChatMutationService(new TestDbContextFactory(_dbOptions), _bus);
     }
 
-    public Task DisposeAsync()
-    {
-        _services?.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private async Task<(User user, Channel channel, ChatMessage msg)> SeedMessageAsync(string handle, string body)
     {

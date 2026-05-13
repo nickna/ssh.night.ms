@@ -10,7 +10,6 @@ public class ChatServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetime
 {
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
-    private IServiceProvider? _serviceProvider;
     private ChatService? _sut;
 
     public ChatServiceTests(PostgresFixture fixture) => _fixture = fixture;
@@ -18,17 +17,10 @@ public class ChatServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetime
     public async Task InitializeAsync()
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
-        var services = new ServiceCollection();
-        services.AddScoped(_ => new AppDbContext(_dbOptions));
-        _serviceProvider = services.BuildServiceProvider();
-        _sut = new ChatService(_serviceProvider);
+        _sut = new ChatService(new TestDbContextFactory(_dbOptions));
     }
 
-    public Task DisposeAsync()
-    {
-        (_serviceProvider as IDisposable)?.Dispose();
-        return Task.CompletedTask;
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private async Task<User> SeedUserAsync(string handle, bool isBanned = false)
     {

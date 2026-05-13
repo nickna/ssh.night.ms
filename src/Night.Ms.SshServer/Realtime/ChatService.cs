@@ -4,9 +4,10 @@ using Night.Ms.SshServer.Persistence;
 
 namespace Night.Ms.SshServer.Realtime;
 
-// Channel discovery + access for the chat UI. Opens a per-call DI scope so it's safe to
-// call from the SSH session handler thread without sharing AppDbContext instances.
-public sealed class ChatService(IServiceProvider services)
+// Channel discovery + access for the chat UI. Each public method opens a fresh DbContext
+// from the factory so the service is safe to share as a singleton across SSH session
+// threads without sharing a tracked context.
+public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
 {
     public abstract record JoinResult
     {
@@ -27,8 +28,7 @@ public sealed class ChatService(IServiceProvider services)
             return new JoinResult.InvalidName(nameError);
         }
 
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
         var existing = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct);
         if (existing is not null)
@@ -82,8 +82,7 @@ public sealed class ChatService(IServiceProvider services)
             return new JoinResult.Denied("You can't DM yourself.");
         }
 
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
         var other = await db.Users.FirstOrDefaultAsync(u => u.Handle == otherHandle, ct);
         if (other is null)
@@ -136,8 +135,7 @@ public sealed class ChatService(IServiceProvider services)
 
     public async Task<bool> CanAccessAsync(long channelId, long userId, CancellationToken ct)
     {
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
         if (channel is null) return false;
         if (!channel.IsPrivate) return true;

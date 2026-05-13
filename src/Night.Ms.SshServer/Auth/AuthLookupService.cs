@@ -4,12 +4,11 @@ using Night.Ms.SshTransport;
 
 namespace Night.Ms.SshServer.Auth;
 
-public sealed class AuthLookupService(IServiceProvider services, ILogger<AuthLookupService> logger)
+public sealed class AuthLookupService(IDbContextFactory<AppDbContext> dbFactory, ILogger<AuthLookupService> logger)
 {
     public async Task<AuthDecision> LookupAsync(AuthQuery query, CancellationToken cancellationToken)
     {
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
         var key = await db.SshKeys
             .Include(k => k.User)

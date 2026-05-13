@@ -5,9 +5,9 @@ using Night.Ms.SshServer.Persistence;
 namespace Night.Ms.SshServer.Realtime;
 
 // Per-user channel-read pointers, powering "channels I've touched" + unread badges.
-// Always opens a fresh DI scope per call so AppDbContext isn't shared across the SSH
-// session thread, matching ChatService / ChatMutationService.
-public sealed class ReadStateService(IServiceProvider services)
+// Each public method spins up a fresh DbContext via the factory so the singleton is safe
+// across SSH session threads without sharing a tracked context.
+public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
 {
     public sealed record ChannelEntry(long ChannelId, string Name, string? Topic, bool IsPrivate, DateTimeOffset LastActivityAt, int UnreadCount);
 
@@ -16,8 +16,7 @@ public sealed class ReadStateService(IServiceProvider services)
     // which keeps the channel sticky at the top of the sidebar.
     public async Task MarkReadAsync(long userId, long channelId, long lastReadMessageId, CancellationToken ct)
     {
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var now = DateTimeOffset.UtcNow;
         var row = await db.ChannelReads
             .FirstOrDefaultAsync(r => r.UserId == userId && r.ChannelId == channelId, ct);
@@ -51,8 +50,7 @@ public sealed class ReadStateService(IServiceProvider services)
     // the sidebar can't show much more anyway at typical terminal heights.
     public async Task<IReadOnlyList<ChannelEntry>> ListForUserAsync(long userId, CancellationToken ct)
     {
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
         // Subquery: each channel's latest-message info (id + created-at) for unread math.
         // Done as one round-trip via GroupBy → Max to keep the per-refresh cost small.

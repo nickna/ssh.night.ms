@@ -57,7 +57,7 @@ public sealed record ProfileUpdate(
     DateFormat DateFormat,
     PreResolvedLocation? PreResolvedLocation = null);
 
-public sealed class ProfileService(IServiceProvider services)
+public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IGeocodingProvider geocoder)
 {
     public const int MaxBioLength = 500;
     public const int MaxLocationLength = 64;
@@ -68,8 +68,7 @@ public sealed class ProfileService(IServiceProvider services)
     // doesn't exist (the caller decides how to render that — /finger prints "no such user").
     public async Task<ProfileSnapshot?> GetByHandleAsync(string handle, CancellationToken ct)
     {
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
 
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Handle == handle, ct);
         if (user is null) return null;
@@ -114,8 +113,7 @@ public sealed class ProfileService(IServiceProvider services)
         catch (TimeZoneNotFoundException) { return new(false, $"Unknown time zone '{timeZoneId}'."); }
         catch (InvalidTimeZoneException) { return new(false, $"Invalid time zone '{timeZoneId}'."); }
 
-        await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null)
             return new(false, "User not found.");
@@ -142,7 +140,6 @@ public sealed class ProfileService(IServiceProvider services)
             }
             else
             {
-                var geocoder = scope.ServiceProvider.GetRequiredService<IGeocodingProvider>();
                 var matches = await geocoder.SearchAsync(location, ct);
                 if (matches is null)
                     return new(false, "Couldn't reach the geocoding service — try again in a moment.", ProfileUpdateFailure.LocationServiceUnavailable);
