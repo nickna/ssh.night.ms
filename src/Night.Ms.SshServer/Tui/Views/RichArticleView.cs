@@ -1,6 +1,7 @@
 using System.Text;
 using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Tui.Art;
+using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -182,7 +183,7 @@ internal sealed class RichArticleView : View
 
         // Paint background once with the body attribute so empty lines don't inherit
         // whatever was in the buffer from the previous screen.
-        SetAttribute(BodyAttr);
+        SetAttribute(ArticlePalette.Body);
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < Viewport.Width; x++)
@@ -256,23 +257,23 @@ internal sealed class RichArticleView : View
 
     private static Attribute ComputeBaseAttribute(RunStyle style)
     {
-        if (style.HasFlag(RunStyle.Heading))
-            return new Attribute(Color.BrightYellow, Color.Black, TextStyle.Bold);
-
-        if (style.HasFlag(RunStyle.Link))
-            return new Attribute(Color.BrightCyan, Color.Black, TextStyle.Underline);
-
-        if (style.HasFlag(RunStyle.Code))
-            return new Attribute(Color.BrightGreen, Color.Black);
-
-        if (style.HasFlag(RunStyle.Bold))
-            return new Attribute(Color.White, Color.Black, TextStyle.Bold);
-
-        if (style.HasFlag(RunStyle.Quote))
-            return new Attribute(Color.DarkGray, Color.Black);
-
-        return BodyAttr;
+        if (style.HasFlag(RunStyle.Heading)) return ArticlePalette.Heading;
+        if (style.HasFlag(RunStyle.Link))    return ArticlePalette.Link;
+        if (style.HasFlag(RunStyle.Code))    return ArticlePalette.Code;
+        if (style.HasFlag(RunStyle.Bold))    return ArticlePalette.Strong;
+        if (style.HasFlag(RunStyle.Quote))   return ArticlePalette.Quote;
+        return ArticlePalette.Body;
     }
+}
 
-    private static readonly Attribute BodyAttr = new(Color.Gray, Color.Black);
+// Per-style attributes for article rendering. Composed from BbsTheme's anchor colors so a
+// palette tweak (e.g. accent colors) flows through both chrome and article body.
+internal static class ArticlePalette
+{
+    public static readonly Attribute Heading = new(BbsTheme.Header,     BbsTheme.Bg, TextStyle.Bold);
+    public static readonly Attribute Link    = new(BbsTheme.Accent,     BbsTheme.Bg, TextStyle.Underline);
+    public static readonly Attribute Code    = new(BbsTheme.Success,    BbsTheme.Bg);
+    public static readonly Attribute Strong  = new(BbsTheme.BodyBright, BbsTheme.Bg, TextStyle.Bold);
+    public static readonly Attribute Quote   = new(BbsTheme.Faint,      BbsTheme.Bg);
+    public static readonly Attribute Body    = new(BbsTheme.Body,       BbsTheme.Bg);
 }

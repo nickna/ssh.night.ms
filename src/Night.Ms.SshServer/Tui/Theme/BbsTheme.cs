@@ -14,18 +14,19 @@ namespace Night.Ms.SshServer.Tui.Theme;
 // codes.
 internal static class BbsTheme
 {
-    // Palette — five accents on a black background, mirroring 90s BBS art.
-    private static readonly Color Bg = Color.Black;
-    private static readonly Color Body = Color.Gray;             // primary body text
-    private static readonly Color BodyBright = Color.White;      // emphasized body text
-    private static readonly Color Accent = Color.BrightCyan;     // chrome accents, button glyphs
-    private static readonly Color AccentDim = Color.Cyan;        // status text
-    private static readonly Color Header = Color.BrightYellow;   // headers / hotkeys
-    private static readonly Color HighlightBg = Color.BrightMagenta; // selection bar
-    private static readonly Color Success = Color.BrightGreen;
-    private static readonly Color Warn = Color.BrightRed;
-    private static readonly Color Faint = Color.DarkGray;
-    private static readonly Color InputBg = Color.Blue;
+    // Palette — five accents on a black background, mirroring 90s BBS art. Kept internal so
+    // article/chat palettes can compose the same anchor colors instead of redefining them.
+    internal static readonly Color Bg = Color.Black;
+    internal static readonly Color Body = Color.Gray;             // primary body text
+    internal static readonly Color BodyBright = Color.White;      // emphasized body text
+    internal static readonly Color Accent = Color.BrightCyan;     // chrome accents, button glyphs
+    internal static readonly Color AccentDim = Color.Cyan;        // status text
+    internal static readonly Color Header = Color.BrightYellow;   // headers / hotkeys
+    internal static readonly Color HighlightBg = Color.BrightMagenta; // selection bar
+    internal static readonly Color Success = Color.BrightGreen;
+    internal static readonly Color Warn = Color.BrightRed;
+    internal static readonly Color Faint = Color.DarkGray;
+    internal static readonly Color InputBg = Color.Blue;
 
     // Default scheme inherited by all controls inside a window: gray body on black, with
     // hotkeys bright-yellow + bold. Buttons + lists derive their focus look from this.

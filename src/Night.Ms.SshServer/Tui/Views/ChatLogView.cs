@@ -267,7 +267,7 @@ internal sealed class ChatLogView : View
             var emojiWidth = DisplayLengthFor(emojiText);
             if (col + emojiWidth > width) break; // truncate rather than wrap reaction footer
             var style = r.ByMe ? ArtStyle.Bold : ArtStyle.None;
-            var color = r.ByMe ? new ArtColor(0xFF, 0xD7, 0x00) : new ArtColor(0xB0, 0xB0, 0xB0);
+            var color = r.ByMe ? ChatPalette.ReactionByMe : ChatPalette.ReactionByOther;
             segments.Add(new RunSegment(emojiText, color, style));
             col += emojiWidth;
         }

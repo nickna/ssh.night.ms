@@ -27,21 +27,7 @@ internal static class MessageRenderer
         @"|(?<code>`[^`\n]+?`)",
         RegexOptions.Compiled);
 
-    // Dim gray "[12:34]" timestamp + ": " separator.
-    private static readonly ArtColor Chrome = new(0x70, 0x70, 0x70);
-
-    // Other-user mention (cyan) and self-mention (bright yellow bold + flag).
-    private static readonly ArtColor MentionOther = new(0x6C, 0xC0, 0xFF);
-    private static readonly ArtColor MentionSelf  = new(0xFF, 0xD7, 0x00);
-
-    // Inline format colors — body text inherits the default fg; the markers themselves are
-    // not emitted, only the styled content between them.
-    private static readonly ArtColor BoldFg   = new(0xFF, 0xFF, 0xFF);
-    private static readonly ArtColor CodeFg   = new(0x9F, 0xE5, 0x9F);
-
-    // Yellow ★ marker prepended to pinned messages. One cell wide so it doesn't disturb
-    // the column alignment for users who aren't using a font with full emoji width.
-    private static readonly ArtColor PinColor = new(0xFF, 0xC8, 0x4C);
+    // All per-token colors live in ChatPalette so the renderer can be re-themed in one file.
 
     // Standard message: "[clock] handle: body". Optional decorations:
     //   pinned    → "★ " marker before the chrome.
@@ -63,27 +49,27 @@ internal static class MessageRenderer
         var runs = new List<ChatRun>(8);
         if (pinned)
         {
-            runs.Add(new ChatRun("★ ", PinColor, ArtStyle.Bold));
+            runs.Add(new ChatRun("★ ", ChatPalette.Pin, ArtStyle.Bold));
         }
-        runs.Add(new ChatRun($"[{clock}] ", Chrome, ArtStyle.None));
+        runs.Add(new ChatRun($"[{clock}] ", ChatPalette.Chrome, ArtStyle.None));
         runs.Add(new ChatRun(senderHandle, HandleColorizer.ColorFor(senderHandle), ArtStyle.Bold));
-        runs.Add(new ChatRun(": ", Chrome, ArtStyle.None));
+        runs.Add(new ChatRun(": ", ChatPalette.Chrome, ArtStyle.None));
         if (!string.IsNullOrEmpty(replyToHandle))
         {
-            runs.Add(new ChatRun("↳ @", Chrome, ArtStyle.None));
-            runs.Add(new ChatRun(replyToHandle, MentionOther, ArtStyle.None));
-            runs.Add(new ChatRun(" ", Chrome, ArtStyle.None));
+            runs.Add(new ChatRun("↳ @", ChatPalette.Chrome, ArtStyle.None));
+            runs.Add(new ChatRun(replyToHandle, ChatPalette.MentionOther, ArtStyle.None));
+            runs.Add(new ChatRun(" ", ChatPalette.Chrome, ArtStyle.None));
         }
 
         var selfMentioned = AppendBodyRuns(runs, body, selfHandle);
         if (edited)
         {
-            runs.Add(new ChatRun(" (edited)", Chrome, ArtStyle.Italic));
+            runs.Add(new ChatRun(" (edited)", ChatPalette.Chrome, ArtStyle.Italic));
         }
         if (replyCount > 0)
         {
             var label = replyCount == 1 ? "1 reply" : $"{replyCount} replies";
-            runs.Add(new ChatRun($"  [{label}]", Chrome, ArtStyle.Italic));
+            runs.Add(new ChatRun($"  [{label}]", ChatPalette.Chrome, ArtStyle.Italic));
         }
         return new ChatLine(runs, selfMentioned);
     }
@@ -93,10 +79,10 @@ internal static class MessageRenderer
     public static ChatLine RenderDeleted(string clock, string senderHandle)
     {
         var runs = new List<ChatRun>(4);
-        runs.Add(new ChatRun($"[{clock}] ", Chrome, ArtStyle.None));
+        runs.Add(new ChatRun($"[{clock}] ", ChatPalette.Chrome, ArtStyle.None));
         runs.Add(new ChatRun(senderHandle, HandleColorizer.ColorFor(senderHandle), ArtStyle.None));
-        runs.Add(new ChatRun(": ", Chrome, ArtStyle.None));
-        runs.Add(new ChatRun("(deleted)", new ArtColor(0x80, 0x80, 0x80), ArtStyle.Italic));
+        runs.Add(new ChatRun(": ", ChatPalette.Chrome, ArtStyle.None));
+        runs.Add(new ChatRun("(deleted)", ChatPalette.Deleted, ArtStyle.Italic));
         return new ChatLine(runs);
     }
 
@@ -104,7 +90,7 @@ internal static class MessageRenderer
     public static ChatLine RenderEmote(string clock, string senderHandle, string action, string selfHandle)
     {
         var runs = new List<ChatRun>(4);
-        runs.Add(new ChatRun($"[{clock}] ", Chrome, ArtStyle.None));
+        runs.Add(new ChatRun($"[{clock}] ", ChatPalette.Chrome, ArtStyle.None));
         var nameColor = HandleColorizer.ColorFor(senderHandle);
         runs.Add(new ChatRun($"* {senderHandle} ", nameColor, ArtStyle.Italic | ArtStyle.Bold));
         var selfMentioned = AppendBodyRuns(runs, action, selfHandle, baseStyle: ArtStyle.Italic);
@@ -114,7 +100,7 @@ internal static class MessageRenderer
     // System lines: "---- joined #lobby ----", "[!] permission denied", etc. No body parsing.
     public static ChatLine RenderSystem(string text, bool isError = false)
     {
-        var color = isError ? new ArtColor(0xFF, 0x70, 0x70) : new ArtColor(0x70, 0xC0, 0xC0);
+        var color = isError ? ChatPalette.SystemError : ChatPalette.SystemInfo;
         return new ChatLine(new[] { new ChatRun(text, color, isError ? ArtStyle.Bold : ArtStyle.None) });
     }
 
@@ -157,12 +143,12 @@ internal static class MessageRenderer
                 if (isSelf) selfMentioned = true;
                 runs.Add(new ChatRun(
                     m.Value,
-                    isSelf ? MentionSelf : MentionOther,
+                    isSelf ? ChatPalette.MentionSelf : ChatPalette.MentionOther,
                     baseStyle | ArtStyle.Bold));
             }
             else if (m.Groups["bold"].Success)
             {
-                runs.Add(new ChatRun(m.Value[1..^1], BoldFg, baseStyle | ArtStyle.Bold));
+                runs.Add(new ChatRun(m.Value[1..^1], ChatPalette.BoldFg, baseStyle | ArtStyle.Bold));
             }
             else if (m.Groups["italic"].Success)
             {
@@ -170,7 +156,7 @@ internal static class MessageRenderer
             }
             else if (m.Groups["code"].Success)
             {
-                runs.Add(new ChatRun(m.Value[1..^1], CodeFg, baseStyle));
+                runs.Add(new ChatRun(m.Value[1..^1], ChatPalette.CodeFg, baseStyle));
             }
 
             cursor = m.Index + m.Length;
