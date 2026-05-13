@@ -250,6 +250,33 @@ public sealed class ChatMutationService(IServiceProvider services)
             .ToListAsync(ct);
     }
 
+    // Pull a single thread: the root message + all its (non-deleted) replies, ordered by
+    // CreatedAt ascending so the renderer can paint top-down chronologically. Reply count is
+    // capped at 500 to bound memory; pathologically long threads truncate to the oldest 500.
+    // Returns null for the root if it doesn't exist; the caller decides how to render an
+    // orphaned reply set (today: not surfaced — ThreadScreen only opens from a known root).
+    public async Task<ThreadView> ListThreadAsync(long rootMessageId, CancellationToken ct)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var root = await db.ChatMessages
+            .AsNoTracking()
+            .Include(m => m.User)
+            .FirstOrDefaultAsync(m => m.Id == rootMessageId, ct);
+        if (root is null) return new ThreadView(null, Array.Empty<ChatMessage>());
+
+        var replies = await db.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.ParentMessageId == rootMessageId && m.DeletedAt == null)
+            .OrderBy(m => m.CreatedAt)
+            .Take(500)
+            .Include(m => m.User)
+            .ToListAsync(ct);
+        return new ThreadView(root, replies);
+    }
+
+    public sealed record ThreadView(ChatMessage? Root, IReadOnlyList<ChatMessage> Replies);
+
     // For a set of parent ids, count children grouped by parent. Used to hydrate the
     // "[N replies]" badge on channel history load.
     public async Task<IReadOnlyDictionary<long, int>> SnapshotReplyCountsAsync(

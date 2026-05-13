@@ -141,4 +141,86 @@ public class ChatMutationServiceThreadsFtsTests : IClassFixture<PostgresFixture>
         var hits = await _sut.SearchAsync(c.Id, "secret", limit: 10, default);
         Assert.Empty(hits);
     }
+
+    [Fact]
+    public async Task ListThread_returns_root_and_replies_in_chronological_order()
+    {
+        var (u, c) = await SeedUserAndChannelAsync();
+        var root = await SeedMessageAsync(u, c, "lets talk about widgets", at: DateTimeOffset.UtcNow.AddMinutes(-10));
+        await SeedMessageAsync(u, c, "first reply",  parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-9));
+        await SeedMessageAsync(u, c, "second reply", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-8));
+        await SeedMessageAsync(u, c, "third reply",  parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-7));
+
+        var view = await _sut!.ListThreadAsync(root.Id, default);
+        Assert.NotNull(view.Root);
+        Assert.Equal(root.Id, view.Root!.Id);
+        Assert.Equal(3, view.Replies.Count);
+        Assert.Equal("first reply",  view.Replies[0].Body);
+        Assert.Equal("second reply", view.Replies[1].Body);
+        Assert.Equal("third reply",  view.Replies[2].Body);
+    }
+
+    [Fact]
+    public async Task ListThread_returns_null_root_when_message_missing()
+    {
+        var view = await _sut!.ListThreadAsync(rootMessageId: 999_999, default);
+        Assert.Null(view.Root);
+        Assert.Empty(view.Replies);
+    }
+
+    [Fact]
+    public async Task ListThread_excludes_deleted_replies()
+    {
+        var (u, c) = await SeedUserAndChannelAsync();
+        var root = await SeedMessageAsync(u, c, "root", at: DateTimeOffset.UtcNow.AddMinutes(-5));
+        var keep = await SeedMessageAsync(u, c, "keeps me", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-4));
+        var del  = await SeedMessageAsync(u, c, "tombstone", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-3));
+        await _sut!.DeleteAsync(del.Id, u.Id, default);
+
+        var view = await _sut.ListThreadAsync(root.Id, default);
+        Assert.Single(view.Replies);
+        Assert.Equal(keep.Id, view.Replies[0].Id);
+    }
+
+    [Fact]
+    public async Task ListThread_does_not_return_other_threads_replies()
+    {
+        var (u, c) = await SeedUserAndChannelAsync();
+        var root  = await SeedMessageAsync(u, c, "thread A", at: DateTimeOffset.UtcNow.AddMinutes(-5));
+        var other = await SeedMessageAsync(u, c, "thread B", at: DateTimeOffset.UtcNow.AddMinutes(-4));
+        await SeedMessageAsync(u, c, "child of A", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-3));
+        await SeedMessageAsync(u, c, "child of B", parentMessageId: other.Id, at: DateTimeOffset.UtcNow.AddMinutes(-2));
+
+        var view = await _sut!.ListThreadAsync(root.Id, default);
+        Assert.Single(view.Replies);
+        Assert.Equal("child of A", view.Replies[0].Body);
+    }
+
+    [Fact]
+    public async Task ListThread_returns_root_with_no_replies()
+    {
+        var (u, c) = await SeedUserAndChannelAsync();
+        var root = await SeedMessageAsync(u, c, "lonely", at: DateTimeOffset.UtcNow);
+
+        var view = await _sut!.ListThreadAsync(root.Id, default);
+        Assert.NotNull(view.Root);
+        Assert.Equal(root.Id, view.Root!.Id);
+        Assert.Empty(view.Replies);
+    }
+
+    [Fact]
+    public async Task ListThread_returns_tombstoned_root_with_replies_intact()
+    {
+        // A deleted root still has its row, so the thread is still openable. The renderer
+        // is responsible for painting "(deleted)" — the service hands the row back as-is.
+        var (u, c) = await SeedUserAndChannelAsync();
+        var root = await SeedMessageAsync(u, c, "to be removed", at: DateTimeOffset.UtcNow.AddMinutes(-5));
+        await SeedMessageAsync(u, c, "still here", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-4));
+        await _sut!.DeleteAsync(root.Id, u.Id, default);
+
+        var view = await _sut.ListThreadAsync(root.Id, default);
+        Assert.NotNull(view.Root);
+        Assert.NotNull(view.Root!.DeletedAt);
+        Assert.Single(view.Replies);
+    }
 }

@@ -252,6 +252,7 @@ public sealed class ChatScreen : BbsWindow
                     "  /react <n> :emoji:   add a reaction to message n (1 = most recent)\n" +
                     "  /unreact <n> :emoji: remove your reaction from message n\n" +
                     "  /reply <n> <body>    post a threaded reply to message n\n" +
+                    "  /thread <n>          open a focused view of message n + its replies\n" +
                     "  /edit <n> <body>     edit your message at position n\n" +
                     "  /del <n>             delete your message at position n\n" +
                     "  /pin <n>             pin message n (★ marker, listed by /pins)\n" +
@@ -337,6 +338,10 @@ public sealed class ChatScreen : BbsWindow
 
             case "/reply":
                 await ReplyAsync(arg);
+                return;
+
+            case "/thread":
+                OpenThread(arg);
                 return;
 
             default:
@@ -542,6 +547,32 @@ public sealed class ChatScreen : BbsWindow
         var muts = _services.GetRequiredService<ChatMutationService>();
         var result = await muts.SetTopicAsync(_currentChannel.Id, _user.Id, _user.Handle, arg, _shutdown.Token);
         ReportMutation(result);
+    }
+
+    // /thread <n> — opens a focused view of the n-th most recent message + all its replies.
+    // Runs as a nested app.Run (same pattern as NewsScreen → ReaderScreen); when the user
+    // hits Esc, control returns here with our channel subscription intact. Background tasks
+    // here stay live during the nested loop — incoming events still mutate _recent so when
+    // we redraw on return, state is current.
+    private void OpenThread(string? arg)
+    {
+        if (string.IsNullOrEmpty(arg) || !int.TryParse(arg, out var pos))
+        {
+            SetStatus("[!] usage: /thread <n>");
+            return;
+        }
+        if (!TryResolveMessage(pos, out var msgRef))
+        {
+            SetStatus($"[!] no message at position {pos}.");
+            return;
+        }
+        // A reply opens the thread of its parent — viewing a reply as a "root" would hide
+        // its siblings. Conceptually a thread is keyed by the original message.
+        var rootId = msgRef.ParentMessageId ?? msgRef.MessageId;
+        _app.Run(new ChatThreadScreen(_services, _app, _user, _currentChannel.Id, rootId));
+        // After the inner screen closes, restore our chrome — the nested screen overwrote
+        // Title and the status line.
+        UpdateChrome();
     }
 
     // /reply <n> <body> — sends `body` as a threaded reply to the n-th most recent message.
