@@ -71,6 +71,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(m => new { m.ChannelId, m.CreatedAt }).IsDescending(false, true);
             b.HasOne(m => m.Channel).WithMany(c => c.Messages).HasForeignKey(m => m.ChannelId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Restrict);
+            // Reply chains: parent FK is intentionally Restrict (not Cascade) so deleting a
+            // parent doesn't wipe its thread. The renderer paints "↳ @alice (deleted): ..."
+            // when the resolved parent is tombstoned.
+            b.HasOne(m => m.ParentMessage).WithMany().HasForeignKey(m => m.ParentMessageId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(m => m.ParentMessageId);
         });
 
         modelBuilder.Entity<ChannelRead>(b =>

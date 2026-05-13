@@ -43,9 +43,22 @@ internal static class MessageRenderer
     // the column alignment for users who aren't using a font with full emoji width.
     private static readonly ArtColor PinColor = new(0xFF, 0xC8, 0x4C);
 
-    // Standard message: "[clock] handle: body". When pinned, a "★ " marker prefixes the
-    // chrome so the message stands out in the log.
-    public static ChatLine RenderMessage(string clock, string senderHandle, string body, string selfHandle, bool edited = false, bool pinned = false)
+    // Standard message: "[clock] handle: body". Optional decorations:
+    //   pinned    → "★ " marker before the chrome.
+    //   replyTo   → "↳ @parent " prefix between chrome and body. Identifies thread context
+    //               without a separate view.
+    //   replyCount → " [N replies]" suffix after the body — only rendered on top-level
+    //               messages that have children.
+    //   edited    → " (edited)" suffix in italic.
+    public static ChatLine RenderMessage(
+        string clock,
+        string senderHandle,
+        string body,
+        string selfHandle,
+        bool edited = false,
+        bool pinned = false,
+        string? replyToHandle = null,
+        int replyCount = 0)
     {
         var runs = new List<ChatRun>(8);
         if (pinned)
@@ -55,11 +68,22 @@ internal static class MessageRenderer
         runs.Add(new ChatRun($"[{clock}] ", Chrome, ArtStyle.None));
         runs.Add(new ChatRun(senderHandle, HandleColorizer.ColorFor(senderHandle), ArtStyle.Bold));
         runs.Add(new ChatRun(": ", Chrome, ArtStyle.None));
+        if (!string.IsNullOrEmpty(replyToHandle))
+        {
+            runs.Add(new ChatRun("↳ @", Chrome, ArtStyle.None));
+            runs.Add(new ChatRun(replyToHandle, MentionOther, ArtStyle.None));
+            runs.Add(new ChatRun(" ", Chrome, ArtStyle.None));
+        }
 
         var selfMentioned = AppendBodyRuns(runs, body, selfHandle);
         if (edited)
         {
             runs.Add(new ChatRun(" (edited)", Chrome, ArtStyle.Italic));
+        }
+        if (replyCount > 0)
+        {
+            var label = replyCount == 1 ? "1 reply" : $"{replyCount} replies";
+            runs.Add(new ChatRun($"  [{label}]", Chrome, ArtStyle.Italic));
         }
         return new ChatLine(runs, selfMentioned);
     }

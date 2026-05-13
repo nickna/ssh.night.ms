@@ -28,7 +28,17 @@ public static class ChatEventKind
 
 public sealed record ChatEnvelope(string Kind, JsonElement Payload);
 
-public sealed record ChatMessageDto(long Id, long ChannelId, long UserId, string Handle, string Body, DateTimeOffset CreatedAt);
+// ParentMessageId is null for top-level messages, set to the parent's id for /reply. We
+// keep it on the on-the-wire DTO (not just the DB row) so receiving sessions can render
+// the "↳ in reply to" prefix without an extra DB round-trip.
+public sealed record ChatMessageDto(
+    long Id,
+    long ChannelId,
+    long UserId,
+    string Handle,
+    string Body,
+    DateTimeOffset CreatedAt,
+    long? ParentMessageId = null);
 
 // Sent when an author edits an existing message. Body is the new value; clients update the
 // in-memory display in place. Pre-edit body is not transmitted — the audit trail (if any)

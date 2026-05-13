@@ -218,6 +218,7 @@ public sealed class ChatScreen : BbsWindow
                     "  /me <action>         emote in third-person (italic)\n" +
                     "  /react <n> :emoji:   add a reaction to message n (1 = most recent)\n" +
                     "  /unreact <n> :emoji: remove your reaction from message n\n" +
+                    "  /reply <n> <body>    post a threaded reply to message n\n" +
                     "  /edit <n> <body>     edit your message at position n\n" +
                     "  /del <n>             delete your message at position n\n" +
                     "  /pin <n>             pin message n (★ marker, listed by /pins)\n" +
@@ -299,6 +300,10 @@ public sealed class ChatScreen : BbsWindow
 
             case "/search":
                 await SearchAsync(arg);
+                return;
+
+            case "/reply":
+                await ReplyAsync(arg);
                 return;
 
             default:
@@ -506,6 +511,22 @@ public sealed class ChatScreen : BbsWindow
         ReportMutation(result);
     }
 
+    // /reply <n> <body> — sends `body` as a threaded reply to the n-th most recent message.
+    private async Task ReplyAsync(string? arg)
+    {
+        if (string.IsNullOrEmpty(arg) || !TryParsePositionArg(arg, out var pos, out var body) || string.IsNullOrWhiteSpace(body))
+        {
+            SetStatus("[!] usage: /reply <n> <body>");
+            return;
+        }
+        if (!TryResolveMessage(pos, out var msgRef))
+        {
+            SetStatus($"[!] no message at position {pos}.");
+            return;
+        }
+        await SendMessageAsync(body, parentMessageId: msgRef.MessageId);
+    }
+
     // /search <term>. Last 50 matches in the current channel, newest first. The renderer
     // reuses RenderMessage so colors/formatting/pin markers stay consistent.
     private async Task SearchAsync(string? arg)
@@ -691,8 +712,12 @@ public sealed class ChatScreen : BbsWindow
             // Pull reactions snapshot for the visible history so the initial render shows
             // current totals without waiting for live events to redraw.
             var muts = scope.ServiceProvider.GetRequiredService<ChatMutationService>();
-            var reactionMap = await muts.SnapshotReactionsAsync(
-                history.Select(m => m.Id).ToArray(), _channelCts.Token);
+            var ids = history.Select(m => m.Id).ToArray();
+            var reactionMap = await muts.SnapshotReactionsAsync(ids, _channelCts.Token);
+            // Reply counts per parent in the loaded window. Children whose parents have
+            // already scrolled off don't contribute (we can't render a badge for an
+            // off-screen parent anyway).
+            var replyCounts = await muts.SnapshotReplyCountsAsync(ids, _channelCts.Token);
 
             long highestSeenId = 0;
             foreach (var msg in history)
@@ -707,6 +732,8 @@ public sealed class ChatScreen : BbsWindow
                     Edited = msg.EditedAt is not null,
                     Pinned = msg.IsPinned,
                     Deleted = msg.DeletedAt is not null,
+                    ParentMessageId = msg.ParentMessageId,
+                    ReplyCount = replyCounts.GetValueOrDefault(msg.Id),
                 };
                 _recent.Insert(0, msgRef);
                 AppendOnUiThread(RenderMessage(msgRef), msg.Id);
@@ -777,9 +804,13 @@ public sealed class ChatScreen : BbsWindow
                         Handle = msg.Handle,
                         At = msg.CreatedAt,
                         Body = msg.Body,
+                        ParentMessageId = msg.ParentMessageId,
                     };
                     _recent.Insert(0, newRef);
                     AppendOnUiThread(RenderMessage(newRef), msg.Id);
+                    // If this message is a reply to one still on screen, bump that parent's
+                    // reply count and re-render its line so the "[N replies]" badge updates.
+                    BumpParentReplyCount(msg.ParentMessageId);
                     // The sender is implicitly no longer typing — clear their hint so the
                     // status bar doesn't say "alice is typing…" right after alice posts.
                     ClearTyperOnUiThread(msg.Handle);
@@ -865,6 +896,20 @@ public sealed class ChatScreen : BbsWindow
         msgRef.Deleted = true;
         var line = MessageRenderer.RenderDeleted(_user.FormatClock(msgRef.At), msgRef.Handle);
         _app.Invoke(() => _log.TryReplace(del.MessageId, line));
+    }
+
+    // Find the parent message on screen and bump its reply count + re-render in place.
+    // Quietly no-ops when the parent has scrolled past the on-screen window — the count
+    // will be correct on next channel re-entry because LoadHistoryAndSubscribeAsync hydrates
+    // counts from the DB.
+    private void BumpParentReplyCount(long? parentMessageId)
+    {
+        if (parentMessageId is not { } pid) return;
+        var parent = _recent.FirstOrDefault(r => r.MessageId == pid);
+        if (parent is null) return;
+        parent.ReplyCount += 1;
+        var line = RenderMessage(parent);
+        _app.Invoke(() => _log.TryReplace(pid, line));
     }
 
     private void ApplyPin(ChatPinDto pin)
@@ -1157,7 +1202,7 @@ public sealed class ChatScreen : BbsWindow
         catch { /* presence is best-effort */ }
     }
 
-    private async Task SendMessageAsync(string body)
+    private async Task SendMessageAsync(string body, long? parentMessageId = null)
     {
         var chat = _services.GetRequiredService<ChatService>();
         if (!await chat.CanAccessAsync(_currentChannel.Id, _user.Id, _shutdown.Token))
@@ -1177,12 +1222,13 @@ public sealed class ChatScreen : BbsWindow
                 UserId = _user.Id,
                 Body = body,
                 CreatedAt = now,
+                ParentMessageId = parentMessageId,
             };
             db.ChatMessages.Add(msg);
             await db.SaveChangesAsync(_shutdown.Token);
 
             var bus = scope.ServiceProvider.GetRequiredService<IRealtimeBus>();
-            var dto = new ChatMessageDto(msg.Id, _currentChannel.Id, _user.Id, _user.Handle, body, now);
+            var dto = new ChatMessageDto(msg.Id, _currentChannel.Id, _user.Id, _user.Handle, body, now, parentMessageId);
             var envelope = new ChatEnvelope(ChatEventKind.Message, JsonSerializer.SerializeToElement(dto));
             await bus.PublishAsync(
                 ChatTopics.Channel(_currentChannel.Id),
@@ -1241,8 +1287,18 @@ public sealed class ChatScreen : BbsWindow
         {
             return MessageRenderer.RenderEmote(clock, msgRef.Handle, msgRef.Body[4..], _user.Handle);
         }
+        // Resolve the parent (if any) to its handle so we can render "↳ @alice" — only
+        // works when the parent is still in the on-screen _recent window. If the parent
+        // has scrolled off the load, fall back to a generic "↳ @(earlier)" stub.
+        string? replyToHandle = null;
+        if (msgRef.ParentMessageId is { } pid)
+        {
+            var parent = _recent.FirstOrDefault(r => r.MessageId == pid);
+            replyToHandle = parent?.Handle ?? "(earlier)";
+        }
         return MessageRenderer.RenderMessage(clock, msgRef.Handle, msgRef.Body ?? string.Empty, _user.Handle,
-            edited: msgRef.Edited, pinned: msgRef.Pinned);
+            edited: msgRef.Edited, pinned: msgRef.Pinned,
+            replyToHandle: replyToHandle, replyCount: msgRef.ReplyCount);
     }
 
     protected override void Dispose(bool disposing)
@@ -1287,5 +1343,10 @@ public sealed class ChatScreen : BbsWindow
         public bool Edited { get; set; }
         public bool Pinned { get; set; }
         public bool Deleted { get; set; }
+        // ParentMessageId is set on /reply messages; it's used to find the parent in _recent
+        // for the "↳ @alice" prefix render. ReplyCount tracks how many children this message
+        // has shown on screen so far — bumped by incoming children, never decremented.
+        public long? ParentMessageId { get; set; }
+        public int ReplyCount { get; set; }
     }
 }

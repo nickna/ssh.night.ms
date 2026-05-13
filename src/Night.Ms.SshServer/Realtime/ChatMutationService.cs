@@ -202,20 +202,42 @@ public sealed class ChatMutationService(IServiceProvider services)
     }
 
     // Search the recent history of a channel for messages whose body matches a term. Uses
-    // case-insensitive ILIKE on body — sufficient for "find that link" UX. Postgres full-text
-    // (tsvector) would be the upgrade path if message volume grows; current scale doesn't
-    // need it. Excludes deleted messages.
+    // Postgres full-text search (websearch_to_tsquery + the generated body_search column)
+    // when the term parses to a valid tsquery; falls back to case-insensitive ILIKE for
+    // single-token queries that don't tokenize cleanly. Excludes deleted messages.
+    //
+    // websearch_to_tsquery accepts Google-style input ("foo bar", "exact phrase", -negate)
+    // and never throws on malformed input, so we don't need a try/catch fallback for
+    // syntax errors — but a very-short or all-punctuation term still yields an empty
+    // tsquery, which would match nothing. The ILIKE fallback handles those cases.
     public async Task<IReadOnlyList<ChatMessage>> SearchAsync(long channelId, string term, int limit, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(term)) return Array.Empty<ChatMessage>();
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // EF.Functions.ILike pushes the pattern down to Postgres; LINQ String.Contains
-        // would translate to LIKE on a non-citext column and lose the case-insensitivity.
-        // Use "|" as the ESCAPE char so users can search for literal "_" and "%" without
-        // the backslash quoting confusion that EF/npgsql don't reliably propagate.
+        var trimmed = term.Trim();
+        var clamped = Math.Clamp(limit, 1, 100);
+
+        // FTS path: hits the GIN index on body_search. EF.Functions.WebSearchToTsQuery +
+        // .Matches() emit `body_search @@ websearch_to_tsquery('simple', term)`.
+        var ftsHits = await db.ChatMessages
+            .FromSqlInterpolated(
+                $@"SELECT * FROM chat_messages
+                   WHERE channel_id = {channelId}
+                     AND deleted_at IS NULL
+                     AND body_search @@ websearch_to_tsquery('english', {trimmed})
+                   ORDER BY created_at DESC
+                   LIMIT {clamped}")
+            .AsNoTracking()
+            .Include(m => m.User)
+            .ToListAsync(ct);
+
+        if (ftsHits.Count > 0) return ftsHits;
+
+        // Fallback: short token or punctuation-only term that tsquery couldn't tokenize.
+        // Same |-escaped ILIKE pattern we used before the FTS upgrade.
         const string esc = "|";
-        var pattern = "%" + term.Trim()
+        var pattern = "%" + trimmed
             .Replace("|", "||")
             .Replace("%", "|%")
             .Replace("_", "|_") + "%";
@@ -223,9 +245,26 @@ public sealed class ChatMutationService(IServiceProvider services)
             .AsNoTracking()
             .Where(m => m.ChannelId == channelId && m.DeletedAt == null && EF.Functions.ILike(m.Body, pattern, esc))
             .OrderByDescending(m => m.CreatedAt)
-            .Take(Math.Clamp(limit, 1, 100))
+            .Take(clamped)
             .Include(m => m.User)
             .ToListAsync(ct);
+    }
+
+    // For a set of parent ids, count children grouped by parent. Used to hydrate the
+    // "[N replies]" badge on channel history load.
+    public async Task<IReadOnlyDictionary<long, int>> SnapshotReplyCountsAsync(
+        IReadOnlyCollection<long> parentIds, CancellationToken ct)
+    {
+        if (parentIds.Count == 0) return new Dictionary<long, int>();
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.ParentMessageId != null && parentIds.Contains(m.ParentMessageId.Value) && m.DeletedAt == null)
+            .GroupBy(m => m.ParentMessageId!.Value)
+            .Select(g => new { ParentId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        return rows.ToDictionary(r => r.ParentId, r => r.Count);
     }
 
     // Snapshot of reactions for a set of messages — used when loading channel history so the

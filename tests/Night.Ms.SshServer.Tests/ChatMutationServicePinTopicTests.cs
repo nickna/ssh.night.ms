@@ -183,8 +183,11 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     }
 
     [Fact]
-    public async Task Search_returns_case_insensitive_matches_in_channel()
+    public async Task Search_matches_are_case_insensitive()
     {
+        // Postgres FTS lowercases tokens, so a search for "build" matches "BUILD" but not
+        // the substring inside "rebuild" — different word, different token. That's a
+        // semantic change from the old ILIKE-based search.
         var (u, c, _) = await SeedAsync("alice", "fixed the BUILD today");
         await using (var db = new AppDbContext(_dbOptions!))
         {
@@ -202,7 +205,8 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         }
 
         var hits = await _sut!.SearchAsync(c.Id, "build", limit: 10, default);
-        Assert.Equal(2, hits.Count);
+        Assert.Single(hits);
+        Assert.Equal("fixed the BUILD today", hits[0].Body);
     }
 
     [Fact]

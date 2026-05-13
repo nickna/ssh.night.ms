@@ -56,9 +56,15 @@ public sealed class ChatMessage
     // a public channel for now; private-channel-ops-only is a follow-up when ChannelMember
     // roles get enforced.
     public bool IsPinned { get; set; }
+    // Threading: when set, this message is a reply to ParentMessageId. The reply appears
+    // inline in the channel with a "↳" prefix, and the parent picks up a "[N replies]"
+    // badge. We deliberately don't enforce a depth limit at the schema level — replies to
+    // replies are stored flat (no chain reconstruction), so depth is always 1 in practice.
+    public long? ParentMessageId { get; set; }
 
     public Channel? Channel { get; set; }
     public User? User { get; set; }
+    public ChatMessage? ParentMessage { get; set; }
     public List<MessageReaction> Reactions { get; set; } = [];
 }
 
