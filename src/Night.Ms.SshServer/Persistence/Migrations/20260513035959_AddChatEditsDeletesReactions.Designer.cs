@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Night.Ms.SshServer.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Night.Ms.SshServer.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260513035959_AddChatEditsDeletesReactions")]
+    partial class AddChatEditsDeletesReactions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -143,37 +146,6 @@ namespace Night.Ms.SshServer.Persistence.Migrations
                     b.ToTable("channel_members", (string)null);
                 });
 
-            modelBuilder.Entity("Night.Ms.SshServer.Domain.ChannelRead", b =>
-                {
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.Property<long>("ChannelId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("channel_id");
-
-                    b.Property<long>("LastReadMessageId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("last_read_message_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("UserId", "ChannelId")
-                        .HasName("pk_channel_reads");
-
-                    b.HasIndex("ChannelId")
-                        .HasDatabaseName("ix_channel_reads_channel_id");
-
-                    b.HasIndex("UserId", "UpdatedAt")
-                        .IsDescending(false, true)
-                        .HasDatabaseName("ix_channel_reads_user_id_updated_at");
-
-                    b.ToTable("channel_reads", (string)null);
-                });
-
             modelBuilder.Entity("Night.Ms.SshServer.Domain.ChatMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -203,10 +175,6 @@ namespace Night.Ms.SshServer.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EditedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("edited_at");
-
-                    b.Property<bool>("IsPinned")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_pinned");
 
                     b.Property<long>("UserId")
                         .HasColumnType("bigint")
@@ -594,27 +562,6 @@ namespace Night.Ms.SshServer.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_channel_members_users_user_id");
-
-                    b.Navigation("Channel");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Night.Ms.SshServer.Domain.ChannelRead", b =>
-                {
-                    b.HasOne("Night.Ms.SshServer.Domain.Channel", "Channel")
-                        .WithMany()
-                        .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_channel_reads_channels_channel_id");
-
-                    b.HasOne("Night.Ms.SshServer.Domain.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_channel_reads_users_user_id");
 
                     b.Navigation("Channel");
 

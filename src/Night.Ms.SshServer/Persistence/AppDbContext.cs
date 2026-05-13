@@ -10,6 +10,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
+    public DbSet<ChannelRead> ChannelReads => Set<ChannelRead>();
     public DbSet<Forum> Forums => Set<Forum>();
     public DbSet<Topic> Topics => Set<Topic>();
     public DbSet<Post> Posts => Set<Post>();
@@ -69,6 +71,31 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(m => new { m.ChannelId, m.CreatedAt }).IsDescending(false, true);
             b.HasOne(m => m.Channel).WithMany(c => c.Messages).HasForeignKey(m => m.ChannelId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChannelRead>(b =>
+        {
+            b.ToTable("channel_reads");
+            b.HasKey(r => new { r.UserId, r.ChannelId });
+            b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(r => r.Channel).WithMany().HasForeignKey(r => r.ChannelId).OnDelete(DeleteBehavior.Cascade);
+            // Sidebar query "channels this user has touched, newest activity first" rides
+            // this index. Without it we'd scan the full table per session refresh.
+            b.HasIndex(r => new { r.UserId, r.UpdatedAt }).IsDescending(false, true);
+        });
+
+        modelBuilder.Entity<MessageReaction>(b =>
+        {
+            b.ToTable("message_reactions");
+            // Composite PK enforces "one user, one emoji per message" — re-adding the same
+            // reaction is a no-op insert that we let the DB reject.
+            b.HasKey(r => new { r.MessageId, r.UserId, r.Emoji });
+            // Emoji is a unicode glyph (often 1–4 codepoints + ZWJ). 32 bytes covers every
+            // sequence in our curated EmojiTable with room for skin-tone modifiers later.
+            b.Property(r => r.Emoji).HasMaxLength(32);
+            b.HasIndex(r => r.MessageId); // for "show me all reactions for these messages"
+            b.HasOne(r => r.Message).WithMany(m => m.Reactions).HasForeignKey(r => r.MessageId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Forum>(b =>

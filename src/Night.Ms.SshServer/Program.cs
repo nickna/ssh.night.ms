@@ -26,6 +26,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
 builder.Services.AddSingleton<ChatService>();
+builder.Services.AddSingleton<ChatMutationService>();
+builder.Services.AddSingleton<PresenceService>();
+builder.Services.AddSingleton<ReadStateService>();
 builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 builder.Services.AddSingleton<ArtProvider>();
