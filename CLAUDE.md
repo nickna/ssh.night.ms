@@ -109,7 +109,7 @@ dotnet run --project src/Night.Ms.Tools.AnsiConvert -- <input.png> \
 
 Depth defaults to `truecolor`; dither defaults to `none` for truecolor and `floyd` (Floyd–Steinberg) for the quantized depths. Without `--out`, output goes to stdout — so `... > art/welcome.ans` is the normal write pattern. Convert offline, commit the `.ans`, point `NIGHTMS_LOGIN_ART_PATH` at it; the server never converts raster at runtime.
 
-ImageSharp 3.1.x carries one open moderate-severity CVE (decode-time DoS). Acceptable for an offline build-time tool run on trusted inputs; upgrading to ImageSharp 4.x would resolve it but switches to the Six Labors Split License.
+We pin ImageSharp to the latest 3.1.x patch (Apache 2.0). The 4.x line switches to the Six Labors Split License, which is why we don't take it.
 
 ## Project-specific conventions worth knowing
 

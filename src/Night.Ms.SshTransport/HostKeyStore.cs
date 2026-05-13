@@ -46,8 +46,10 @@ public static class HostKeyStore
         try
         {
             KeyPair.ExportPrivateKeyFile(generated, path, passphrase: null, KeyFormat.OpenSsh, KeyEncoding.Default);
-            try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
-            catch { /* Windows: NTFS ACLs left at default. */ }
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
             logger.LogInformation("Generated and persisted host key: {Label} ({Path})", label, path);
         }
         catch (Exception ex)

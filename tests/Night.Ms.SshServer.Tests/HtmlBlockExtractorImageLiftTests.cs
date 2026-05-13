@@ -94,7 +94,7 @@ public class HtmlBlockExtractorImageLiftTests
         var blocks = ExtractBlocks(html);
 
         Assert.Single(blocks.OfType<ImageBlock>());
-        Assert.Empty(blocks.OfType<ParagraphBlock>().Where(p => p.Runs.Any(r => r.Text.Contains("[image:"))));
+        Assert.DoesNotContain(blocks.OfType<ParagraphBlock>(), p => p.Runs.Any(r => r.Text.Contains("[image:")));
     }
 
     [Fact]
