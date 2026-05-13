@@ -1,5 +1,6 @@
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -14,7 +15,7 @@ public sealed class BrowserPromptScreen : BbsWindow
 {
     private readonly IApplication _app;
     private readonly TextField _url;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
 
     public BrowserPromptScreen(IApplication app, IServiceProvider services, User user)
         : base(app, services, user)
@@ -38,13 +39,12 @@ public sealed class BrowserPromptScreen : BbsWindow
         };
         _url.SetScheme(BbsTheme.Input);
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 2,
             Y = 5,
             Width = Dim.Fill(2),
         };
-        _status.SetScheme(BbsTheme.Status);
 
         var open = new Button
         {
@@ -91,7 +91,7 @@ public sealed class BrowserPromptScreen : BbsWindow
         var raw = (_url.Text ?? string.Empty).Trim();
         if (raw.Length == 0)
         {
-            SetError("[!] Enter a URL.");
+            _status.Set("[!] Enter a URL.");
             return;
         }
 
@@ -104,7 +104,7 @@ public sealed class BrowserPromptScreen : BbsWindow
         if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            SetError("[!] Not a valid http(s) URL.");
+            _status.Set("[!] Not a valid http(s) URL.");
             return;
         }
 
@@ -114,7 +114,7 @@ public sealed class BrowserPromptScreen : BbsWindow
         if (string.Equals(uri.Host, "http", StringComparison.OrdinalIgnoreCase)
             || string.Equals(uri.Host, "https", StringComparison.OrdinalIgnoreCase))
         {
-            SetError("[!] URL looks malformed (duplicated scheme?).");
+            _status.Set("[!] URL looks malformed (duplicated scheme?).");
             return;
         }
 
@@ -122,9 +122,4 @@ public sealed class BrowserPromptScreen : BbsWindow
         _app.RequestStop();
     }
 
-    private void SetError(string text)
-    {
-        _status.Text = text;
-        _status.SetScheme(BbsTheme.Warning);
-    }
 }

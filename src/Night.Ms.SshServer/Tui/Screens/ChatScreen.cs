@@ -53,7 +53,7 @@ public sealed class ChatScreen : BbsWindow
     private readonly ListView _channelsList;
     private readonly TextField _input;
     private readonly ChatInputPreview _preview;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<long, string> _drafts = new();
 
@@ -82,6 +82,9 @@ public sealed class ChatScreen : BbsWindow
 
     private Channel _currentChannel;
     private CancellationTokenSource _channelCts = new();
+    // Linked CTS combining _shutdown and _channelCts. Recreated per LoadHistoryAndSubscribeAsync;
+    // disposed by TeardownChannelTasksAsync so a long-running session doesn't leak one CTS per /join.
+    private CancellationTokenSource? _channelLinkedCts;
     private Task? _subscriber;
     private Task? _presenceSubscriber;
     private Task? _heartbeat;
@@ -143,13 +146,13 @@ public sealed class ChatScreen : BbsWindow
         };
         _sidebar.Add(_sidebarList);
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 0,
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
+            DefaultKind = BbsStatusLine.StatusKind.Status,
         };
-        _status.SetScheme(BbsTheme.Status);
 
         // One-row preview shown above the input while the buffer is non-empty. Starts hidden
         // with Height=0 so it doesn't reserve a row at chat-empty rest.
@@ -745,6 +748,8 @@ public sealed class ChatScreen : BbsWindow
         _heartbeat = null;
         _typingPrune = null;
         _channelsRefresh = null;
+        _channelLinkedCts?.Dispose();
+        _channelLinkedCts = null;
         lock (_typers) _typers.Clear();
         _typingHint = string.Empty;
     }
@@ -818,7 +823,8 @@ public sealed class ChatScreen : BbsWindow
                 _ = MarkReadSafelyAsync(_currentChannel.Id, highestSeenId);
             }
 
-            var channelToken = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, _channelCts.Token).Token;
+            _channelLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, _channelCts.Token);
+            var channelToken = _channelLinkedCts.Token;
             _subscriber = Task.Run(() => RunSubscribeAsync(_currentChannel.Id, channelToken));
             _presenceSubscriber = Task.Run(() => RunPresenceSubscribeAsync(_currentChannel.Id, channelToken));
             _heartbeat = Task.Run(() => RunHeartbeatAsync(_currentChannel.Id, channelToken));
@@ -1145,11 +1151,7 @@ public sealed class ChatScreen : BbsWindow
     {
         var baseStatus = $"in {LabelFor(_currentChannel)}  topic: {_currentChannel.Topic ?? "(none)"}";
         var text = string.IsNullOrEmpty(_typingHint) ? baseStatus : $"{baseStatus}  |  {_typingHint}";
-        _app.Invoke(() =>
-        {
-            _status.Text = text;
-            _status.SetScheme(BbsTheme.Status);
-        });
+        _app.Invoke(() => _status.Set(text, BbsStatusLine.StatusKind.Status));
     }
 
     // Debounced typing publish. Fires at most once per TypingDebounce, only when the input
@@ -1384,11 +1386,7 @@ public sealed class ChatScreen : BbsWindow
             ? "DM"
             : $"#{channel.Name}";
 
-    private void SetStatus(string text) => _app.Invoke(() =>
-    {
-        _status.Text = text;
-        _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Status);
-    });
+    private void SetStatus(string text) => _app.Invoke(() => _status.Set(text));
 
     // Recomputes the preview row from the current buffer. Toggles the row's Height/Visible
     // (and the log's Fill margin) so the row collapses entirely when the buffer is empty.
@@ -1432,8 +1430,7 @@ public sealed class ChatScreen : BbsWindow
             _log.Append(line, messageId);
             if (line.SelfMentioned)
             {
-                _status.Text = "@ you were mentioned";
-                _status.SetScheme(BbsTheme.Warning);
+                _status.SetWarning("@ you were mentioned");
             }
         });
     }

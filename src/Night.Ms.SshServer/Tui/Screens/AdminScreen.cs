@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -17,7 +18,7 @@ public sealed class AdminScreen : BbsWindow
     private readonly User _actor;
     private readonly TextView _userPane;
     private readonly TextView _audit;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
     private readonly TextField _command;
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
@@ -68,14 +69,13 @@ public sealed class AdminScreen : BbsWindow
             CanFocus = false,
         };
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 0,
             Y = Pos.AnchorEnd(3),
             Width = Dim.Fill(),
             Text = "Commands: ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh",
         };
-        _status.SetScheme(BbsTheme.Hint);
 
         _command = new TextField
         {
@@ -231,11 +231,7 @@ public sealed class AdminScreen : BbsWindow
         }
     }
 
-    private void SetStatus(string text) => _app.Invoke(() =>
-    {
-        _status.Text = text;
-        _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Hint);
-    });
+    private void SetStatus(string text) => _app.Invoke(() => _status.Set(text));
 
     private static string FormatUser(User u, User viewer)
     {

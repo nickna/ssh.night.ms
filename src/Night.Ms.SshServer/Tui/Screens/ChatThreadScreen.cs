@@ -31,7 +31,7 @@ public sealed class ChatThreadScreen : BbsWindow
     private readonly long _rootMessageId;
     private readonly ChatLogView _log;
     private readonly TextField _input;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
     private readonly CancellationTokenSource _shutdown = new();
 
     // Same MessageRef shape as ChatScreen — duplicated rather than shared because both
@@ -59,14 +59,14 @@ public sealed class ChatThreadScreen : BbsWindow
             Height = Dim.Fill(3),
         };
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 0,
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
             Text = "loading thread…",
+            DefaultKind = BbsStatusLine.StatusKind.Status,
         };
-        _status.SetScheme(BbsTheme.Status);
 
         _input = new TextField
         {
@@ -582,11 +582,7 @@ public sealed class ChatThreadScreen : BbsWindow
     private void AppendOnUiThread(ChatLine line, long? messageId = null) =>
         _app.Invoke(() => _log.Append(line, messageId));
 
-    private void SetStatus(string text) => _app.Invoke(() =>
-    {
-        _status.Text = text;
-        _status.SetScheme(text.StartsWith("[!]") ? BbsTheme.Warning : BbsTheme.Status);
-    });
+    private void SetStatus(string text) => _app.Invoke(() => _status.Set(text));
 
     protected override void Dispose(bool disposing)
     {

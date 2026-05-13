@@ -4,6 +4,7 @@ using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -28,7 +29,7 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly OptionSelector<TemperatureUnit> _temperature;
     private readonly OptionSelector<ClockFormat> _clockFormat;
     private readonly OptionSelector<DateFormat> _dateFormat;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
 
     public ProfileEditScreen(IApplication app, IServiceProvider services, User user, IPAddress? clientIp)
         : base(app, services, user)
@@ -160,8 +161,13 @@ public sealed class ProfileEditScreen : BbsWindow
 
         // ----- Footer -----
 
-        _status = new Label { X = 2, Y = Pos.AnchorEnd(2), Width = Dim.Fill(2) };
-        _status.SetScheme(BbsTheme.Status);
+        _status = new BbsStatusLine
+        {
+            X = 2,
+            Y = Pos.AnchorEnd(2),
+            Width = Dim.Fill(2),
+            DefaultKind = BbsStatusLine.StatusKind.Status,
+        };
 
         var save = new Button { X = 2, Y = Pos.AnchorEnd(4), Text = "_Save", IsDefault = true };
         save.Accepting += (_, e) => { e.Handled = true; _ = SaveAsync(); };
@@ -213,11 +219,7 @@ public sealed class ProfileEditScreen : BbsWindow
 
             if (!result.Ok)
             {
-                _app.Invoke(() =>
-                {
-                    _status.Text = $"[!] {result.Error}";
-                    _status.SetScheme(BbsTheme.Warning);
-                });
+                _app.Invoke(() => _status.SetWarning($"[!] {result.Error}"));
                 return;
             }
             ReflectSavedUser(update);
@@ -225,19 +227,11 @@ public sealed class ProfileEditScreen : BbsWindow
             _user.LocationLongitude = result.LocationLongitude;
             _user.LocationCanonical = result.LocationCanonical;
             _user.LocationSource = result.LocationSource;
-            _app.Invoke(() =>
-            {
-                _status.Text = "Saved.";
-                _status.SetScheme(BbsTheme.Success_);
-            });
+            _app.Invoke(() => _status.SetSuccess("Saved."));
         }
         catch (Exception ex)
         {
-            _app.Invoke(() =>
-            {
-                _status.Text = $"[!] save failed: {ex.Message}";
-                _status.SetScheme(BbsTheme.Warning);
-            });
+            _app.Invoke(() => _status.SetWarning($"[!] save failed: {ex.Message}"));
         }
     }
 
@@ -277,11 +271,7 @@ public sealed class ProfileEditScreen : BbsWindow
         var ipResult = await profile.UpdateAsync(_user.Id, ipUpdate, default);
         if (!ipResult.Ok)
         {
-            _app.Invoke(() =>
-            {
-                _status.Text = $"[!] {ipResult.Error}";
-                _status.SetScheme(BbsTheme.Warning);
-            });
+            _app.Invoke(() => _status.SetWarning($"[!] {ipResult.Error}"));
             return false;
         }
         _app.Invoke(() =>
@@ -293,11 +283,7 @@ public sealed class ProfileEditScreen : BbsWindow
         _user.LocationLongitude = suggestion.Longitude;
         _user.LocationCanonical = suggestion.DisplayName;
         _user.LocationSource = LocationSource.IpGuess;
-        _app.Invoke(() =>
-        {
-            _status.Text = $"Saved with detected location: {suggestion.DisplayName}";
-            _status.SetScheme(BbsTheme.Success_);
-        });
+        _app.Invoke(() => _status.SetSuccess($"Saved with detected location: {suggestion.DisplayName}"));
         return true;
     }
 

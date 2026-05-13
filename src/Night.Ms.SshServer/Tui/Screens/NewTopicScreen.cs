@@ -1,6 +1,7 @@
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -16,7 +17,7 @@ public sealed class NewTopicScreen : BbsWindow
     private readonly Forum _forum;
     private readonly TextField _title;
     private readonly TextView _body;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
 
     public NewTopicScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
         : base(app, services, user)
@@ -45,13 +46,13 @@ public sealed class NewTopicScreen : BbsWindow
         };
         _body.SetScheme(BbsTheme.Input);
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 2,
             Y = Pos.Bottom(_body),
             Width = Dim.Fill(2),
+            DefaultKind = BbsStatusLine.StatusKind.Status,
         };
-        _status.SetScheme(BbsTheme.Status);
 
         var submit = new Button
         {
@@ -104,12 +105,12 @@ public sealed class NewTopicScreen : BbsWindow
         var body = (_body.Text ?? string.Empty).Trim();
         if (title.Length is < 3 or > 120)
         {
-            SetStatusError("[!] Title must be 3–120 characters.");
+            _status.SetWarning("[!] Title must be 3–120 characters.");
             return;
         }
         if (body.Length < 1)
         {
-            SetStatusError("[!] Body cannot be empty.");
+            _status.SetWarning("[!] Body cannot be empty.");
             return;
         }
 
@@ -147,13 +148,8 @@ public sealed class NewTopicScreen : BbsWindow
         }
         catch (Exception ex)
         {
-            SetStatusError($"[!] Failed to create topic: {ex.Message}");
+            _status.SetWarning($"[!] Failed to create topic: {ex.Message}");
         }
     }
 
-    private void SetStatusError(string text)
-    {
-        _status.Text = text;
-        _status.SetScheme(BbsTheme.Warning);
-    }
 }
