@@ -49,8 +49,22 @@ public sealed class ChatService(IServiceProvider services)
             CreatedAt = DateTimeOffset.UtcNow,
         };
         db.Channels.Add(channel);
-        await db.SaveChangesAsync(ct);
-        return new JoinResult.Created(channel);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return new JoinResult.Created(channel);
+        }
+        catch (DbUpdateException)
+        {
+            // Two clients typed /join #foo at the same time — the unique index on Channel.Name
+            // will reject the second insert. Re-look up the now-existing row.
+            db.ChangeTracker.Clear();
+            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct);
+            if (winner is null) throw;
+            return winner.IsPrivate
+                ? new JoinResult.Denied($"#{name} is a private channel.")
+                : new JoinResult.Joined(winner);
+        }
     }
 
     // DMs are private channels with a deterministic name: dm-{minHandle}-{maxHandle}, so the
@@ -97,7 +111,20 @@ public sealed class ChatService(IServiceProvider services)
             CreatedAt = DateTimeOffset.UtcNow,
         };
         db.Channels.Add(channel);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Both pair members typed /dm at the same time — the unique index on Channel.Name
+            // rejected the second insert. Defer to the winner; their members are being added
+            // on the other path.
+            db.ChangeTracker.Clear();
+            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == dmName, ct);
+            if (winner is null) throw;
+            return new JoinResult.Joined(winner);
+        }
 
         var now = DateTimeOffset.UtcNow;
         db.ChannelMembers.Add(new ChannelMember { ChannelId = channel.Id, UserId = actor.Id, JoinedAt = now, Role = "member" });

@@ -87,7 +87,15 @@ public sealed class BbsSshServer : IAsyncDisposable
             _remoteIPs[session] = ip;
             _logger.LogDebug("Session opened from {Address}:{Port}", ip, endpoint.Port);
         }
-        session.Closed += (_, _) => _remoteIPs.TryRemove(session, out _);
+        session.Closed += (_, _) =>
+        {
+            _remoteIPs.TryRemove(session, out _);
+            // A session that authenticates but never opens a channel (port-scan, half-open)
+            // would otherwise retain its PendingAuth row — including the public-key blob —
+            // for the lifetime of the server. OnChannelOpening also TryRemoves; this is the
+            // safety net for the no-channel path.
+            _pendingAuth.TryRemove(session, out _);
+        };
     }
 
     private void OnSessionAuthenticating(object? sender, SshAuthenticatingEventArgs e)
