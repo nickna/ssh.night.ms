@@ -53,7 +53,7 @@ public sealed class ChatScreen : BbsWindow
     private readonly ListView _channelsList;
     private readonly TextField _input;
     private readonly ChatInputPreview _preview;
-    private readonly BbsStatusLine _status;
+    private readonly BbsChatStatusLine _status;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<long, string> _drafts = new();
 
@@ -146,12 +146,12 @@ public sealed class ChatScreen : BbsWindow
         };
         _sidebar.Add(_sidebarList);
 
-        _status = new BbsStatusLine
+        _status = new BbsChatStatusLine
         {
             X = 0,
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
-            DefaultKind = BbsStatusLine.StatusKind.Status,
+            Height = 1,
         };
 
         // One-row preview shown above the input while the buffer is non-empty. Starts hidden
@@ -1127,9 +1127,33 @@ public sealed class ChatScreen : BbsWindow
 
     private void RefreshStatusLine()
     {
-        var baseStatus = $"in {LabelFor(_currentChannel)}  topic: {_currentChannel.Topic ?? "(none)"}";
-        var text = string.IsNullOrEmpty(_typingHint) ? baseStatus : $"{baseStatus}  |  {_typingHint}";
-        _app.Invoke(() => _status.Set(text, BbsStatusLine.StatusKind.Status));
+        var line = BuildTopicStatusLine();
+        _app.Invoke(() => _status.SetStyled(line));
+    }
+
+    // Builds the styled "in #lobby  topic: <topic>  |  alice is typing..." line. The topic
+    // portion runs through MessageRenderer.PreviewBody so *bold*/_italic_/`code`/:emoji:
+    // render the same as in chat bodies. Chrome (prefix/separator/typing hint) uses dim
+    // ChatPalette.Chrome to match the timestamp + "[N replies]" chrome elsewhere.
+    private ChatLine BuildTopicStatusLine()
+    {
+        var runs = new List<ChatRun>(8);
+        runs.Add(new ChatRun($"in {LabelFor(_currentChannel)}  topic: ", ChatPalette.Chrome, ArtStyle.None));
+        var topic = _currentChannel.Topic;
+        if (string.IsNullOrEmpty(topic))
+        {
+            runs.Add(new ChatRun("(none)", ChatPalette.Chrome, ArtStyle.Italic));
+        }
+        else
+        {
+            var topicLine = MessageRenderer.PreviewBody(topic, _user.Handle);
+            foreach (var run in topicLine.Runs) runs.Add(run);
+        }
+        if (!string.IsNullOrEmpty(_typingHint))
+        {
+            runs.Add(new ChatRun($"  |  {_typingHint}", ChatPalette.Chrome, ArtStyle.Italic));
+        }
+        return new ChatLine(runs);
     }
 
     // Debounced typing publish. Fires at most once per TypingDebounce, only when the input
@@ -1336,7 +1360,7 @@ public sealed class ChatScreen : BbsWindow
     {
         var label = LabelFor(_currentChannel);
         Title = $"{label} — {_user.Handle} — /help — [Esc] back to lobby";
-        SetStatus($"in {label}  topic: {_currentChannel.Topic ?? "(none)"}");
+        RefreshStatusLine();
     }
 
     private static string LabelFor(Channel channel) =>
