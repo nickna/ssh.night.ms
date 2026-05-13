@@ -326,6 +326,15 @@ internal sealed class ChatLogView : View
             var i = 0;
             while (i < text.Length)
             {
+                // Hard line break — flush the current row (even if empty, so consecutive
+                // \n produce a blank line) and drop the newline itself.
+                if (text[i] == '\n')
+                {
+                    Flush();
+                    i++;
+                    continue;
+                }
+
                 if (text[i] == ' ')
                 {
                     var space = i;
@@ -341,7 +350,7 @@ internal sealed class ChatLogView : View
                 }
 
                 var start = i;
-                while (i < text.Length && text[i] != ' ') i++;
+                while (i < text.Length && text[i] != ' ' && text[i] != '\n') i++;
                 EmitWord(text[start..i], run.Foreground, run.Style);
             }
         }
