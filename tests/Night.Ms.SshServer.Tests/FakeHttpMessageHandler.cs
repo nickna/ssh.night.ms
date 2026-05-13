@@ -54,7 +54,26 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
     }
 }
 
+// Mirrors the production AddHttpClient configuration: providers expect BaseAddress to be
+// set up-front by the factory (Program.cs does this via AddHttpClient("name", c => ...)).
+// We map each known client name to its production base so tests behave identically.
 internal sealed class StaticHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
 {
-    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    private static readonly Dictionary<string, Uri> BaseAddresses = new()
+    {
+        [Night.Ms.SshServer.Providers.OpenMeteoWeatherProvider.HttpClientName]    = new Uri("https://api.open-meteo.com/"),
+        [Night.Ms.SshServer.Providers.HackerNewsProvider.HttpClientName]          = new Uri("https://hacker-news.firebaseio.com/"),
+        [Night.Ms.SshServer.Providers.OpenMeteoGeocodingProvider.HttpClientName]  = new Uri("https://geocoding-api.open-meteo.com/"),
+        [Night.Ms.SshServer.Providers.IpApiCoGeolocationProvider.HttpClientName]  = new Uri("https://ipapi.co/"),
+    };
+
+    public HttpClient CreateClient(string name)
+    {
+        var client = new HttpClient(handler, disposeHandler: false);
+        if (BaseAddresses.TryGetValue(name, out var baseAddress))
+        {
+            client.BaseAddress = baseAddress;
+        }
+        return client;
+    }
 }

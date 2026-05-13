@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Night.Ms.SshServer.Providers;
@@ -45,12 +44,7 @@ public sealed class HackerNewsProvider(IHttpClientFactory httpClientFactory, ILo
     private async Task<IReadOnlyList<NewsHeadline>> FetchAsync(int max, CancellationToken ct)
     {
         var http = httpClientFactory.CreateClient(HttpClientName);
-        if (http.BaseAddress is null)
-        {
-            http.BaseAddress = new Uri("https://hacker-news.firebaseio.com/");
-        }
-
-        var ids = await http.GetFromJsonAsync<int[]>("v0/topstories.json", JsonOpts, ct).ConfigureAwait(false)
+        var ids = await http.GetFromJsonAsync<int[]>("v0/topstories.json", SnakeCaseJson.Options, ct).ConfigureAwait(false)
                   ?? [];
 
         var picks = ids.Take(max).ToArray();
@@ -62,7 +56,7 @@ public sealed class HackerNewsProvider(IHttpClientFactory httpClientFactory, ILo
     {
         try
         {
-            var item = await http.GetFromJsonAsync<HnItem>($"v0/item/{id}.json", JsonOpts, ct).ConfigureAwait(false);
+            var item = await http.GetFromJsonAsync<HnItem>($"v0/item/{id}.json", SnakeCaseJson.Options, ct).ConfigureAwait(false);
             if (item?.Title is null) return null;
             return new NewsHeadline(
                 Title: item.Title,
@@ -76,8 +70,6 @@ public sealed class HackerNewsProvider(IHttpClientFactory httpClientFactory, ILo
             return null;
         }
     }
-
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
     private sealed record HnItem(
         [property: JsonPropertyName("id")] int Id,

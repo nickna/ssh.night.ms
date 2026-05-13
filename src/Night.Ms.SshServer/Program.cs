@@ -46,10 +46,16 @@ builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider, Ni
 // Pluggable provider interfaces (M10 follow-up F9). Open-Meteo + Hacker News ship as the
 // default no-key implementations; swap in a paid news source or a different weather API
 // later by re-binding INewsProvider / IWeatherProvider.
-builder.Services.AddHttpClient(OpenMeteoWeatherProvider.HttpClientName);
-builder.Services.AddHttpClient(HackerNewsProvider.HttpClientName);
-builder.Services.AddHttpClient(OpenMeteoGeocodingProvider.HttpClientName);
-builder.Services.AddHttpClient(IpApiCoGeolocationProvider.HttpClientName);
+// BaseAddress is set up-front so providers don't race to lazily assign it on the shared
+// HttpClient instance handed out by IHttpClientFactory.
+builder.Services.AddHttpClient(OpenMeteoWeatherProvider.HttpClientName, c =>
+    c.BaseAddress = new Uri("https://api.open-meteo.com/"));
+builder.Services.AddHttpClient(HackerNewsProvider.HttpClientName, c =>
+    c.BaseAddress = new Uri("https://hacker-news.firebaseio.com/"));
+builder.Services.AddHttpClient(OpenMeteoGeocodingProvider.HttpClientName, c =>
+    c.BaseAddress = new Uri("https://geocoding-api.open-meteo.com/"));
+builder.Services.AddHttpClient(IpApiCoGeolocationProvider.HttpClientName, c =>
+    c.BaseAddress = new Uri("https://ipapi.co/"));
 builder.Services.AddHttpClient(SmartReaderArticleReader.HttpClientName, c =>
 {
     // Identify ourselves so site operators can trace traffic back to a known BBS rather

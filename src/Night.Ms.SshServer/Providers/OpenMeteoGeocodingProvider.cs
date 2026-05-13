@@ -23,11 +23,10 @@ public sealed class OpenMeteoGeocodingProvider(IHttpClientFactory httpClientFact
         try
         {
             var http = httpClientFactory.CreateClient(HttpClientName);
-            EnsureBaseAddress(http);
             using var response = await http.GetAsync(uri, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            var payload = await JsonSerializer.DeserializeAsync<SearchResponse>(stream, JsonOpts, cancellationToken).ConfigureAwait(false);
+            var payload = await JsonSerializer.DeserializeAsync<SearchResponse>(stream, SnakeCaseJson.Options, cancellationToken).ConfigureAwait(false);
             if (payload?.Results is null) return Array.Empty<GeocodingMatch>();
 
             return payload.Results
@@ -62,14 +61,6 @@ public sealed class OpenMeteoGeocodingProvider(IHttpClientFactory httpClientFact
             Admin1: null);
     }
 
-    private static void EnsureBaseAddress(HttpClient http)
-    {
-        if (http.BaseAddress is null)
-        {
-            http.BaseAddress = new Uri("https://geocoding-api.open-meteo.com/");
-        }
-    }
-
     private static string BuildCanonicalName(GeocodingResult r)
     {
         var parts = new List<string> { r.Name };
@@ -79,11 +70,6 @@ public sealed class OpenMeteoGeocodingProvider(IHttpClientFactory httpClientFact
             parts.Add(r.Country);
         return string.Join(", ", parts);
     }
-
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    };
 
     private sealed record SearchResponse(
         [property: JsonPropertyName("results")] GeocodingResult[]? Results);

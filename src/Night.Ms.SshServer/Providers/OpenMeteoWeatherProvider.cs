@@ -72,15 +72,10 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
         var uri = $"v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code&temperature_unit=celsius";
 
         var http = httpClientFactory.CreateClient(HttpClientName);
-        if (http.BaseAddress is null)
-        {
-            http.BaseAddress = new Uri("https://api.open-meteo.com/");
-        }
-
         using var response = await http.GetAsync(uri, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        var payload = await JsonSerializer.DeserializeAsync<OpenMeteoResponse>(stream, JsonOpts, ct).ConfigureAwait(false);
+        var payload = await JsonSerializer.DeserializeAsync<OpenMeteoResponse>(stream, SnakeCaseJson.Options, ct).ConfigureAwait(false);
         if (payload?.Current is null) return null;
 
         var celsius = payload.Current.Temperature2m;
@@ -93,11 +88,6 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
             Conditions: WmoCode(payload.Current.WeatherCode),
             FetchedAt: DateTimeOffset.UtcNow);
     }
-
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    };
 
     // WMO 4677 weather codes — see https://open-meteo.com/en/docs (look for "Weather variable documentation").
     internal static string WmoCode(int code) => code switch

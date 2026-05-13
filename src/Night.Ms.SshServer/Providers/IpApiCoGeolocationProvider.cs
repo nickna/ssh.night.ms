@@ -23,7 +23,6 @@ public sealed class IpApiCoGeolocationProvider(IHttpClientFactory httpClientFact
         try
         {
             var http = httpClientFactory.CreateClient(HttpClientName);
-            if (http.BaseAddress is null) http.BaseAddress = new Uri("https://ipapi.co/");
             using var response = await http.GetAsync(uri, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -31,7 +30,7 @@ public sealed class IpApiCoGeolocationProvider(IHttpClientFactory httpClientFact
                 return null;
             }
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            var payload = await JsonSerializer.DeserializeAsync<IpApiResponse>(stream, JsonOpts, cancellationToken).ConfigureAwait(false);
+            var payload = await JsonSerializer.DeserializeAsync<IpApiResponse>(stream, SnakeCaseJson.Options, cancellationToken).ConfigureAwait(false);
             // ipapi.co returns HTTP 200 even when the IP is reserved/private, but flags it with
             // an `error` field. Detect that explicitly so we don't surface bogus 0,0 coords.
             if (payload is null || payload.Error == true || payload.Latitude is null || payload.Longitude is null)
@@ -85,11 +84,6 @@ public sealed class IpApiCoGeolocationProvider(IHttpClientFactory httpClientFact
         if (!string.IsNullOrEmpty(p.CountryName)) parts.Add(p.CountryName);
         return parts.Count > 0 ? string.Join(", ", parts) : "Unknown location";
     }
-
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    };
 
     private sealed record IpApiResponse(
         [property: JsonPropertyName("latitude")] double? Latitude,
