@@ -51,7 +51,7 @@ public sealed class BbsSshServer : IAsyncDisposable
         // config.KeyExchangeAlgorithms.Add(new Curve25519KeyExchangeAlgorithm());
 
         var trace = new TraceSource(nameof(BbsSshServer));
-        _server = new IpCapturingTcpSshServer(config, trace)
+        _server = new IpCapturingTcpSshServer(config, trace, _logger)
         {
             Credentials = new SshServerCredentials(_hostKeys.ToArray()),
         };
