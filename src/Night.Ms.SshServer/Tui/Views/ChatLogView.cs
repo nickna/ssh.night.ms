@@ -5,6 +5,7 @@ using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Attribute = Terminal.Gui.Drawing.Attribute;
+using Cell = Night.Ms.SshServer.Tui.Art.Cell;
 using Mouse = Terminal.Gui.Input.Mouse;
 
 namespace Night.Ms.SshServer.Tui.Views;
@@ -66,6 +67,33 @@ internal sealed class ChatLogView : View
         var idx = _entries.FindIndex(e => e.MessageId == messageId);
         if (idx < 0) return false;
         _entries[idx].Reactions = reactions;
+        InvalidateLayout();
+        return true;
+    }
+
+    // Attach a rendered image (half-block CellGrid) to a message. Multiple calls for the
+    // same message accumulate — useful for messages containing several image URLs. The
+    // image is painted as a block between the message body and any reactions footer.
+    public bool TryAddImage(long messageId, CellGrid grid)
+    {
+        var idx = _entries.FindIndex(e => e.MessageId == messageId);
+        if (idx < 0) return false;
+        var entry = _entries[idx];
+        var images = entry.Images.ToList();
+        images.Add(grid);
+        entry.Images = images;
+        InvalidateLayout();
+        return true;
+    }
+
+    // Wipe attached images for a message. Used when a message is deleted (tombstoned)
+    // so the image rows don't survive past the body that referenced them.
+    public bool TryClearImages(long messageId)
+    {
+        var idx = _entries.FindIndex(e => e.MessageId == messageId);
+        if (idx < 0) return false;
+        if (_entries[idx].Images.Count == 0) return false;
+        _entries[idx].Images = Array.Empty<CellGrid>();
         InvalidateLayout();
         return true;
     }
@@ -135,12 +163,16 @@ internal sealed class ChatLogView : View
         {
             var rowIdx = row + _topRow;
             if (rowIdx >= _displayRows.Count) break;
-            PaintRow(_displayRows[rowIdx], row, width);
+            switch (_displayRows[rowIdx])
+            {
+                case TextDisplayRow text: PaintTextRow(text, row, width); break;
+                case ImageDisplayRow img:  PaintImageRow(img, row, width); break;
+            }
         }
         return true;
     }
 
-    private void PaintRow(DisplayRow row, int y, int width)
+    private void PaintTextRow(TextDisplayRow row, int y, int width)
     {
         var col = 0;
         foreach (var seg in row.Segments)
@@ -152,6 +184,22 @@ internal sealed class ChatLogView : View
                 AddRune(col, y, rune);
                 col += Math.Max(1, RuneWidth(rune));
             }
+        }
+    }
+
+    // Image rows carry a per-cell (fg, bg) pair from the half-block renderer; paint each
+    // cell with its own attribute so background colors are honored (unlike text rows which
+    // always assume black background).
+    private void PaintImageRow(ImageDisplayRow row, int y, int width)
+    {
+        for (var col = 0; col < row.Cells.Count && col < width; col++)
+        {
+            var cell = row.Cells[col];
+            var fg = new Color(cell.Foreground.R, cell.Foreground.G, cell.Foreground.B);
+            var bg = new Color(cell.Background.R, cell.Background.G, cell.Background.B);
+            var style = cell.Style.HasFlag(ArtStyle.Bold) ? TextStyle.Bold : TextStyle.None;
+            SetAttribute(new Attribute(fg, bg, style));
+            AddRune(col, y, cell.Glyph);
         }
     }
 
@@ -173,6 +221,18 @@ internal sealed class ChatLogView : View
         foreach (var entry in _entries)
         {
             WrapAndAppend(entry.Line, width);
+            // Image rows render after the message body and before any reactions. One
+            // display row per source CellGrid row; widths > viewport clip rather than wrap.
+            foreach (var grid in entry.Images)
+            {
+                for (var y = 0; y < grid.Height; y++)
+                {
+                    var rowWidth = Math.Min(grid.Width, width);
+                    var cells = new Cell[rowWidth];
+                    for (var x = 0; x < rowWidth; x++) cells[x] = grid[x, y];
+                    _displayRows.Add(new ImageDisplayRow(cells));
+                }
+            }
             if (entry.Reactions.Count > 0)
             {
                 AppendReactionRow(entry.Reactions, width);
@@ -212,7 +272,7 @@ internal sealed class ChatLogView : View
             col += emojiWidth;
         }
 
-        _displayRows.Add(new DisplayRow(segments.ToArray()));
+        _displayRows.Add(new TextDisplayRow(segments.ToArray()));
     }
 
     private void WrapAndAppend(ChatLine line, int width)
@@ -223,7 +283,7 @@ internal sealed class ChatLogView : View
 
         void Flush()
         {
-            _displayRows.Add(new DisplayRow(current.ToArray()));
+            _displayRows.Add(new TextDisplayRow(current.ToArray()));
             current = new List<RunSegment>();
             currentWidth = 0;
         }
@@ -334,8 +394,16 @@ internal sealed class ChatLogView : View
         public long? MessageId;
         public required ChatLine Line { get; set; }
         public IReadOnlyList<ReactionSummary> Reactions { get; set; } = Array.Empty<ReactionSummary>();
+        // Inline images attached to this message. Each grid renders as a contiguous block
+        // of ImageDisplayRows between the message body and the reactions footer.
+        public IReadOnlyList<CellGrid> Images { get; set; } = Array.Empty<CellGrid>();
     }
 
     private readonly record struct RunSegment(string Text, ArtColor Foreground, ArtStyle Style);
-    private readonly record struct DisplayRow(IReadOnlyList<RunSegment> Segments);
+
+    // Display rows are tagged so the painter can switch between text (default-black bg) and
+    // image rows (per-cell bg from the half-block renderer).
+    private abstract record DisplayRow;
+    private sealed record TextDisplayRow(IReadOnlyList<RunSegment> Segments) : DisplayRow;
+    private sealed record ImageDisplayRow(IReadOnlyList<Cell> Cells) : DisplayRow;
 }

@@ -2,9 +2,12 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Night.Ms.Imaging;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Realtime;
+using Night.Ms.SshServer.Tui.Art;
 using Night.Ms.SshServer.Tui.Chat;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
@@ -24,6 +27,14 @@ public sealed class ChatScreen : BbsWindow
     private const int SidebarWidth = 16;
     private const int ChannelPaneWidth = 20;
     private static readonly TimeSpan ChannelRefreshPeriod = TimeSpan.FromSeconds(5);
+
+    // Image-render bounds for inline chat images. Cap is intentionally low so a big image
+    // doesn't dominate the narrow chat column; floor stops tiny favicons from rendering
+    // as 1×1 dots. Concurrency is 2 — bursty pastes don't need to saturate the network.
+    private const int ImageRenderColsCap = 40;
+    private const int ImageRenderColsFloor = 8;
+    private const int ImageSourcePixelsPerCell = 10;
+    private const int ImageFetchConcurrency = 2;
     private static readonly TimeSpan HeartbeatPeriod = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PresencePollPeriod = TimeSpan.FromSeconds(15);
     // Typing publish rate-limit. Two seconds means a 50wpm typer fans out ~3-4 events per
@@ -49,6 +60,13 @@ public sealed class ChatScreen : BbsWindow
     // position to a real ChatMessage.Id. Also seeds the reactions map for snapshot rendering.
     private readonly List<MessageRef> _recent = new();
     private readonly Dictionary<long, Dictionary<string, HashSet<long>>> _reactions = new();
+
+    // Per-session image cache. Keyed by URL so repeated postings of the same link don't
+    // re-fetch / re-render. Bounded indirectly by the per-session HttpImageFetcher cache,
+    // which evicts decoded Image<Rgba32> after a fixed-size FIFO. Half-block rendering is
+    // cheap so we don't bother LRU-ing CellGrids — just keep what we've drawn.
+    private readonly ConcurrentDictionary<Uri, CellGrid> _imageGrids = new();
+    private readonly SemaphoreSlim _imageFetchSemaphore = new(ImageFetchConcurrency, ImageFetchConcurrency);
 
     // Active "typing…" hints — handle → last-seen-typing-at. Pruned each tick of _typingTimer.
     private readonly Dictionary<string, DateTimeOffset> _typers = new();
@@ -742,6 +760,7 @@ public sealed class ChatScreen : BbsWindow
                     SeedReactions(msg.Id, rows);
                     PushReactionFooter(msg.Id);
                 }
+                if (!msgRef.Deleted) ScheduleImageFetches(msg.Id, msg.Body);
                 if (msg.Id > highestSeenId) highestSeenId = msg.Id;
             }
             _lastReadMessageId = highestSeenId;
@@ -808,6 +827,7 @@ public sealed class ChatScreen : BbsWindow
                     };
                     _recent.Insert(0, newRef);
                     AppendOnUiThread(RenderMessage(newRef), msg.Id);
+                    ScheduleImageFetches(msg.Id, msg.Body);
                     // If this message is a reply to one still on screen, bump that parent's
                     // reply count and re-render its line so the "[N replies]" badge updates.
                     BumpParentReplyCount(msg.ParentMessageId);
@@ -895,7 +915,11 @@ public sealed class ChatScreen : BbsWindow
         if (msgRef is null) return;
         msgRef.Deleted = true;
         var line = MessageRenderer.RenderDeleted(_user.FormatClock(msgRef.At), msgRef.Handle);
-        _app.Invoke(() => _log.TryReplace(del.MessageId, line));
+        _app.Invoke(() =>
+        {
+            _log.TryReplace(del.MessageId, line);
+            _log.TryClearImages(del.MessageId);
+        });
     }
 
     // Find the parent message on screen and bump its reply count + re-render in place.
@@ -1170,6 +1194,65 @@ public sealed class ChatScreen : BbsWindow
         // dm-{a}-{b} → "a/b" — cheap and unambiguous.
         var rest = dmName.Substring(3);
         return rest;
+    }
+
+    // Scans the message body for image URLs and kicks off a background fetch+render for
+    // each one. Cached grids (same URL already seen this session) paint immediately on the
+    // UI thread; new fetches go through the per-screen semaphore. Failures are silent —
+    // the link text remains visible in the body either way.
+    private void ScheduleImageFetches(long messageId, string body)
+    {
+        var urls = UrlExtractor.FindImageUrls(body);
+        if (urls.Count == 0) return;
+        foreach (var url in urls)
+        {
+            if (_imageGrids.TryGetValue(url, out var cached))
+            {
+                AttachImageOnUiThread(messageId, cached);
+                continue;
+            }
+            _ = Task.Run(() => FetchAndAttachAsync(messageId, url, _shutdown.Token));
+        }
+    }
+
+    private async Task FetchAndAttachAsync(long messageId, Uri url, CancellationToken ct)
+    {
+        IImageFetcher fetcher;
+        try
+        {
+            fetcher = _services.GetRequiredService<IImageFetcher>();
+        }
+        catch
+        {
+            return; // No fetcher registered in this build — leave the link as text.
+        }
+
+        await _imageFetchSemaphore.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var image = await fetcher.FetchAsync(url, ct).ConfigureAwait(false);
+            if (image is null || ct.IsCancellationRequested) return;
+
+            // String-roundtrip via SgrParser, same pattern as ReaderScreen — the renderer
+            // emits SGR + half-block "▀" and the parser folds that back into a CellGrid
+            // our view can paint. Keeps the imaging library decoupled from CellGrid.
+            var cols = Math.Clamp(image.Width / ImageSourcePixelsPerCell, ImageRenderColsFloor, ImageRenderColsCap);
+            var ansi = HalfBlockRenderer.Render(image, cols, ColorDepth.Truecolor, DitherMode.None);
+            var grid = SgrParser.Parse(ansi);
+            _imageGrids[url] = grid;
+            AttachImageOnUiThread(messageId, grid);
+        }
+        catch (OperationCanceledException) { /* screen closed mid-fetch */ }
+        catch { /* fetcher already logs; leave link as text */ }
+        finally
+        {
+            _imageFetchSemaphore.Release();
+        }
+    }
+
+    private void AttachImageOnUiThread(long messageId, CellGrid grid)
+    {
+        _app.Invoke(() => _log.TryAddImage(messageId, grid));
     }
 
     private async Task MarkReadSafelyAsync(long channelId, long messageId)
