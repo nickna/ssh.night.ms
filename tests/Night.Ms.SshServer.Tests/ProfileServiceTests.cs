@@ -30,9 +30,6 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
             Task.FromResult<IReadOnlyList<GeocodingMatch>?>(string.IsNullOrEmpty(query)
                 ? Array.Empty<GeocodingMatch>()
                 : [new GeocodingMatch(query, 40.0, -74.0, "United States", "New York")]);
-
-        public Task<GeocodingMatch?> ReverseAsync(double latitude, double longitude, CancellationToken cancellationToken = default) =>
-            Task.FromResult<GeocodingMatch?>(new GeocodingMatch($"{latitude},{longitude}", latitude, longitude, null, null));
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

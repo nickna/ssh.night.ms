@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Mapbox.Vector.Tile;
+using Night.Ms.SshServer.Caching;
 
 namespace Night.Ms.SshServer.Tui.Map;
 
@@ -36,9 +36,7 @@ internal sealed class OpenFreeMapVectorTileFetcher(
     private const int MaxCacheEntries = 1024;
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(8);
 
-    private readonly ConcurrentDictionary<(int z, int x, int y), Lazy<Task<DecodedVectorTile?>>> _cache = new();
-    private readonly Queue<(int z, int x, int y)> _cacheOrder = new();
-    private readonly object _evictLock = new();
+    private readonly FifoAsyncCache<(int z, int x, int y), DecodedVectorTile?> _cache = new(MaxCacheEntries);
 
     // Tile URL template lookup: discovered once via TileJSON, refreshed on 404 (snapshot
     // rotation). The lock serialises concurrent discovery on cold start so we don't burn
@@ -46,28 +44,8 @@ internal sealed class OpenFreeMapVectorTileFetcher(
     private string? _tileUrlTemplate;
     private readonly SemaphoreSlim _templateLock = new(1, 1);
 
-    public Task<DecodedVectorTile?> FetchAsync(int zoom, int tileX, int tileY, CancellationToken cancellationToken = default)
-    {
-        var key = (zoom, tileX, tileY);
-        var entry = _cache.GetOrAdd(key, k => new Lazy<Task<DecodedVectorTile?>>(
-            () => FetchInternalAsync(k.z, k.x, k.y),
-            LazyThreadSafetyMode.ExecutionAndPublication));
-        TrackInsert(key);
-        return entry.Value.WaitAsync(cancellationToken);
-    }
-
-    private void TrackInsert((int z, int x, int y) key)
-    {
-        lock (_evictLock)
-        {
-            _cacheOrder.Enqueue(key);
-            while (_cacheOrder.Count > MaxCacheEntries)
-            {
-                var oldest = _cacheOrder.Dequeue();
-                _cache.TryRemove(oldest, out _);
-            }
-        }
-    }
+    public Task<DecodedVectorTile?> FetchAsync(int zoom, int tileX, int tileY, CancellationToken cancellationToken = default) =>
+        _cache.GetOrAddAsync((zoom, tileX, tileY), k => FetchInternalAsync(k.z, k.x, k.y), cancellationToken);
 
     private async Task<DecodedVectorTile?> FetchInternalAsync(int z, int x, int y)
     {

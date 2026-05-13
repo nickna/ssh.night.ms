@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using Night.Ms.SshServer.Caching;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.PixelFormats;
@@ -25,31 +25,10 @@ public sealed class HttpImageFetcher(
     private const int MaxCacheEntries = 64;
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly ConcurrentDictionary<Uri, Lazy<Task<Image<Rgba32>?>>> _cache = new();
-    private readonly Queue<Uri> _cacheOrder = new();
-    private readonly object _evictLock = new();
+    private readonly FifoAsyncCache<Uri, Image<Rgba32>?> _cache = new(MaxCacheEntries);
 
-    public Task<Image<Rgba32>?> FetchAsync(Uri url, CancellationToken cancellationToken = default)
-    {
-        var entry = _cache.GetOrAdd(url, u => new Lazy<Task<Image<Rgba32>?>>(
-            () => FetchInternalAsync(u),
-            LazyThreadSafetyMode.ExecutionAndPublication));
-        TrackInsert(url);
-        return entry.Value.WaitAsync(cancellationToken);
-    }
-
-    private void TrackInsert(Uri url)
-    {
-        lock (_evictLock)
-        {
-            _cacheOrder.Enqueue(url);
-            while (_cacheOrder.Count > MaxCacheEntries)
-            {
-                var oldest = _cacheOrder.Dequeue();
-                _cache.TryRemove(oldest, out _);
-            }
-        }
-    }
+    public Task<Image<Rgba32>?> FetchAsync(Uri url, CancellationToken cancellationToken = default) =>
+        _cache.GetOrAddAsync(url, FetchInternalAsync, cancellationToken);
 
     private async Task<Image<Rgba32>?> FetchInternalAsync(Uri url)
     {

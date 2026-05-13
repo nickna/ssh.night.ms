@@ -185,9 +185,7 @@ internal static class BbsSessionRunner
                 }
                 else if (listResult == TopicListResult.NewTopic)
                 {
-                    using var scope = services.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    topic = app.Run(new NewTopicScreen(app, services, db, user, forum)) as Topic;
+                    topic = app.Run(new NewTopicScreen(app, services, user, forum)) as Topic;
                 }
                 if (topic is null) continue; // back to topic list
 

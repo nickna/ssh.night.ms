@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using Night.Ms.SshServer.Caching;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.PixelFormats;
@@ -25,32 +25,10 @@ internal sealed class OsmTileFetcher(
 
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(6);
 
-    private readonly ConcurrentDictionary<(int z, int x, int y), Lazy<Task<Image<Rgba32>?>>> _cache = new();
-    private readonly Queue<(int z, int x, int y)> _cacheOrder = new();
-    private readonly object _evictLock = new();
+    private readonly FifoAsyncCache<(int z, int x, int y), Image<Rgba32>?> _cache = new(MaxCacheEntries);
 
-    public Task<Image<Rgba32>?> FetchAsync(int zoom, int tileX, int tileY, CancellationToken cancellationToken = default)
-    {
-        var key = (zoom, tileX, tileY);
-        var entry = _cache.GetOrAdd(key, k => new Lazy<Task<Image<Rgba32>?>>(
-            () => FetchInternalAsync(k.z, k.x, k.y),
-            LazyThreadSafetyMode.ExecutionAndPublication));
-        TrackInsert(key);
-        return entry.Value.WaitAsync(cancellationToken);
-    }
-
-    private void TrackInsert((int z, int x, int y) key)
-    {
-        lock (_evictLock)
-        {
-            _cacheOrder.Enqueue(key);
-            while (_cacheOrder.Count > MaxCacheEntries)
-            {
-                var oldest = _cacheOrder.Dequeue();
-                _cache.TryRemove(oldest, out _);
-            }
-        }
-    }
+    public Task<Image<Rgba32>?> FetchAsync(int zoom, int tileX, int tileY, CancellationToken cancellationToken = default) =>
+        _cache.GetOrAddAsync((zoom, tileX, tileY), k => FetchInternalAsync(k.z, k.x, k.y), cancellationToken);
 
     private async Task<Image<Rgba32>?> FetchInternalAsync(int z, int x, int y)
     {

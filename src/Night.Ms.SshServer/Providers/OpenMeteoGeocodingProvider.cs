@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -43,22 +42,6 @@ public sealed class OpenMeteoGeocodingProvider(IHttpClientFactory httpClientFact
             logger.LogWarning(ex, "Geocoding search failed for query={Query}", trimmed);
             return null;
         }
-    }
-
-    public async Task<GeocodingMatch?> ReverseAsync(double latitude, double longitude, CancellationToken cancellationToken = default)
-    {
-        // Open-Meteo's free geocoding endpoint doesn't expose reverse — fall back to a
-        // best-effort label built from the coordinates. Callers use this only for the
-        // "Use detected location: …" prompt, where a fuzzy label is acceptable.
-        await Task.CompletedTask.ConfigureAwait(false);
-        var lat = latitude.ToString("F2", CultureInfo.InvariantCulture);
-        var lon = longitude.ToString("F2", CultureInfo.InvariantCulture);
-        return new GeocodingMatch(
-            CanonicalName: $"{lat}, {lon}",
-            Latitude: latitude,
-            Longitude: longitude,
-            Country: null,
-            Admin1: null);
     }
 
     private static string BuildCanonicalName(GeocodingResult r)

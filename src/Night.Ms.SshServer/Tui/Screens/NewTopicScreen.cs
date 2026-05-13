@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
@@ -12,18 +13,18 @@ namespace Night.Ms.SshServer.Tui.Screens;
 public sealed class NewTopicScreen : BbsWindow
 {
     private readonly IApplication _app;
-    private readonly AppDbContext _db;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly User _user;
     private readonly Forum _forum;
     private readonly TextField _title;
     private readonly TextView _body;
     private readonly BbsStatusLine _status;
 
-    public NewTopicScreen(IApplication app, IServiceProvider services, AppDbContext db, User user, Forum forum)
+    public NewTopicScreen(IApplication app, IServiceProvider services, User user, Forum forum)
         : base(app, services, user)
     {
         _app = app;
-        _db = db;
+        _dbFactory = services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         _user = user;
         _forum = forum;
         Title = $"new topic in #{forum.Name} — [Ctrl+S] submit — [Esc] cancel";
@@ -116,6 +117,7 @@ public sealed class NewTopicScreen : BbsWindow
 
         try
         {
+            await using var db = await _dbFactory.CreateDbContextAsync();
             var now = DateTimeOffset.UtcNow;
             var topic = new Topic
             {
@@ -125,23 +127,23 @@ public sealed class NewTopicScreen : BbsWindow
                 CreatedAt = now,
                 LastPostAt = now,
             };
-            _db.Topics.Add(topic);
-            await _db.SaveChangesAsync();
+            db.Topics.Add(topic);
+            await db.SaveChangesAsync();
 
-            _db.Posts.Add(new Post
+            db.Posts.Add(new Post
             {
                 TopicId = topic.Id,
                 Body = body,
                 CreatedById = _user.Id,
                 CreatedAt = now,
             });
-            _db.PostReads.Add(new PostRead
+            db.PostReads.Add(new PostRead
             {
                 UserId = _user.Id,
                 TopicId = topic.Id,
                 LastReadAt = now,
             });
-            await _db.SaveChangesAsync();
+            await db.SaveChangesAsync();
 
             Result = topic;
             _app.RequestStop();
