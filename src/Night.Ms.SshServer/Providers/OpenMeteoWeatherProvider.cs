@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Night.Ms.SshServer.Caching;
 
 namespace Night.Ms.SshServer.Providers;
 
@@ -19,7 +19,7 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
     public static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
     public const string HttpClientName = "open-meteo";
 
-    private readonly ConcurrentDictionary<(double lat, double lon), WeatherSnapshot> _cache = new();
+    private readonly TtlAsyncCache<(double lat, double lon), WeatherSnapshot> _cache = new(CacheTtl);
 
     public string FallbackLabel => configuration["NIGHTMS_WEATHER_LABEL"] ?? "New York";
     public double FallbackLatitude => TryParse(configuration["NIGHTMS_WEATHER_LAT"], fallback: 40.7128);
@@ -36,7 +36,7 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
         var displayLabel = !string.IsNullOrEmpty(label) ? label : FallbackLabel;
         var cacheKey = (Math.Round(lat, 3), Math.Round(lon, 3));
 
-        if (_cache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.UtcNow - cached.FetchedAt < CacheTtl)
+        if (_cache.TryGetFresh(cacheKey, out var cached))
         {
             // Refresh the label so a user editing their location sees the new name even when
             // we serve a cached temperature; coords haven't changed so the reading is valid.
@@ -48,7 +48,7 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
             var fresh = await FetchAsync(lat, lon, displayLabel, cancellationToken).ConfigureAwait(false);
             if (fresh is not null)
             {
-                _cache[cacheKey] = fresh;
+                _cache.Set(cacheKey, fresh);
             }
             return fresh ?? CachedFallback(cacheKey, displayLabel);
         }
@@ -61,7 +61,7 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
 
     private WeatherSnapshot? CachedFallback((double lat, double lon) key, string label)
     {
-        if (!_cache.TryGetValue(key, out var cached)) return null;
+        if (!_cache.TryGetAny(key, out var cached)) return null;
         return cached.LocationLabel == label ? cached : cached with { LocationLabel = label };
     }
 

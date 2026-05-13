@@ -1,43 +1,40 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using Night.Ms.SshServer.Caching;
 
 namespace Night.Ms.SshServer.Providers;
 
 // Free, key-less news provider backed by https://hacker-news.firebaseio.com. Fits the BBS
 // aesthetic — programmer news, simple data shape. The official API returns IDs from the
 // top-stories list; we fetch the first N items in parallel and turn them into headlines.
-// Cached for 5 minutes so opening the NewsScreen back-to-back doesn't burst API traffic.
+// Cached for 5 minutes (per requested max) so opening the NewsScreen back-to-back doesn't
+// burst API traffic.
 public sealed class HackerNewsProvider(IHttpClientFactory httpClientFactory, ILogger<HackerNewsProvider> logger)
     : INewsProvider
 {
     public static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
     public const string HttpClientName = "hacker-news";
 
-    private readonly object _gate = new();
-    private (IReadOnlyList<NewsHeadline> Items, DateTimeOffset FetchedAt)? _cached;
+    // Keyed by the clamped max so different request sizes don't share an entry. In practice
+    // every caller uses the same max (15 from NewsScreen), so there's one live entry.
+    private readonly TtlAsyncCache<int, IReadOnlyList<NewsHeadline>> _cache = new(CacheTtl);
 
     public async Task<IReadOnlyList<NewsHeadline>> GetTopAsync(int max, CancellationToken cancellationToken = default)
     {
         max = Math.Clamp(max, 1, 30);
 
-        lock (_gate)
-        {
-            if (_cached is { } c && DateTimeOffset.UtcNow - c.FetchedAt < CacheTtl)
-            {
-                return c.Items.Count >= max ? c.Items.Take(max).ToList() : c.Items;
-            }
-        }
+        if (_cache.TryGetFresh(max, out var cached)) return cached;
 
         try
         {
             var fresh = await FetchAsync(max, cancellationToken).ConfigureAwait(false);
-            lock (_gate) { _cached = (fresh, DateTimeOffset.UtcNow); }
+            _cache.Set(max, fresh);
             return fresh;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "HN fetch failed; returning last cached headlines if any.");
-            lock (_gate) { return _cached?.Items ?? []; }
+            return _cache.TryGetAny(max, out var stale) ? stale : [];
         }
     }
 
