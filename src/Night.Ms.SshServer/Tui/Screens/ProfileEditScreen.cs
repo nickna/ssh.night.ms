@@ -170,7 +170,7 @@ public sealed class ProfileEditScreen : BbsWindow
         };
 
         var save = new Button { X = 2, Y = Pos.AnchorEnd(4), Text = "_Save", IsDefault = true };
-        save.Accepting += (_, e) => { e.Handled = true; _ = SaveAsync(); };
+        save.Accepting += (_, e) => { e.Handled = true; SaveAsync().FireAndLog(_services, nameof(SaveAsync)); };
 
         var cancel = new Button { X = Pos.Right(save) + 2, Y = Pos.AnchorEnd(4), Text = "_Cancel" };
         cancel.Accepting += (_, e) => { e.Handled = true; _app.RequestStop(); };
@@ -188,7 +188,7 @@ public sealed class ProfileEditScreen : BbsWindow
             else if (key == Key.S.WithCtrl)
             {
                 key.Handled = true;
-                _ = SaveAsync();
+                SaveAsync().FireAndLog(_services, nameof(SaveAsync));
             }
         };
     }

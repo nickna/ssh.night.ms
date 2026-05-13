@@ -65,7 +65,7 @@ public sealed class ThreadScreen : BbsWindow
                 if (text.Length > 0)
                 {
                     _input.Text = string.Empty;
-                    _ = PostReplyAsync(text);
+                    PostReplyAsync(text).FireAndLog(_services, nameof(PostReplyAsync));
                 }
             }
         };
@@ -82,7 +82,7 @@ public sealed class ThreadScreen : BbsWindow
             }
         };
 
-        _ = LoadAsync();
+        LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }
 
     private async Task LoadAsync()

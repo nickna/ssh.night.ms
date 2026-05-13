@@ -17,6 +17,7 @@ public sealed class BbsStatusBar : View
 {
     private const string Brand = "ssh.night.ms";
 
+    private readonly IServiceProvider _services;
     private readonly IApplication _app;
     private readonly IWeatherProvider? _weather;
     private readonly User? _user;
@@ -31,6 +32,7 @@ public sealed class BbsStatusBar : View
 
     public BbsStatusBar(IApplication app, IServiceProvider services, User? user)
     {
+        _services = services;
         _app = app;
         _weather = services.GetService<IWeatherProvider>();
         _user = user;
@@ -77,10 +79,10 @@ public sealed class BbsStatusBar : View
         Tick();
         _clockTimerToken = _app.AddTimeout(TimeSpan.FromSeconds(1), Tick);
         // First weather refresh fires immediately; subsequent ones every 5 minutes.
-        _ = RefreshWeatherAsync();
+        RefreshWeatherAsync().FireAndLog(_services, nameof(RefreshWeatherAsync));
         _weatherTimerToken = _app.AddTimeout(TimeSpan.FromMinutes(5), () =>
         {
-            _ = RefreshWeatherAsync();
+            RefreshWeatherAsync().FireAndLog(_services, nameof(RefreshWeatherAsync));
             return true;
         });
     }

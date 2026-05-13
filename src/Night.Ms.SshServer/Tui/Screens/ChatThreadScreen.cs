@@ -85,7 +85,7 @@ public sealed class ChatThreadScreen : BbsWindow
                 if (text.Length > 0)
                 {
                     _input.Text = string.Empty;
-                    _ = HandleInputAsync(text);
+                    HandleInputAsync(text).FireAndLog(_services, nameof(HandleInputAsync));
                 }
                 return;
             }
@@ -108,7 +108,7 @@ public sealed class ChatThreadScreen : BbsWindow
             }
         };
 
-        _ = LoadAndSubscribeAsync();
+        LoadAndSubscribeAsync().FireAndLog(_services, nameof(LoadAndSubscribeAsync));
     }
 
     private async Task LoadAndSubscribeAsync()
@@ -139,7 +139,6 @@ public sealed class ChatThreadScreen : BbsWindow
                 Edited = thread.Root.EditedAt is not null,
                 Pinned = thread.Root.IsPinned,
                 Deleted = thread.Root.DeletedAt is not null,
-                IsRoot = true,
             });
             ApplyReactionSnapshot(thread.Root.Id, reactionMap);
 
@@ -467,14 +466,14 @@ public sealed class ChatThreadScreen : BbsWindow
         ReportMutation(result);
     }
 
-    private void ReportMutation(ChatMutationService.Result result)
+    private void ReportMutation(ChatOpResult result)
     {
         switch (result)
         {
-            case ChatMutationService.Result.Ok: SetStatus("ok"); return;
-            case ChatMutationService.Result.NotFound: SetStatus("[!] message not found."); return;
-            case ChatMutationService.Result.Forbidden f: SetStatus($"[!] {f.Reason}"); return;
-            case ChatMutationService.Result.Invalid i: SetStatus($"[!] {i.Reason}"); return;
+            case ChatOpResult.Ok: SetStatus("ok"); return;
+            case ChatOpResult.NotFound: SetStatus("[!] message not found."); return;
+            case ChatOpResult.Forbidden f: SetStatus($"[!] {f.Reason}"); return;
+            case ChatOpResult.Invalid i: SetStatus($"[!] {i.Reason}"); return;
         }
     }
 
@@ -603,8 +602,5 @@ public sealed class ChatThreadScreen : BbsWindow
         public bool Edited { get; set; }
         public bool Pinned { get; set; }
         public bool Deleted { get; set; }
-        // Marker for the thread root — currently used only for the "── thread by … ──"
-        // header above it, but kept on the ref in case future render tweaks want it.
-        public bool IsRoot { get; init; }
     }
 }

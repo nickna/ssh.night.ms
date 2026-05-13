@@ -115,7 +115,7 @@ public sealed class ReaderScreen : BbsWindow
         KeyDown += OnKey;
         _linksView.KeyDown += OnKey;
 
-        _ = LoadAsync();
+        LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }
 
     protected override void Dispose(bool disposing)
@@ -190,7 +190,7 @@ public sealed class ReaderScreen : BbsWindow
             _imageCells.Clear();
             _article = null;
             if (_showingLinks) ShowBody();
-            _ = LoadAsync();
+            LoadAsync().FireAndLog(_services, nameof(LoadAsync));
             key.Handled = true;
             return;
         }
@@ -340,7 +340,7 @@ public sealed class ReaderScreen : BbsWindow
 
             // Kick off parallel image fetches now that the article is on-screen with
             // placeholders. Each completion paints into _imageCells and triggers a re-layout.
-            _ = LoadImagesAsync(article.Blocks);
+            LoadImagesAsync(article.Blocks).FireAndLog(_services, nameof(LoadImagesAsync));
         });
     }
 

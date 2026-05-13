@@ -12,6 +12,7 @@ namespace Night.Ms.SshServer.Tui.Screens;
 
 public sealed class NewTopicScreen : BbsWindow
 {
+    private readonly IServiceProvider _services;
     private readonly IApplication _app;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly User _user;
@@ -23,6 +24,7 @@ public sealed class NewTopicScreen : BbsWindow
     public NewTopicScreen(IApplication app, IServiceProvider services, User user, Forum forum)
         : base(app, services, user)
     {
+        _services = services;
         _app = app;
         _dbFactory = services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         _user = user;
@@ -65,7 +67,7 @@ public sealed class NewTopicScreen : BbsWindow
         submit.Accepting += (_, e) =>
         {
             e.Handled = true;
-            _ = SubmitAsync();
+            SubmitAsync().FireAndLog(_services, nameof(SubmitAsync));
         };
 
         var cancel = new Button
@@ -94,7 +96,7 @@ public sealed class NewTopicScreen : BbsWindow
             }
             else if (key == Key.S.WithCtrl)
             {
-                _ = SubmitAsync();
+                SubmitAsync().FireAndLog(_services, nameof(SubmitAsync));
                 key.Handled = true;
             }
         };

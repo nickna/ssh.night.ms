@@ -60,7 +60,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         var (u, _, m) = await SeedAsync("alice", "important");
         var result = await _sut!.PinAsync(m.Id, u.Id, default);
 
-        Assert.IsType<ChatMutationService.Result.Ok>(result);
+        Assert.IsType<ChatOpResult.Ok>(result);
         await using var db = new AppDbContext(_dbOptions!);
         Assert.True((await db.ChatMessages.FirstAsync(x => x.Id == m.Id)).IsPinned);
         Assert.Equal(ChatEventKind.Pin,
@@ -75,7 +75,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         var publishedBefore = _bus!.Published.Count;
         var result = await _sut.PinAsync(m.Id, u.Id, default);
 
-        Assert.IsType<ChatMutationService.Result.Ok>(result);
+        Assert.IsType<ChatOpResult.Ok>(result);
         // No second publish — nothing changed.
         Assert.Equal(publishedBefore, _bus.Published.Count);
     }
@@ -98,7 +98,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         await _sut!.DeleteAsync(m.Id, u.Id, default);
         var result = await _sut.PinAsync(m.Id, u.Id, default);
 
-        Assert.IsType<ChatMutationService.Result.Forbidden>(result);
+        Assert.IsType<ChatOpResult.Forbidden>(result);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         var (u, c, _) = await SeedAsync("alice", "x");
         var result = await _sut!.SetTopicAsync(c.Id, u.Id, u.Handle, "now featuring: stuff", default);
 
-        Assert.IsType<ChatMutationService.Result.Ok>(result);
+        Assert.IsType<ChatOpResult.Ok>(result);
         await using var db = new AppDbContext(_dbOptions!);
         Assert.Equal("now featuring: stuff", (await db.Channels.FirstAsync(x => x.Id == c.Id)).Topic);
         Assert.Equal(ChatEventKind.Topic,
@@ -151,7 +151,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         var bob = await db2.Users.FirstAsync(x => x.Handle == "bob");
 
         var result = await _sut!.SetTopicAsync(c.Id, bob.Id, bob.Handle, "hijacked", default);
-        Assert.IsType<ChatMutationService.Result.Forbidden>(result);
+        Assert.IsType<ChatOpResult.Forbidden>(result);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     {
         var (u, c, _) = await SeedAsync("alice", "x");
         var result = await _sut!.SetTopicAsync(c.Id, u.Id, u.Handle, new string('x', 250), default);
-        Assert.IsType<ChatMutationService.Result.Invalid>(result);
+        Assert.IsType<ChatOpResult.Invalid>(result);
     }
 
     [Fact]

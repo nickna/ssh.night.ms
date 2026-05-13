@@ -61,14 +61,15 @@ public sealed record ChatPinDto(long MessageId, long ChannelId, bool IsPinned);
 public sealed record ChatTopicDto(long ChannelId, string? Topic, long ActorUserId, string ActorHandle);
 
 // Presence events on the dedicated chat:presence:{channelId} topic. "join" and "leave" are
-// edges; "heartbeat" is the periodic refresh that keeps a session alive in the Redis TTL set.
+// edges. Heartbeats are not broadcast — sessions refresh their Redis sorted-set entry
+// silently (see PresenceService.HeartbeatAsync) so N sessions don't fan out N×6/min of
+// no-op events.
 public sealed record PresenceEventDto(long ChannelId, long UserId, string Handle, string Kind, DateTimeOffset At);
 
 public static class PresenceEventKind
 {
     public const string Join      = "join";
     public const string Leave     = "leave";
-    public const string Heartbeat = "heartbeat";
     // Transient — sent on keystroke (debounced), not persisted anywhere. Listeners render
     // "alice is typing…" and auto-clear after a few seconds of silence.
     public const string Typing    = "typing";

@@ -89,11 +89,11 @@ public sealed class NewsScreen : BbsWindow
             else if (key == Key.R || key == Key.R.WithShift)
             {
                 key.Handled = true;
-                _ = ReloadAsync();
+                ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));
             }
         };
 
-        _ = ReloadAsync();
+        ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));
     }
 
     private void OpenStory(NewsHeadline item)

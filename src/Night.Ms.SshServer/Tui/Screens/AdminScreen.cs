@@ -93,7 +93,7 @@ public sealed class AdminScreen : BbsWindow
                 if (line.Length > 0)
                 {
                     _command.Text = string.Empty;
-                    _ = ExecuteAsync(line);
+                    ExecuteAsync(line).FireAndLog(_services, nameof(ExecuteAsync));
                 }
             }
         };
@@ -110,7 +110,7 @@ public sealed class AdminScreen : BbsWindow
             }
         };
 
-        _ = LoadAsync();
+        LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }
 
     private async Task ExecuteAsync(string line)

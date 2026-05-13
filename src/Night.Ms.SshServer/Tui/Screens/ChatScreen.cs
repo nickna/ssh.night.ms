@@ -184,7 +184,7 @@ public sealed class ChatScreen : BbsWindow
                     _input.Text = string.Empty;
                     _drafts.TryRemove(_currentChannel.Id, out string? _);
                     UpdatePreview();
-                    _ = HandleInputAsync(text);
+                    HandleInputAsync(text).FireAndLog(_services, nameof(HandleInputAsync));
                 }
                 return;
             }
@@ -195,7 +195,7 @@ public sealed class ChatScreen : BbsWindow
 
             // Every non-scroll, non-Enter keystroke is a typing signal. Debounced inside
             // MaybePublishTypingAsync so we don't fan out 1 event per character.
-            _ = MaybePublishTypingAsync();
+            MaybePublishTypingAsync().FireAndLog(_services, nameof(MaybePublishTypingAsync));
             // Defer so TextField has already applied the keystroke when we re-read Text.
             _app.Invoke(UpdatePreview);
         };
@@ -219,12 +219,12 @@ public sealed class ChatScreen : BbsWindow
             if (slot is not null)
             {
                 key.Handled = true;
-                _ = SwitchByIndexAsync(slot.Value);
+                SwitchByIndexAsync(slot.Value).FireAndLog(_services, nameof(SwitchByIndexAsync));
             }
         };
 
         UpdateChrome();
-        _ = LoadHistoryAndSubscribeAsync();
+        LoadHistoryAndSubscribeAsync().FireAndLog(_services, nameof(LoadHistoryAndSubscribeAsync));
     }
 
     private async Task HandleInputAsync(string text)
@@ -610,14 +610,14 @@ public sealed class ChatScreen : BbsWindow
         }
     }
 
-    private void ReportMutation(ChatMutationService.Result result)
+    private void ReportMutation(ChatOpResult result)
     {
         switch (result)
         {
-            case ChatMutationService.Result.Ok: SetStatus("ok"); return;
-            case ChatMutationService.Result.NotFound: SetStatus("[!] message not found."); return;
-            case ChatMutationService.Result.Forbidden f: SetStatus($"[!] {f.Reason}"); return;
-            case ChatMutationService.Result.Invalid i: SetStatus($"[!] {i.Reason}"); return;
+            case ChatOpResult.Ok: SetStatus("ok"); return;
+            case ChatOpResult.NotFound: SetStatus("[!] message not found."); return;
+            case ChatOpResult.Forbidden f: SetStatus($"[!] {f.Reason}"); return;
+            case ChatOpResult.Invalid i: SetStatus($"[!] {i.Reason}"); return;
         }
     }
 
@@ -798,7 +798,7 @@ public sealed class ChatScreen : BbsWindow
             // background so a slow DB doesn't delay the first render of the chat.
             if (highestSeenId > 0)
             {
-                _ = MarkReadSafelyAsync(_currentChannel.Id, highestSeenId);
+                MarkReadSafelyAsync(_currentChannel.Id, highestSeenId).FireAndLog(_services, nameof(MarkReadSafelyAsync));
             }
 
             _channelLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, _channelCts.Token);
@@ -871,7 +871,7 @@ public sealed class ChatScreen : BbsWindow
                     if (msg.Id > _lastReadMessageId)
                     {
                         _lastReadMessageId = msg.Id;
-                        _ = MarkReadSafelyAsync(_currentChannel.Id, msg.Id);
+                        MarkReadSafelyAsync(_currentChannel.Id, msg.Id).FireAndLog(_services, nameof(MarkReadSafelyAsync));
                     }
                 }
                 return;
@@ -1262,7 +1262,8 @@ public sealed class ChatScreen : BbsWindow
                 AttachImageOnUiThread(messageId, cached);
                 continue;
             }
-            _ = Task.Run(() => FetchAndAttachAsync(messageId, url, _shutdown.Token));
+            Task.Run(() => FetchAndAttachAsync(messageId, url, _shutdown.Token))
+                .FireAndLog(_services, nameof(FetchAndAttachAsync));
         }
     }
 
@@ -1344,9 +1345,9 @@ public sealed class ChatScreen : BbsWindow
             var result = await muts.PostAsync(_currentChannel.Id, _user.Id, _user.Handle, body, parentMessageId, _shutdown.Token);
             switch (result)
             {
-                case ChatMutationService.PostResult.Forbidden f: SetStatus($"[!] {f.Reason}"); break;
-                case ChatMutationService.PostResult.Invalid i:   SetStatus($"[!] {i.Reason}"); break;
-                case ChatMutationService.PostResult.NotFound:    SetStatus("[!] Channel no longer exists."); break;
+                case ChatOpResult.Forbidden f: SetStatus($"[!] {f.Reason}"); break;
+                case ChatOpResult.Invalid i:   SetStatus($"[!] {i.Reason}"); break;
+                case ChatOpResult.NotFound:    SetStatus("[!] Channel no longer exists."); break;
             }
         }
         catch (OperationCanceledException) { /* expected on close */ }
@@ -1450,7 +1451,7 @@ public sealed class ChatScreen : BbsWindow
             try { _channelCts.Cancel(); } catch { /* ignore */ }
             // Best-effort leave on the way out so other sessions see us drop immediately
             // instead of waiting for the Redis TTL to evict.
-            try { _ = LeaveChannelPresenceAsync(_currentChannel.Id); } catch { /* ignore */ }
+            LeaveChannelPresenceAsync(_currentChannel.Id).FireAndLog(_services, nameof(LeaveChannelPresenceAsync));
             _shutdown.Dispose();
             _channelCts.Dispose();
         }
