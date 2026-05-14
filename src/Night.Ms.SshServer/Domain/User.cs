@@ -19,6 +19,12 @@ public sealed class User
     public string? Location { get; set; }
     public string? RealName { get; set; }
 
+    // When the user last uploaded (or replaced) their profile picture. Null = no upload,
+    // in which case the rendering layer falls back to a procedural identicon. Doubles as
+    // an ETag basis for the web /u/{handle}/avatar endpoint and as a cache key for the
+    // in-memory CellGrid cache that the TUI uses.
+    public DateTimeOffset? ProfilePictureUpdatedAt { get; set; }
+
     // Resolved geocoded location, populated when Location validates against the geocoder.
     // Drives per-user weather. LocationCanonical is what the geocoder echoed back; the user's
     // typed Location is kept verbatim for display.

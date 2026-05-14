@@ -107,6 +107,7 @@ if (nightMsOptions.IsMicrosoftConfigured)
 builder.Services.AddAuthorization();
 builder.Services.AddRazorPages();
 builder.Services.AddScoped<IdentityResolutionService>();
+builder.Services.AddSingleton<ProfilePictureService>();
 
 // Postgres + EF Core. Connection string lives under ConnectionStrings:bbs (set by
 // run.ps1, or via appsettings in production). Snake-case convention matches the
@@ -331,6 +332,63 @@ app.MapPost("/profile/unlink/{credentialId:long}", async (long credentialId, Htt
         _ => null,
     };
     return Results.Redirect($"/profile{(flash is null ? "" : $"?flash={Uri.EscapeDataString(flash)}")}");
+});
+
+// POST /profile/avatar — multipart upload of the user's profile picture. Validates content
+// type + size, hands the stream to ProfilePictureService for the center-crop + resize +
+// canonical PNG write, and bumps User.ProfilePictureUpdatedAt for cache-busting.
+app.MapPost("/profile/avatar", async (HttpContext ctx, ProfilePictureService pfp, [FromForm] IFormFile? image) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
+
+    if (image is null || image.Length == 0)
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Pick an image file first."));
+    }
+    if (image.Length > ProfilePictureService.MaxUploadBytes)
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Image too large (max 4 MB)."));
+    }
+
+    await using var src = image.OpenReadStream();
+    var ok = await pfp.SaveAsync(userId, src, ctx.RequestAborted);
+    var flash = ok ? "Picture updated." : "Couldn't process that image. PNG, JPEG, or WebP only.";
+    return Results.Redirect("/profile?flash=" + Uri.EscapeDataString(flash));
+}).DisableAntiforgery();
+
+// POST /profile/avatar/delete — removes the current upload (next render shows the identicon).
+app.MapPost("/profile/avatar/delete", async (HttpContext ctx, ProfilePictureService pfp) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
+
+    var ok = await pfp.DeleteAsync(userId, ctx.RequestAborted);
+    return Results.Redirect("/profile?flash=" + Uri.EscapeDataString(ok ? "Picture removed." : "Nothing to remove."));
+});
+
+// GET /u/{handle}/avatar — public PNG endpoint. Returns the stored upload when one exists,
+// or a freshly-generated identicon. ETag = ticks(updated_at) | "identicon-{handle-lower}" so
+// browsers + reverse proxies cache aggressively across the page's avatar references.
+app.MapGet("/u/{handle}/avatar", async (string handle, HttpContext ctx, AppDbContext db, ProfilePictureService pfp) =>
+{
+    var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Handle == handle && !u.IsBanned, ctx.RequestAborted);
+    if (user is null) return Results.NotFound();
+
+    var etag = user.ProfilePictureUpdatedAt is { } ts
+        ? $"\"{ts.UtcTicks}\""
+        : $"\"identicon-{handle.ToLowerInvariant()}\"";
+    if (ctx.Request.Headers.IfNoneMatch.ToString() == etag)
+    {
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    }
+    ctx.Response.Headers.ETag = etag;
+    ctx.Response.Headers.CacheControl = "public, max-age=86400";
+
+    var bytes = await pfp.GetPngBytesAsync(user.Id, user.Handle, ctx.RequestAborted);
+    return Results.File(bytes, contentType: "image/png");
 });
 
 app.Run();

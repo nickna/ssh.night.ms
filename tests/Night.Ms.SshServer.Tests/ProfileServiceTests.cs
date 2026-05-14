@@ -258,7 +258,8 @@ public class ProfileServiceTests : IClassFixture<PostgresFixture>, IAsyncLifetim
             TimeZoneId: timeZoneId,
             ChatMessageCount: chatMessageCount,
             TopicCount: topicCount,
-            PostCount: postCount);
+            PostCount: postCount,
+            ProfilePictureUpdatedAt: null);
 
     [Fact]
     public void FormatFinger_includes_handle_joined_lastseen_and_stats()

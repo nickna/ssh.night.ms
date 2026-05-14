@@ -69,6 +69,12 @@ public sealed class ChatScreen : BbsWindow
     private readonly ConcurrentDictionary<Uri, CellGrid> _imageGrids = new();
     private readonly SemaphoreSlim _imageFetchSemaphore = new(ImageFetchConcurrency, ImageFetchConcurrency);
 
+    // Cache of "has this handle uploaded a profile picture?". Looked up lazily the first
+    // time we render a message from a handle; once known, future messages from the same
+    // handle in this session get a "●" prefix without re-querying. Stale state (e.g. user
+    // uploads a pfp mid-session in another tab) corrects on next channel re-entry.
+    private readonly ConcurrentDictionary<string, bool> _hasPfpByHandle = new(StringComparer.OrdinalIgnoreCase);
+
     // Active "typing…" hints — handle → last-seen-typing-at. Pruned each tick of _typingTimer.
     private readonly Dictionary<string, DateTimeOffset> _typers = new();
     private DateTimeOffset _lastTypingPublishedAt = DateTimeOffset.MinValue;
@@ -393,11 +399,14 @@ public sealed class ChatScreen : BbsWindow
                 AppendSystem($"── finger {handle} ──\n   no such user.");
                 return;
             }
-            var lines = ProfileService.FormatFinger(snap, _user).TrimEnd('\n').Split('\n');
-            foreach (var line in lines)
+            // Open the modal FingerScreen instead of dumping text into chat scrollback: this
+            // gives us room for the half-block avatar render alongside the text fields.
+            // Application.Run blocks until the user presses Esc, so we marshal back to the UI
+            // thread and let it block there.
+            _app.Invoke(() =>
             {
-                AppendOnUiThread(MessageRenderer.RenderRaw(line));
-            }
+                _app.Run(new FingerScreen(_app, _services, _user, snap));
+            });
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
@@ -1318,13 +1327,14 @@ public sealed class ChatScreen : BbsWindow
     private ChatLine RenderMessage(MessageRef msgRef)
     {
         var clock = _user.FormatClock(msgRef.At);
+        var hasPfp = HasPfp(msgRef.Handle);
         if (msgRef.Deleted)
         {
             return MessageRenderer.RenderDeleted(clock, msgRef.Handle);
         }
         if (msgRef.Body is not null && msgRef.Body.StartsWith("/me ", StringComparison.Ordinal))
         {
-            return MessageRenderer.RenderEmote(clock, msgRef.Handle, msgRef.Body[4..], _user.Handle);
+            return MessageRenderer.RenderEmote(clock, msgRef.Handle, msgRef.Body[4..], _user.Handle, hasPfp: hasPfp);
         }
         // Resolve the parent (if any) to its handle so we can render "↳ @alice" — only
         // works when the parent is still in the on-screen window. If the parent has
@@ -1337,7 +1347,33 @@ public sealed class ChatScreen : BbsWindow
         }
         return MessageRenderer.RenderMessage(clock, msgRef.Handle, msgRef.Body ?? string.Empty, _user.Handle,
             edited: msgRef.Edited, pinned: msgRef.Pinned,
-            replyToHandle: replyToHandle, replyCount: msgRef.ReplyCount);
+            replyToHandle: replyToHandle, replyCount: msgRef.ReplyCount,
+            hasPfp: hasPfp);
+    }
+
+    // Returns whether the named handle has a profile picture, looking it up lazily on first
+    // sighting. Unknown handles default to false (no marker); a background task fills in the
+    // dictionary so the NEXT message from the same handle in this session gets the marker.
+    private bool HasPfp(string handle)
+    {
+        if (_hasPfpByHandle.TryGetValue(handle, out var v)) return v;
+        // Kick off a background lookup. Fire-and-forget; we don't await it because we don't
+        // want to re-render historical messages, just mark future ones.
+        Task.Run(async () =>
+        {
+            try
+            {
+                var profile = _services.GetRequiredService<ProfileService>();
+                var snap = await profile.GetByHandleAsync(handle, _shutdown.Token);
+                _hasPfpByHandle[handle] = snap?.ProfilePictureUpdatedAt is not null;
+            }
+            catch (OperationCanceledException) { }
+            catch
+            {
+                _hasPfpByHandle[handle] = false;
+            }
+        });
+        return false;
     }
 
     protected override void Dispose(bool disposing)

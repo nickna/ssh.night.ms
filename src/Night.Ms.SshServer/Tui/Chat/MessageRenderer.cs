@@ -36,6 +36,9 @@ internal static class MessageRenderer
     //   replyCount → " [N replies]" suffix after the body — only rendered on top-level
     //               messages that have children.
     //   edited    → " (edited)" suffix in italic.
+    //   hasPfp    → render a leading "●" dot in the sender's color, before the handle, when
+    //               the author has a profile picture uploaded. Pure visual signal — gives
+    //               readers an "this person has a face" cue without bloating the line.
     public static ChatLine RenderMessage(
         string clock,
         string senderHandle,
@@ -44,7 +47,8 @@ internal static class MessageRenderer
         bool edited = false,
         bool pinned = false,
         string? replyToHandle = null,
-        int replyCount = 0)
+        int replyCount = 0,
+        bool hasPfp = false)
     {
         var runs = new List<ChatRun>(8);
         if (pinned)
@@ -52,7 +56,12 @@ internal static class MessageRenderer
             runs.Add(new ChatRun("★ ", ChatPalette.Pin, ArtStyle.Bold));
         }
         runs.Add(new ChatRun($"[{clock}] ", ChatPalette.Chrome, ArtStyle.None));
-        runs.Add(new ChatRun(senderHandle, HandleColorizer.ColorFor(senderHandle), ArtStyle.Bold));
+        var senderColor = HandleColorizer.ColorFor(senderHandle);
+        if (hasPfp)
+        {
+            runs.Add(new ChatRun("● ", senderColor, ArtStyle.None));
+        }
+        runs.Add(new ChatRun(senderHandle, senderColor, ArtStyle.Bold));
         runs.Add(new ChatRun(": ", ChatPalette.Chrome, ArtStyle.None));
         if (!string.IsNullOrEmpty(replyToHandle))
         {
@@ -87,11 +96,15 @@ internal static class MessageRenderer
     }
 
     // /me variant: "[clock] * alice waves at the lobby" — italicized whole-line emote.
-    public static ChatLine RenderEmote(string clock, string senderHandle, string action, string selfHandle)
+    public static ChatLine RenderEmote(string clock, string senderHandle, string action, string selfHandle, bool hasPfp = false)
     {
         var runs = new List<ChatRun>(4);
         runs.Add(new ChatRun($"[{clock}] ", ChatPalette.Chrome, ArtStyle.None));
         var nameColor = HandleColorizer.ColorFor(senderHandle);
+        if (hasPfp)
+        {
+            runs.Add(new ChatRun("● ", nameColor, ArtStyle.None));
+        }
         runs.Add(new ChatRun($"* {senderHandle} ", nameColor, ArtStyle.Italic | ArtStyle.Bold));
         var selfMentioned = AppendBodyRuns(runs, action, selfHandle, baseStyle: ArtStyle.Italic);
         return new ChatLine(runs, selfMentioned);

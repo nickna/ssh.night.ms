@@ -15,6 +15,10 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
     public string Handle { get; set; } = "";
     public string? Email { get; set; }
     public bool IsSysop { get; set; }
+    public bool HasProfilePicture { get; set; }
+    // Cache-bust value the avatar <img> appends as ?v=… so a fresh upload reloads instantly.
+    // Ticks-from-UTC when set, "0" otherwise (identicon).
+    public long AvatarVersion { get; set; }
     public List<CredentialRow> Credentials { get; set; } = new();
     public bool CanLinkGoogle { get; private set; }
     public bool CanLinkMicrosoft { get; private set; }
@@ -33,6 +37,8 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
         Handle = user.Handle;
         Email = user.Email;
         IsSysop = user.IsSysop;
+        HasProfilePicture = user.ProfilePictureUpdatedAt is not null;
+        AvatarVersion = user.ProfilePictureUpdatedAt?.UtcTicks ?? 0;
         Flash = flash;
         Credentials = user.Credentials
             .OrderBy(c => c.Provider).ThenBy(c => c.CreatedAt)

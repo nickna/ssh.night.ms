@@ -92,3 +92,40 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 th { color: var(--dim); font-weight: normal; font-size: 13px; }
 
+.avatar-row {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    border: 1px solid var(--border);
+    padding: 18px 20px;
+    border-radius: 6px;
+    margin-bottom: 24px;
+    background: rgba(255,255,255,0.02);
+}
+.avatar-row .avatar {
+    width: 96px;
+    height: 96px;
+    border-radius: 8px;
+    image-rendering: pixelated;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    object-fit: cover;
+}
+.avatar-row .avatar-meta { flex: 1; min-width: 0; }
+.avatar-row h1 { margin: 0 0 4px 0; font-size: 24px; }
+.avatar-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 8px 0 6px 0;
+}
+.avatar-form input[type=file] {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font: inherit;
+}
+

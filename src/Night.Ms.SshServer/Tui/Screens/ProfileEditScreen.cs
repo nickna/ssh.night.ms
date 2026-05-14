@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Net;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
+using Night.Ms.SshServer.Web;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -49,27 +51,63 @@ public sealed class ProfileEditScreen : BbsWindow
         blurb.SetScheme(BbsTheme.Header_);
         Add(blurb);
 
+        // ----- Profile picture preview (top strip) -----
+        // The avatar view sits above the two main columns. It's populated asynchronously from
+        // ProfilePictureService after the screen mounts so a slow first decode doesn't block
+        // the screen render. If the user has no upload, the service returns an identicon.
+        const int previewCols = 20;
+        var avatarView = new AnsiArtView
+        {
+            X = 2,
+            Y = 3,
+        };
+        var pfpHintLine1 = new Label { X = 2 + previewCols + 2, Y = 3, Text = "Profile picture" };
+        pfpHintLine1.SetScheme(BbsTheme.Header_);
+        var pfpHintLine2 = new Label
+        {
+            X = 2 + previewCols + 2,
+            Y = 4,
+            Text = "Change it from the web profile page",
+        };
+        pfpHintLine2.SetScheme(BbsTheme.Faint_);
+        var pfpHintLine3 = new Label
+        {
+            X = 2 + previewCols + 2,
+            Y = 5,
+            Text = ResolvePublicUrl(services),
+        };
+        pfpHintLine3.SetScheme(BbsTheme.Hint);
+        Add(avatarView, pfpHintLine1, pfpHintLine2, pfpHintLine3);
+
+        // Kick off the half-block render in the background; the AnsiArtView.Grid setter
+        // triggers a redraw on the UI thread via Application.Invoke.
+        LoadAvatarAsync(app, services, user, previewCols, avatarView);
+
+        // Avatar block reserves Y=3..12 (preview ~10 rows high for a square 20-col render).
+        // Everything below uses fieldsTop as the starting row.
+        const int fieldsTop = 14;
+
         // ----- Left column: existing profile fields -----
 
-        var realNameLabel = new Label { X = 2, Y = 3, Text = $"Real name (optional, ≤ {ProfileService.MaxRealNameLength}):" };
+        var realNameLabel = new Label { X = 2, Y = fieldsTop, Text = $"Real name (optional, ≤ {ProfileService.MaxRealNameLength}):" };
         realNameLabel.SetScheme(BbsTheme.Hint);
         Add(realNameLabel);
-        _realName = new TextField { X = 2, Y = 4, Width = 36, Text = user.RealName ?? string.Empty };
+        _realName = new TextField { X = 2, Y = fieldsTop + 1, Width = 36, Text = user.RealName ?? string.Empty };
         _realName.SetScheme(BbsTheme.Input);
 
-        var locationLabel = new Label { X = 2, Y = 6, Text = $"Location (optional, ≤ {ProfileService.MaxLocationLength}):" };
+        var locationLabel = new Label { X = 2, Y = fieldsTop + 3, Text = $"Location (optional, ≤ {ProfileService.MaxLocationLength}):" };
         locationLabel.SetScheme(BbsTheme.Hint);
         Add(locationLabel);
-        _location = new TextField { X = 2, Y = 7, Width = 36, Text = user.Location ?? string.Empty };
+        _location = new TextField { X = 2, Y = fieldsTop + 4, Width = 36, Text = user.Location ?? string.Empty };
         _location.SetScheme(BbsTheme.Input);
 
-        var bioLabel = new Label { X = 2, Y = 9, Text = $"Bio (optional, ≤ {ProfileService.MaxBioLength}):" };
+        var bioLabel = new Label { X = 2, Y = fieldsTop + 6, Text = $"Bio (optional, ≤ {ProfileService.MaxBioLength}):" };
         bioLabel.SetScheme(BbsTheme.Hint);
         Add(bioLabel);
         _bio = new TextView
         {
             X = 2,
-            Y = 10,
+            Y = fieldsTop + 7,
             Width = 38,
             Height = 6,
             Text = user.Bio ?? string.Empty,
@@ -79,11 +117,11 @@ public sealed class ProfileEditScreen : BbsWindow
 
         // ----- Right column: display preferences -----
 
-        var prefsHeader = new Label { X = RightColumnX, Y = 3, Text = "── display preferences ──" };
+        var prefsHeader = new Label { X = RightColumnX, Y = fieldsTop, Text = "── display preferences ──" };
         prefsHeader.SetScheme(BbsTheme.Header_);
         Add(prefsHeader);
 
-        var tzLabel = new Label { X = RightColumnX, Y = 4, Text = "Time zone (type to jump):" };
+        var tzLabel = new Label { X = RightColumnX, Y = fieldsTop + 1, Text = "Time zone (type to jump):" };
         tzLabel.SetScheme(BbsTheme.Hint);
         Add(tzLabel);
 
@@ -97,10 +135,13 @@ public sealed class ProfileEditScreen : BbsWindow
         _timeZoneIds = zones.Select(z => z.Id).ToArray();
         var tzLabels = new ObservableCollection<string>(zones.Select(FormatZone));
 
+        // Right column lays out top-to-bottom; tzListTop is the row where the TZ list begins.
+        // Everything below it offsets from that anchor for readability.
+        var tzListTop = fieldsTop + 2;
         _timeZoneList = new ListView
         {
             X = RightColumnX,
-            Y = 5,
+            Y = tzListTop,
             Width = 36,
             Height = TimeZoneListHeight,
         };
@@ -111,13 +152,13 @@ public sealed class ProfileEditScreen : BbsWindow
         if (currentIndex < 0) currentIndex = 0;
         _timeZoneList.SelectedItem = currentIndex;
 
-        var temperatureLabel = new Label { X = RightColumnX, Y = 5 + TimeZoneListHeight + 1, Text = "Temperature:" };
+        var temperatureLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 1, Text = "Temperature:" };
         temperatureLabel.SetScheme(BbsTheme.Hint);
         Add(temperatureLabel);
         _temperature = new OptionSelector<TemperatureUnit>
         {
             X = RightColumnX,
-            Y = 5 + TimeZoneListHeight + 2,
+            Y = tzListTop + TimeZoneListHeight + 2,
             Width = 36,
             Height = 1,
             Orientation = Orientation.Horizontal,
@@ -125,13 +166,13 @@ public sealed class ProfileEditScreen : BbsWindow
         };
         _temperature.Labels = ["Celsius", "Fahrenheit", "Both"];
 
-        var clockLabel = new Label { X = RightColumnX, Y = 5 + TimeZoneListHeight + 4, Text = "Clock:" };
+        var clockLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 4, Text = "Clock:" };
         clockLabel.SetScheme(BbsTheme.Hint);
         Add(clockLabel);
         _clockFormat = new OptionSelector<ClockFormat>
         {
             X = RightColumnX,
-            Y = 5 + TimeZoneListHeight + 5,
+            Y = tzListTop + TimeZoneListHeight + 5,
             Width = 36,
             Height = 1,
             Orientation = Orientation.Horizontal,
@@ -139,13 +180,13 @@ public sealed class ProfileEditScreen : BbsWindow
         };
         _clockFormat.Labels = ["24-hour", "12-hour"];
 
-        var dateLabel = new Label { X = RightColumnX, Y = 5 + TimeZoneListHeight + 7, Text = "Date format:" };
+        var dateLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 7, Text = "Date format:" };
         dateLabel.SetScheme(BbsTheme.Hint);
         Add(dateLabel);
         _dateFormat = new OptionSelector<DateFormat>
         {
             X = RightColumnX,
-            Y = 5 + TimeZoneListHeight + 8,
+            Y = tzListTop + TimeZoneListHeight + 8,
             Width = 36,
             Height = 1,
             Orientation = Orientation.Horizontal,
@@ -309,4 +350,36 @@ public sealed class ProfileEditScreen : BbsWindow
 
     private static string? NullIfEmpty(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    // Renders the user's avatar (real upload or identicon) at `cols` wide and pushes the
+    // resulting CellGrid onto the view. Runs as fire-and-forget on a thread-pool task so
+    // the screen's initial paint isn't blocked by image decoding.
+    private static void LoadAvatarAsync(IApplication app, IServiceProvider services, User user, int cols, AnsiArtView view)
+    {
+        Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = services.CreateScope();
+                var pfp = scope.ServiceProvider.GetRequiredService<ProfilePictureService>();
+                var grid = await pfp.GetCellGridAsync(user.Id, user.Handle, cols, user.ProfilePictureUpdatedAt, default);
+                app.Invoke(() =>
+                {
+                    view.Grid = grid;
+                    view.SetNeedsDraw();
+                });
+            }
+            catch
+            {
+                // Best-effort: a bad image shouldn't break the profile screen.
+            }
+        });
+    }
+
+    private static string ResolvePublicUrl(IServiceProvider services)
+    {
+        var options = services.GetRequiredService<NightMsOptions>();
+        var baseUrl = options.PublicBaseUrl?.TrimEnd('/') ?? $"http://localhost:{options.HttpPort ?? 5080}";
+        return $"{baseUrl}/profile";
+    }
 }

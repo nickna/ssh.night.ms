@@ -4,18 +4,33 @@
     ViewData["Title"] = $"{Model.Handle} — profile";
 }
 
-<h1>@Model.Handle</h1>
-@if (!string.IsNullOrEmpty(Model.Email))
-{
-    <p class="muted">@Model.Email</p>
-}
-@if (Model.IsSysop)
-{
-    <p><strong>sysop</strong></p>
-}
+<div class="avatar-row">
+    <img class="avatar" src="/u/@Model.Handle/avatar?v=@Model.AvatarVersion" alt="@Model.Handle's avatar" width="96" height="96" />
+    <div class="avatar-meta">
+        <h1>@Model.Handle</h1>
+        @if (!string.IsNullOrEmpty(Model.Email))
+        {
+            <p class="muted">@Model.Email</p>
+        }
+        @if (Model.IsSysop)
+        {
+            <p><strong>sysop</strong></p>
+        }
+        <form method="post" enctype="multipart/form-data" action="/profile/avatar" class="avatar-form">
+            <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required />
+            <button class="btn" type="submit">@(Model.HasProfilePicture ? "Replace picture" : "Upload picture")</button>
+            @if (Model.HasProfilePicture)
+            {
+                <button class="btn danger" type="submit" formaction="/profile/avatar/delete" formenctype="application/x-www-form-urlencoded">Remove</button>
+            }
+        </form>
+        <p class="muted">PNG / JPEG / WebP. Square images look best; non-square uploads are center-cropped to 256×256.</p>
+    </div>
+</div>
 
 <div class="actions">
     <a href="/terminal" class="btn">Open web terminal</a>
+    <a href="/u/@Model.Handle" class="btn">View public profile</a>
 </div>
 
 @if (Model.Flash is not null)

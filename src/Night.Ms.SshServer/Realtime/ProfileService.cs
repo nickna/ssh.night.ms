@@ -17,7 +17,10 @@ public sealed record ProfileSnapshot(
     string TimeZoneId,
     int ChatMessageCount,
     int TopicCount,
-    int PostCount);
+    int PostCount,
+    // ProfilePictureUpdatedAt doubles as a "has one" flag and an ETag basis for the avatar
+    // endpoint. Null = no upload; the rendering layer falls back to a procedural identicon.
+    DateTimeOffset? ProfilePictureUpdatedAt);
 
 // Returned alongside an UpdateAsync failure when the typed Location couldn't be geocoded.
 // The screen uses this to decide whether to offer the "use IP-detected location" prompt.
@@ -89,7 +92,8 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
             TimeZoneId: user.TimeZoneId,
             ChatMessageCount: chatCount,
             TopicCount: topicCount,
-            PostCount: postCount);
+            PostCount: postCount,
+            ProfilePictureUpdatedAt: user.ProfilePictureUpdatedAt);
     }
 
     public async Task<ProfileUpdateResult> UpdateAsync(long userId, ProfileUpdate update, CancellationToken ct)
