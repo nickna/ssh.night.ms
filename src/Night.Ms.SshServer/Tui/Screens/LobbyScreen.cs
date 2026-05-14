@@ -1,4 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Tui.Art;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
@@ -14,21 +16,22 @@ public sealed class LobbyScreen : BbsWindow
 {
     private readonly IApplication _app;
 
-    // The button row + its key bindings used to live in two parallel hand-rolled lists. They're
-    // table-driven now so a tenth destination is one row and the layout-chain skip for invisible
-    // buttons (e.g. _Sysop for non-sysops) happens in one place.
+    // The carousel entries are table-driven so a tenth destination is one row, and so the
+    // hotkey loop + the per-card icon lookup share a single source of truth.
     private readonly record struct LobbyEntry(
         string Label,
+        string IconName,
         Key Hotkey,
         LobbyNavigation Target,
-        bool Visible = true,
-        bool IsDefault = false);
+        bool Visible = true);
 
     public LobbyScreen(IApplication app, IServiceProvider services, User user, bool justRegistered, ArtProvider art)
         : base(app, services, user)
     {
         _app = app;
         Title = $"ssh.night.ms — lobby — {user.Handle}";
+
+        var icons = services.GetRequiredService<ILobbyIconProvider>();
 
         View artView;
         if (art.IsColor)
@@ -42,7 +45,6 @@ public sealed class LobbyScreen : BbsWindow
             artView = label;
         }
 
-        // Push the rest of the lobby below the art (with a one-row gap).
         var contentTop = art.LineCount + 1;
 
         var welcome = new Label
@@ -55,61 +57,49 @@ public sealed class LobbyScreen : BbsWindow
         };
         welcome.SetScheme(justRegistered ? BbsTheme.Success_ : BbsTheme.Header_);
 
-        var hint = new Label
-        {
-            X = 2,
-            Y = contentTop + 2,
-            Text = "Choose where to go:",
-        };
-        hint.SetScheme(BbsTheme.Hint);
-
-        Add(artView, welcome, hint);
+        Add(artView, welcome);
 
         var entries = new[]
         {
-            new LobbyEntry("_Chat (#lobby)", Key.C, LobbyNavigation.Chat, IsDefault: true),
-            new LobbyEntry("_Boards",        Key.B, LobbyNavigation.Boards),
-            new LobbyEntry("_Profile",       Key.P, LobbyNavigation.Profile),
-            new LobbyEntry("_News",          Key.N, LobbyNavigation.News),
-            new LobbyEntry("Bro_wser",       Key.W, LobbyNavigation.Browser),
-            new LobbyEntry("_Gallery",       Key.G, LobbyNavigation.Gallery),
-            new LobbyEntry("_Map",           Key.M, LobbyNavigation.Map),
-            new LobbyEntry("_Sysop",         Key.S, LobbyNavigation.Sysop, Visible: user.IsSysop),
-            new LobbyEntry("_Logout",        Key.L, LobbyNavigation.Logout),
+            new LobbyEntry("Chat",     "chat",    Key.C, LobbyNavigation.Chat),
+            new LobbyEntry("Boards",   "boards",  Key.B, LobbyNavigation.Boards),
+            new LobbyEntry("Profile",  "profile", Key.P, LobbyNavigation.Profile),
+            new LobbyEntry("News",     "news",    Key.N, LobbyNavigation.News),
+            new LobbyEntry("Browser",  "browser", Key.W, LobbyNavigation.Browser),
+            new LobbyEntry("Gallery",  "gallery", Key.G, LobbyNavigation.Gallery),
+            new LobbyEntry("Map",      "map",     Key.M, LobbyNavigation.Map),
+            new LobbyEntry("Sysop",    "sysop",   Key.S, LobbyNavigation.Sysop, Visible: user.IsSysop),
+            new LobbyEntry("Logout",   "logout",  Key.L, LobbyNavigation.Logout),
         };
 
-        Button? prevVisible = null;
-        foreach (var entry in entries)
+        var carouselEntries = entries
+            .Where(e => e.Visible)
+            .Select(e => new LobbyCarouselView.Entry(e.Label, e.Hotkey, e.Target, icons.Get(e.IconName)))
+            .ToList();
+
+        var carousel = new LobbyCarouselView(carouselEntries)
         {
-            var btn = new Button
-            {
-                X = prevVisible is null ? 2 : Pos.Right(prevVisible) + 2,
-                Y = contentTop + 4,
-                Text = entry.Label,
-                IsDefault = entry.IsDefault,
-                Visible = entry.Visible,
-                Enabled = entry.Visible,
-            };
-            var target = entry.Target;
-            btn.Accepting += (_, e) => { e.Handled = true; Choose(target); };
-            Add(btn);
-            if (entry.Visible) prevVisible = btn;
-        }
+            X = 0,
+            Y = contentTop + 2,
+            Width = Dim.Fill(),
+        };
+        carousel.EntryActivated += (_, target) => Choose(target);
+        Add(carousel);
 
         var sysopBadge = new Label
         {
             X = 2,
-            Y = contentTop + 7,
+            Y = contentTop + 2 + LobbyCarouselView.RowHeight + 1,
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
         Add(sysopBadge);
 
+        carousel.SetFocus();
+
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)        { key.Handled = true; Choose(LobbyNavigation.Logout); return; }
-            // Enter from anywhere on the lobby jumps into chat — saves a Tab dance.
-            if (key == Key.Enter)      { key.Handled = true; Choose(LobbyNavigation.Chat); return; }
+            if (key == Key.Esc) { key.Handled = true; Choose(LobbyNavigation.Logout); return; }
 
             foreach (var entry in entries)
             {
@@ -117,7 +107,7 @@ public sealed class LobbyScreen : BbsWindow
                 if (key == entry.Hotkey || key == entry.Hotkey.WithShift)
                 {
                     key.Handled = true;
-                    Choose(entry.Target);
+                    carousel.TrySelectByHotkey(key);
                     return;
                 }
             }

@@ -147,6 +147,7 @@ builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 builder.Services.AddSingleton<ArtProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider, Night.Ms.SshServer.Tui.Art.FileSystemArtGalleryProvider>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.ILobbyIconProvider, Night.Ms.SshServer.Tui.Art.FileSystemLobbyIconProvider>();
 
 // Pluggable provider interfaces (M10 follow-up F9). Open-Meteo + Hacker News ship as the
 // default no-key implementations; swap in a paid news source or a different weather API by

@@ -21,6 +21,7 @@ public sealed class NightMsOptions
     public string? BootstrapSysopHandle { get; init; }
     public string? LoginArtPath { get; init; }
     public string? ArtGalleryPath { get; init; }
+    public string? LobbyIconsPath { get; init; }
     public string? ProfilePictureDirectory { get; init; }
     public string? WeatherLabel { get; init; }
     public double? WeatherLatitude { get; init; }
@@ -55,6 +56,7 @@ public sealed class NightMsOptions
         BootstrapSysopHandle = TrimOrNull(cfg["NIGHTMS_BOOTSTRAP_SYSOP_HANDLE"]),
         LoginArtPath         = First(cfg, "NIGHTMS_LOGIN_ART_PATH", "LoginArt:Path"),
         ArtGalleryPath       = First(cfg, "NIGHTMS_ART_DIR", "ArtGallery:Path"),
+        LobbyIconsPath       = First(cfg, "NIGHTMS_LOBBY_ICONS_DIR", "LobbyIcons:Path"),
         ProfilePictureDirectory = First(cfg, "NIGHTMS_PFP_DIR", "ProfilePictures:Path"),
         WeatherLabel         = NullIfEmpty(cfg["NIGHTMS_WEATHER_LABEL"]),
         WeatherLatitude      = ParseDouble(cfg["NIGHTMS_WEATHER_LAT"]),

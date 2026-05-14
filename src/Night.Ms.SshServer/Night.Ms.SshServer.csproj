@@ -34,4 +34,10 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Night.Ms.SshServer.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="art\lobby-icons\*.ans">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
