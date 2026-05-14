@@ -219,7 +219,9 @@ NIGHTMS_MICROSOFT_CLIENT_SECRET=…
 
 ## Continuous deployment
 
-`.github/workflows/deploy.yml` is a **manually-triggered** workflow that builds the Docker image on a GitHub runner, pushes it to GHCR (`ghcr.io/nickna/ssh.night.ms`), then SSHes to the VPS and runs `docker compose pull && up -d`. Triggered from the Actions tab → **deploy** → **Run workflow** (optional `ref` input to deploy a non-`main` branch / tag / SHA).
+`.github/workflows/deploy.yml` is a **manually-triggered** workflow that builds the Docker image on a GitHub runner, pushes it to GHCR (`ghcr.io/nickna/ssh.night.ms`), `scp`'s the latest `deploy/compose.yml` to the VPS, then SSHes in and runs `docker compose pull && up -d`. Triggered from the Actions tab → **deploy** → **Run workflow** (optional `ref` input to deploy a non-`main` branch / tag / SHA).
+
+The VPS only needs the `.env` file and the deploy user's SSH access — no git checkout, no source code. `compose.yml` is delivered fresh on every run.
 
 ### One-time GitHub setup
 
@@ -238,7 +240,7 @@ NIGHTMS_MICROSOFT_CLIENT_SECRET=…
    KEY
    chmod 600 ~/.ssh/authorized_keys
    ```
-   The deploy user needs `docker` group membership and write access to the repo checkout under `DEPLOY_PATH`.
+   The deploy user needs `docker` group membership and write access to `DEPLOY_PATH`.
 
 3. **Add secrets to the repo.** Settings → Secrets and variables → Actions → New repository secret. Create a `production` environment first (Settings → Environments → New environment → `production`) if you want the deploy job gated by environment protection rules; otherwise the secrets can live on the repo directly.
 
@@ -248,30 +250,34 @@ NIGHTMS_MICROSOFT_CLIENT_SECRET=…
    | `SSH_HOST`          | `vps.night.ms` or the IP               | Resolvable from the GitHub runner.                                                              |
    | `SSH_USER`          | `deploy`                               | The Linux user the runner will `ssh` in as.                                                     |
    | `SSH_PORT`          | `2200`                                 | Optional; defaults to `22`. Set if you moved sshd off `:22` to free it for the BBS container.   |
-   | `DEPLOY_PATH`       | `/home/deploy/ssh.night.ms`            | Absolute path to the repo checkout on the VPS.                                                  |
+   | `DEPLOY_PATH`       | `/home/deploy/nightms`                 | Absolute path on the VPS. The workflow drops `compose.yml` here; you put `.env` here.           |
 
 4. **Make the GHCR package public** (one-time, after the first successful workflow run). GHCR creates packages as private by default. Open `https://github.com/users/nickna/packages/container/ssh.night.ms/settings` → **Change visibility** → **Public**. Otherwise the VPS needs to `docker login ghcr.io` with a PAT to pull.
 
 ### One-time VPS prep
 
+Stand up the directory the workflow will deploy into, and put the `.env` file there. From your **workstation**:
+
 ```sh
-# As the deploy user, on the VPS:
-git clone https://github.com/nickna/ssh.night.ms.git
-cd ssh.night.ms
-cp deploy/.env.example deploy/.env   # then edit deploy/.env with real secrets
-docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+scp deploy/.env.example <user>@<vps>:/home/<user>/nightms/.env
+# (or copy + edit on the VPS directly)
+ssh <user>@<vps>
+chmod 600 ~/nightms/.env
+nano ~/nightms/.env   # fill in POSTGRES_PASSWORD at minimum
 ```
 
-After that, every workflow run will `git fetch + checkout` the requested ref, pull the new image, and recreate the `app` container. Postgres and Redis are unaffected (their volumes survive).
+That's it — no `git clone` on the VPS. On the **first** workflow run the deploy step uploads `compose.yml`, pulls the image, and starts the stack. Postgres and Redis volumes persist across subsequent deploys.
 
 ### Rolling back
 
-The build job tags every image with both `latest` and `sha-<short>`. To roll back, SSH to the VPS yourself and override the tag:
+The build job tags every image with both `latest` and `sha-<short>`. To roll back without touching the workflow, SSH to the VPS and override the tag:
 
 ```sh
-docker compose -f deploy/compose.yml --env-file deploy/.env pull
-# Edit deploy/compose.yml: change `:latest` to `:sha-abc1234` for the previous good build
-docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+cd ~/nightms
+# Edit compose.yml: change `image: ghcr.io/nickna/ssh.night.ms:latest`
+#                       to `image: ghcr.io/nickna/ssh.night.ms:sha-abc1234`
+docker compose --env-file .env pull app
+docker compose --env-file .env up -d
 ```
 
-Or simply re-run the workflow against the previous good commit SHA via the `ref` input.
+The next workflow run will overwrite `compose.yml` and put you back on `:latest`. Or re-run the workflow against the previous good commit SHA via the `ref` input — the build job tags the new image with that ref's short SHA.
