@@ -1,6 +1,15 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authentication.MicrosoftAccount;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Configuration;
+using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
@@ -10,11 +19,93 @@ using Night.Ms.SshServer.Tui;
 using Night.Ms.SshServer.Tui.Map;
 using StackExchange.Redis;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 
 // Single typed view of the NIGHTMS_* env vars + their appsettings aliases. Bound once at
 // boot so consumers don't each repeat the env-or-config fallback lookup.
-builder.Services.AddSingleton(NightMsOptions.FromConfiguration(builder.Configuration));
+var nightMsOptions = NightMsOptions.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(nightMsOptions);
+
+// Kestrel binds the web listener; SshHost owns the SSH listener separately. Both live in
+// the same process so they share DI, AppDbContext, Redis, NightMsOptions. The web side is
+// HTTP only — TLS terminates upstream at the reverse proxy in prod (UseForwardedHeaders
+// below restores the client-visible scheme/host on the request).
+var httpPort = nightMsOptions.HttpPort is { } p && p is > 0 and <= 65535 ? p : 5080;
+builder.WebHost.ConfigureKestrel(opts => opts.ListenAnyIP(httpPort));
+
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownIPNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
+// Web auth: a single cookie scheme owns the persistent session. Google / Microsoft handlers
+// are only registered when their (ClientId, ClientSecret) pair is configured — so a dev
+// install without SSO credentials still boots cleanly with just the SSH listener and the
+// landing page. The handlers expose their default callback paths ("/signin-google" /
+// "/signin-microsoft"); our user-facing challenge endpoints will sit under /login/{provider}.
+// Two cookie schemes:
+//   - "Cookies" (default): the durable session cookie, set after onboarding/sign-in succeeds.
+//   - "External":  short-lived cookie that holds the OIDC ticket between the IdP callback and
+//                  either (a) immediate sign-in (subject is known) or (b) the onboarding
+//                  handle picker. The provider handlers below SignInScheme="External" so the
+//                  callback never writes the long-lived cookie before we know the user has a
+//                  handle. SignInManager-style flow without Identity itself.
+const string ExternalScheme = "External";
+
+var authBuilder = builder.Services.AddAuthentication(opts =>
+{
+    opts.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    opts.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie(opts =>
+{
+    opts.Cookie.Name = "nightms-auth";
+    opts.Cookie.SameSite = SameSiteMode.Lax;
+    opts.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    opts.ExpireTimeSpan = TimeSpan.FromDays(30);
+    opts.SlidingExpiration = true;
+    opts.LoginPath = "/login";
+    opts.LogoutPath = "/logout";
+    opts.AccessDeniedPath = "/login";
+})
+.AddCookie(ExternalScheme, opts =>
+{
+    opts.Cookie.Name = "nightms-ext";
+    opts.Cookie.SameSite = SameSiteMode.Lax;
+    opts.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    opts.ExpireTimeSpan = TimeSpan.FromMinutes(10);
+    opts.SlidingExpiration = false;
+});
+
+if (nightMsOptions.IsGoogleConfigured)
+{
+    authBuilder.AddGoogle(opts =>
+    {
+        opts.ClientId = nightMsOptions.GoogleClientId!;
+        opts.ClientSecret = nightMsOptions.GoogleClientSecret!;
+        opts.SignInScheme = ExternalScheme;
+        opts.SaveTokens = false;
+        // openid+email scopes are added by default; the email + email_verified claims arrive
+        // on the ticket once the userinfo endpoint responds.
+    });
+}
+
+if (nightMsOptions.IsMicrosoftConfigured)
+{
+    authBuilder.AddMicrosoftAccount(opts =>
+    {
+        opts.ClientId = nightMsOptions.MicrosoftClientId!;
+        opts.ClientSecret = nightMsOptions.MicrosoftClientSecret!;
+        opts.SignInScheme = ExternalScheme;
+        opts.SaveTokens = false;
+    });
+}
+
+builder.Services.AddAuthorization();
+builder.Services.AddRazorPages();
+builder.Services.AddScoped<IdentityResolutionService>();
 
 // Postgres + EF Core. Connection string lives under ConnectionStrings:bbs (set by
 // run.ps1, or via appsettings in production). Snake-case convention matches the
@@ -75,5 +166,208 @@ builder.Services.AddHostedService<DatabaseInitializer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SysopBootstrap>());
 builder.Services.AddHostedService<SshHost>();
 
-var host = builder.Build();
-host.Run();
+var app = builder.Build();
+
+app.UseForwardedHeaders();
+app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGet("/healthz", () => Results.Ok("ok"));
+app.MapRazorPages();
+
+// --- Auth action endpoints ----------------------------------------------------------------
+// These are kept as Minimal API endpoints because they don't render a view; each one either
+// issues a challenge, reads the External cookie, or completes a sign-in / link / unlink.
+// Pages own anything user-facing (Index / Login / Onboarding / Profile).
+
+// POST /login/{provider} — issues an OIDC challenge for the named provider. The provider
+// handler signs into the "External" scheme on return and redirects to /signin/complete.
+app.MapPost("/login/{provider}", (string provider, HttpContext ctx) =>
+{
+    var scheme = ResolveOidcScheme(provider);
+    if (scheme is null) return Results.Redirect("/login");
+    var props = new AuthenticationProperties { RedirectUri = "/signin/complete" };
+    return Results.Challenge(props, [scheme]);
+});
+
+// GET /signin/complete — the External cookie now holds the OIDC ticket. Look up the subject;
+// if a credential exists or the verified email matches an existing user, sign in immediately
+// with the durable Cookies scheme. Otherwise leave the External cookie in place and redirect
+// to the onboarding handle picker.
+app.MapGet("/signin/complete", async (HttpContext ctx, IdentityResolutionService resolver) =>
+{
+    var ext = await ctx.AuthenticateAsync(ExternalScheme);
+    if (!ext.Succeeded || ext.Principal is null) return Results.Redirect("/login");
+
+    if (!TryReadExternalClaims(ext, out var provider, out var subject, out var email, out var emailVerified))
+    {
+        await ctx.SignOutAsync(ExternalScheme);
+        return Results.Redirect("/login");
+    }
+
+    var resolution = await resolver.ResolveAsync(
+        provider, subject, email, emailVerified, extraMetadata: null, ctx.RequestAborted);
+
+    switch (resolution)
+    {
+        case IdentityResolution.Existing(var uid, var handle, var sysop):
+        case IdentityResolution.LinkedToExisting(var uid2, var handle2, var sysop2, _):
+            var (signedInId, signedInHandle, signedInSysop) = resolution switch
+            {
+                IdentityResolution.Existing e => (e.UserId, e.Handle, e.IsSysop),
+                IdentityResolution.LinkedToExisting l => (l.UserId, l.Handle, l.IsSysop),
+                _ => throw new InvalidOperationException(),
+            };
+            await ctx.SignOutAsync(ExternalScheme);
+            await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                BuildCookiePrincipal(signedInId, signedInHandle, signedInSysop));
+            return Results.Redirect("/profile");
+
+        case IdentityResolution.NewSignup:
+            // Keep External cookie so onboarding/handle can read the ticket.
+            return Results.Redirect("/onboarding/handle");
+
+        case IdentityResolution.Banned b:
+            await ctx.SignOutAsync(ExternalScheme);
+            return Results.Content($"This account is banned: {b.Reason}", "text/plain");
+
+        default:
+            await ctx.SignOutAsync(ExternalScheme);
+            return Results.Redirect("/login");
+    }
+});
+
+// GET /cancel-signin — wipes a half-finished external ticket and returns to the landing.
+app.MapGet("/cancel-signin", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync(ExternalScheme);
+    return Results.Redirect("/");
+});
+
+// POST /logout — clears the durable cookie.
+app.MapPost("/logout", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.Redirect("/");
+});
+
+// POST /profile/link/{provider} — logged-in user issues a challenge to add another credential
+// to their existing account. The callback returns to /profile/link-complete.
+app.MapPost("/profile/link/{provider}", (string provider, HttpContext ctx) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    var scheme = ResolveOidcScheme(provider);
+    if (scheme is null) return Results.Redirect("/profile");
+    var props = new AuthenticationProperties { RedirectUri = "/profile/link-complete" };
+    return Results.Challenge(props, [scheme]);
+});
+
+// GET /profile/link-complete — runs after the external ticket arrives for a link flow.
+app.MapGet("/profile/link-complete", async (HttpContext ctx, IdentityResolutionService resolver) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    var currentUserIdStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(currentUserIdStr, out var currentUserId)) return Results.Redirect("/login");
+
+    var ext = await ctx.AuthenticateAsync(ExternalScheme);
+    if (!ext.Succeeded || ext.Principal is null) return Results.Redirect("/profile");
+
+    if (!TryReadExternalClaims(ext, out var provider, out var subject, out var email, out var emailVerified))
+    {
+        await ctx.SignOutAsync(ExternalScheme);
+        return Results.Redirect("/profile");
+    }
+
+    var outcome = await resolver.LinkToUserAsync(currentUserId, provider, subject, email, emailVerified,
+        extraMetadata: null, ctx.RequestAborted);
+    await ctx.SignOutAsync(ExternalScheme);
+
+    var flash = outcome switch
+    {
+        LinkOutcome.Linked => $"Linked {provider}.",
+        LinkOutcome.AlreadyLinkedToYou => $"{provider} is already linked to your account.",
+        LinkOutcome.AlreadyLinkedToOther => $"That {provider} account is linked to a different handle. Sign in with that one to manage it.",
+        _ => null,
+    };
+    return Results.Redirect($"/profile{(flash is null ? "" : $"?flash={Uri.EscapeDataString(flash)}")}");
+});
+
+// POST /profile/unlink/{credentialId} — refuses if it's the user's last credential.
+app.MapPost("/profile/unlink/{credentialId:long}", async (long credentialId, HttpContext ctx, IdentityResolutionService resolver) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    var currentUserIdStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(currentUserIdStr, out var currentUserId)) return Results.Redirect("/login");
+
+    var outcome = await resolver.UnlinkAsync(currentUserId, credentialId, ctx.RequestAborted);
+    var flash = outcome switch
+    {
+        UnlinkOutcome.Removed => "Identity unlinked.",
+        UnlinkOutcome.RefusedLastCredential => "Cannot remove your only remaining identity — link another first.",
+        UnlinkOutcome.NotFound => "Identity not found.",
+        _ => null,
+    };
+    return Results.Redirect($"/profile{(flash is null ? "" : $"?flash={Uri.EscapeDataString(flash)}")}");
+});
+
+app.Run();
+
+// Local helpers (file-scoped). Kept here so the wiring stays in one place; if these grow they
+// can move into a small Web/AuthEndpoints.cs partial class.
+static string? ResolveOidcScheme(string provider) => provider.ToLowerInvariant() switch
+{
+    "google" => GoogleDefaults.AuthenticationScheme,
+    "microsoft" => MicrosoftAccountDefaults.AuthenticationScheme,
+    _ => null,
+};
+
+static bool TryReadExternalClaims(
+    AuthenticateResult ext,
+    out CredentialProvider provider,
+    out string subject,
+    out string? email,
+    out bool emailVerified)
+{
+    provider = default;
+    subject = "";
+    email = null;
+    emailVerified = false;
+
+    var subjectClaim = ext.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (string.IsNullOrEmpty(subjectClaim)) return false;
+    subject = subjectClaim;
+
+    var scheme = ext.Properties?.Items["LoginProvider"] ?? ext.Principal!.Identity?.AuthenticationType;
+    if (string.Equals(scheme, GoogleDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
+        provider = CredentialProvider.Google;
+    else if (string.Equals(scheme, MicrosoftAccountDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
+        provider = CredentialProvider.Microsoft;
+    else
+        return false;
+
+    var principal = ext.Principal!;
+    email = principal.FindFirstValue(ClaimTypes.Email);
+    emailVerified = provider switch
+    {
+        CredentialProvider.Google =>
+            string.Equals(principal.FindFirstValue("email_verified"), "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(principal.FindFirstValue("urn:google:email_verified"), "true", StringComparison.OrdinalIgnoreCase),
+        // Microsoft accounts require verified email at signup; the handler does not surface a
+        // separate email_verified claim. Treat the presence of an email as verified.
+        CredentialProvider.Microsoft => !string.IsNullOrWhiteSpace(email),
+        _ => false,
+    };
+    return true;
+}
+
+static ClaimsPrincipal BuildCookiePrincipal(long userId, string handle, bool isSysop)
+{
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.NameIdentifier, userId.ToString()),
+        new(ClaimTypes.Name, handle),
+    };
+    if (isSysop) claims.Add(new Claim(ClaimTypes.Role, "sysop"));
+    return new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
+}

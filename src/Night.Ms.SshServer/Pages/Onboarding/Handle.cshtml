@@ -1,0 +1,25 @@
+@page "/onboarding/handle"
+@model OnboardingHandleModel
+@{
+    ViewData["Title"] = "pick a handle — ssh.night.ms";
+}
+
+<h1>Pick a handle</h1>
+
+<p class="muted">
+    Signed in as <code>@Model.Email</code> via @Model.ProviderDisplay. Pick a handle for your
+    BBS identity — it's how everyone will see you in chat, forums, and finger.
+</p>
+
+<form method="post" class="box">
+    <p>Handle (3–32 chars, letters/digits/underscore/dash):</p>
+    <input type="text" name="handle" value="@Model.SuggestedHandle" maxlength="32" autofocus />
+    @if (Model.Error is not null)
+    {
+        <p class="warn">[!] @Model.Error</p>
+    }
+    <div class="actions">
+        <button type="submit" class="btn">Continue</button>
+        <a href="/cancel-signin" class="btn">Cancel</a>
+    </div>
+</form>

@@ -1,0 +1,35 @@
+@{
+    var title = ViewData["Title"] as string ?? "ssh.night.ms";
+}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@title</title>
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <header>
+        <a href="/" class="logo">ssh.night.ms</a>
+        <nav>
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <a href="/profile">@User.Identity.Name</a>
+                <form method="post" action="/logout" class="inline">
+                    <button type="submit" class="link">sign out</button>
+                </form>
+            }
+            else
+            {
+                <a href="/login">sign in</a>
+            }
+        </nav>
+    </header>
+    <main>
+        @RenderBody()
+    </main>
+    <footer>
+        <span>ssh -p 2222 &lt;handle&gt;@@night.ms</span>
+    </footer>
+</body>
+</html>

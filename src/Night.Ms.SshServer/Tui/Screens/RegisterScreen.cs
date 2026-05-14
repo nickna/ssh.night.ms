@@ -162,17 +162,26 @@ public sealed class RegisterScreen : BbsWindow
             LastSeenAt = now,
             IsSysop = promoteToSysop,
         };
-        var key = new SshKey
+        // SSH metadata (algorithm + base64 public key blob) is archived in the credential's
+        // jsonb Metadata column — AuthLookupService only needs the fingerprint to authorize
+        // a session, but keeping the blob lets a future "show me my registered keys" UI
+        // render details without an extra schema.
+        var metadata = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            algorithm = _session.KeyAlgorithm,
+            blob_b64 = Convert.ToBase64String(_session.PublicKeyBlob),
+        });
+        var credential = new IdentityCredential
         {
             User = user,
-            KeyType = _session.KeyAlgorithm,
-            PublicKeyBlob = _session.PublicKeyBlob,
-            Fingerprint = _session.Fingerprint,
+            Provider = CredentialProvider.Ssh,
+            Subject = _session.Fingerprint,
+            Metadata = metadata,
             Label = "registered at signup",
-            AddedAt = now,
+            CreatedAt = now,
         };
         _db.Users.Add(user);
-        _db.SshKeys.Add(key);
+        _db.IdentityCredentials.Add(credential);
         await _db.SaveChangesAsync();
 
         if (promoteToSysop)

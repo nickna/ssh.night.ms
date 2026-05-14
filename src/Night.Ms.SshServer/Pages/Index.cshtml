@@ -1,0 +1,35 @@
+@page "/"
+@model IndexModel
+@{
+    ViewData["Title"] = "ssh.night.ms";
+}
+
+<h1>ssh.night.ms</h1>
+<p class="muted">A small BBS that lives over SSH.</p>
+
+<div class="box">
+    <h2>Connect from your terminal</h2>
+    <pre>ssh -p 2222 &lt;handle&gt;@@@Model.PublicHost</pre>
+    <p class="muted">
+        First connection from a new key drops you into the registration screen — pick a handle
+        and you're in. There's no email recovery; lose the key, lose the account.
+    </p>
+</div>
+
+@if (Model.AnySsoConfigured)
+{
+    <div class="box">
+        <h2>Sign in to the web</h2>
+        <p>Manage your linked identities, see your profile, and (soon) connect to the BBS from the browser.</p>
+        <div class="actions">
+            @if (Model.GoogleConfigured)
+            {
+                <form method="post" action="/login/google" class="inline"><button class="btn">Sign in with Google</button></form>
+            }
+            @if (Model.MicrosoftConfigured)
+            {
+                <form method="post" action="/login/microsoft" class="inline"><button class="btn">Sign in with Microsoft</button></form>
+            }
+        </div>
+    </div>
+}

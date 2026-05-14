@@ -1,0 +1,35 @@
+@page "/login"
+@model LoginModel
+@{
+    ViewData["Title"] = "sign in — ssh.night.ms";
+}
+
+<h1>Sign in</h1>
+
+@if (!Model.AnySsoConfigured)
+{
+    <div class="box">
+        <p class="warn">No SSO providers are configured on this server.</p>
+        <p class="muted">
+            Set <code>NIGHTMS_GOOGLE_CLIENT_ID</code> + <code>NIGHTMS_GOOGLE_CLIENT_SECRET</code>
+            (and/or the Microsoft equivalents) and restart to enable web sign-in.
+        </p>
+    </div>
+}
+else
+{
+    <div class="actions">
+        @if (Model.GoogleConfigured)
+        {
+            <form method="post" action="/login/google" class="inline"><button class="btn">Sign in with Google</button></form>
+        }
+        @if (Model.MicrosoftConfigured)
+        {
+            <form method="post" action="/login/microsoft" class="inline"><button class="btn">Sign in with Microsoft</button></form>
+        }
+    </div>
+    <p class="muted">
+        Already on the BBS? Sign in here and you can link this account to your SSH identity from
+        the profile screen.
+    </p>
+}

@@ -6,7 +6,7 @@ namespace Night.Ms.SshServer.Persistence;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
-    public DbSet<SshKey> SshKeys => Set<SshKey>();
+    public DbSet<IdentityCredential> IdentityCredentials => Set<IdentityCredential>();
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<ChannelMember> ChannelMembers => Set<ChannelMember>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
@@ -27,6 +27,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             b.ToTable("users");
             b.Property(u => u.Handle).HasColumnType("citext").HasMaxLength(32);
+            b.Property(u => u.Email).HasColumnType("citext").HasMaxLength(254);
             b.Property(u => u.Bio).HasMaxLength(500);
             b.Property(u => u.Location).HasMaxLength(64);
             b.Property(u => u.LocationCanonical).HasMaxLength(160);
@@ -37,15 +38,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(u => u.ClockFormat).HasDefaultValue(ClockFormat.Hours24);
             b.Property(u => u.DateFormat).HasDefaultValue(DateFormat.Iso);
             b.HasIndex(u => u.Handle).IsUnique();
+            b.HasIndex(u => u.Email).IsUnique();
         });
 
-        modelBuilder.Entity<SshKey>(b =>
+        modelBuilder.Entity<IdentityCredential>(b =>
         {
-            b.ToTable("ssh_keys");
-            b.Property(k => k.KeyType).HasMaxLength(64);
-            b.Property(k => k.Fingerprint).HasMaxLength(80);
-            b.HasIndex(k => k.Fingerprint).IsUnique();
-            b.HasOne(k => k.User).WithMany(u => u.Keys).HasForeignKey(k => k.UserId).OnDelete(DeleteBehavior.Cascade);
+            b.ToTable("identity_credentials");
+            // Enum stored as string so the table reads cleanly in psql and is robust to
+            // future enum reordering. Subject stays case-sensitive — SSH fingerprints embed
+            // base64 (case is meaningful), and OIDC subject claims are opaque IDs the
+            // provider returns verbatim. citext would create false-positive collisions on
+            // keys whose base64 differs only in case.
+            b.Property(c => c.Provider).HasConversion<string>().HasMaxLength(32);
+            b.Property(c => c.Subject).HasMaxLength(255);
+            b.Property(c => c.Metadata).HasColumnType("jsonb");
+            b.Property(c => c.Label).HasMaxLength(80);
+            b.HasIndex(c => new { c.Provider, c.Subject }).IsUnique();
+            b.HasIndex(c => c.UserId);
+            b.HasOne(c => c.User).WithMany(u => u.Credentials).HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Channel>(b =>

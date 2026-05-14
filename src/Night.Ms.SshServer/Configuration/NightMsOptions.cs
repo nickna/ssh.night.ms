@@ -17,6 +17,7 @@ public sealed class NightMsOptions
 {
     public string? HostKeyDirectory { get; init; }
     public int? SshPort { get; init; }
+    public int? HttpPort { get; init; }
     public string? BootstrapSysopHandle { get; init; }
     public string? LoginArtPath { get; init; }
     public string? ArtGalleryPath { get; init; }
@@ -24,16 +25,38 @@ public sealed class NightMsOptions
     public double? WeatherLatitude { get; init; }
     public double? WeatherLongitude { get; init; }
 
+    // Optional. When all four (GoogleClientId, GoogleClientSecret, MicrosoftClientId,
+    // MicrosoftClientSecret) are set, the web auth handlers register; otherwise the
+    // corresponding "Sign in with X" button is hidden. PublicBaseUrl is the externally-
+    // visible origin (e.g. https://night.ms) for callback URL construction in prod; in dev
+    // it's null and ASP.NET uses the request scheme/host (recovered from forwarded headers).
+    public string? GoogleClientId { get; init; }
+    public string? GoogleClientSecret { get; init; }
+    public string? MicrosoftClientId { get; init; }
+    public string? MicrosoftClientSecret { get; init; }
+    public string? PublicBaseUrl { get; init; }
+
+    public bool IsGoogleConfigured =>
+        !string.IsNullOrWhiteSpace(GoogleClientId) && !string.IsNullOrWhiteSpace(GoogleClientSecret);
+    public bool IsMicrosoftConfigured =>
+        !string.IsNullOrWhiteSpace(MicrosoftClientId) && !string.IsNullOrWhiteSpace(MicrosoftClientSecret);
+
     public static NightMsOptions FromConfiguration(IConfiguration cfg) => new()
     {
         HostKeyDirectory     = First(cfg, "NIGHTMS_HOST_KEY_DIR", "HostKeyDirectory"),
         SshPort              = ParseInt(cfg["BBS_SSH_PORT"]),
+        HttpPort             = ParseInt(cfg["BBS_HTTP_PORT"]),
         BootstrapSysopHandle = TrimOrNull(cfg["NIGHTMS_BOOTSTRAP_SYSOP_HANDLE"]),
         LoginArtPath         = First(cfg, "NIGHTMS_LOGIN_ART_PATH", "LoginArt:Path"),
         ArtGalleryPath       = First(cfg, "NIGHTMS_ART_DIR", "ArtGallery:Path"),
         WeatherLabel         = NullIfEmpty(cfg["NIGHTMS_WEATHER_LABEL"]),
         WeatherLatitude      = ParseDouble(cfg["NIGHTMS_WEATHER_LAT"]),
         WeatherLongitude     = ParseDouble(cfg["NIGHTMS_WEATHER_LON"]),
+        GoogleClientId       = First(cfg, "NIGHTMS_GOOGLE_CLIENT_ID", "Authentication:Google:ClientId"),
+        GoogleClientSecret   = First(cfg, "NIGHTMS_GOOGLE_CLIENT_SECRET", "Authentication:Google:ClientSecret"),
+        MicrosoftClientId    = First(cfg, "NIGHTMS_MICROSOFT_CLIENT_ID", "Authentication:Microsoft:ClientId"),
+        MicrosoftClientSecret= First(cfg, "NIGHTMS_MICROSOFT_CLIENT_SECRET", "Authentication:Microsoft:ClientSecret"),
+        PublicBaseUrl        = First(cfg, "NIGHTMS_PUBLIC_BASE_URL", "PublicBaseUrl"),
     };
 
     private static string? First(IConfiguration cfg, params string[] keys)

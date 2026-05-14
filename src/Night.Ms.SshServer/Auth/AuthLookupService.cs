@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshTransport;
 
@@ -10,17 +11,21 @@ public sealed class AuthLookupService(IDbContextFactory<AppDbContext> dbFactory,
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var key = await db.SshKeys
-            .Include(k => k.User)
+        // SSH credentials live in the unified identity_credentials table alongside SSO
+        // identities; the (Provider, Subject) pair is unique so this is a single index hit.
+        var credential = await db.IdentityCredentials
+            .Include(c => c.User)
             .AsNoTracking()
-            .FirstOrDefaultAsync(k => k.Fingerprint == query.Fingerprint, cancellationToken);
+            .FirstOrDefaultAsync(
+                c => c.Provider == CredentialProvider.Ssh && c.Subject == query.Fingerprint,
+                cancellationToken);
 
-        if (key is null)
+        if (credential is null)
         {
             return AuthDecision.Unknown.Instance;
         }
 
-        var user = key.User!;
+        var user = credential.User!;
         if (user.IsBanned)
         {
             logger.LogWarning("Banned account attempted login: handle={Handle} fingerprint={Fingerprint}",

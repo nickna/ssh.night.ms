@@ -21,6 +21,11 @@
 .PARAMETER SshPort
     SSH listener port for the BBS. Defaults to 2222.
 
+.PARAMETER HttpPort
+    HTTP listener port for the Kestrel web server (landing page, SSO callbacks).
+    Defaults to 5080 (5000 is commonly held by Docker Desktop on Windows and AirPlay
+    Receiver on macOS).
+
 .PARAMETER Stop
     Stops and removes the Postgres + Redis containers and exits. Doesn't run the server.
 
@@ -46,6 +51,7 @@ param(
     [int]$PostgresPort = 55432,
     [int]$RedisPort = 56379,
     [int]$SshPort = 2222,
+    [int]$HttpPort = 5080,
     [switch]$Stop,
     [switch]$Reset
 )
@@ -156,10 +162,12 @@ if (-not (Test-Path $HostKeyDir)) {
 }
 
 # --- Run ----------------------------------------------------------------------
-Write-Step "Starting Night.Ms.SshServer on :$SshPort"
+Write-Step "Starting Night.Ms.SshServer on ssh :$SshPort, http :$HttpPort"
 Write-Host ""
 Write-Host "    Connect with:" -ForegroundColor Green
 Write-Host "      ssh -p $SshPort <handle>@localhost" -ForegroundColor Green
+Write-Host "    Or open:" -ForegroundColor Green
+Write-Host "      http://localhost:$HttpPort/" -ForegroundColor Green
 Write-Host ""
 Write-Host "    First connection from a key not on file lands on the registration screen." -ForegroundColor DarkGray
 Write-Host "    Bootstrap sysop handle: $SysopHandle" -ForegroundColor DarkGray
@@ -170,6 +178,7 @@ $env:Logging__LogLevel__Default = 'Information'
 $env:NIGHTMS_BOOTSTRAP_SYSOP_HANDLE = $SysopHandle
 $env:NIGHTMS_HOST_KEY_DIR = $HostKeyDir
 $env:BBS_SSH_PORT = $SshPort
+$env:BBS_HTTP_PORT = $HttpPort
 $env:ConnectionStrings__bbs = "Host=127.0.0.1;Port=$PostgresPort;Database=bbs;Username=postgres;Password=postgres"
 $env:ConnectionStrings__redis = "127.0.0.1:$RedisPort,abortConnect=false"
 

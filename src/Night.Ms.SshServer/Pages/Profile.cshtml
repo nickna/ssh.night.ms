@@ -1,0 +1,76 @@
+@page "/profile"
+@model ProfileModel
+@{
+    ViewData["Title"] = $"{Model.Handle} — profile";
+}
+
+<h1>@Model.Handle</h1>
+@if (!string.IsNullOrEmpty(Model.Email))
+{
+    <p class="muted">@Model.Email</p>
+}
+@if (Model.IsSysop)
+{
+    <p><strong>sysop</strong></p>
+}
+
+@if (Model.Flash is not null)
+{
+    <div class="box"><p>@Model.Flash</p></div>
+}
+
+<h2>Linked identities</h2>
+<table>
+    <thead>
+        <tr>
+            <th>provider</th>
+            <th>subject</th>
+            <th>linked</th>
+            <th>last used</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var c in Model.Credentials)
+        {
+            <tr>
+                <td>@c.Provider</td>
+                <td><code>@c.SubjectShort</code></td>
+                <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
+                <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
+                <td>
+                    @if (Model.Credentials.Count > 1)
+                    {
+                        <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                            <button type="submit" class="btn danger">unlink</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <span class="muted">last one</span>
+                    }
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h2>Add another</h2>
+<div class="actions">
+    @if (Model.CanLinkGoogle)
+    {
+        <form method="post" action="/profile/link/google" class="inline"><button class="btn">Link Google</button></form>
+    }
+    @if (Model.CanLinkMicrosoft)
+    {
+        <form method="post" action="/profile/link/microsoft" class="inline"><button class="btn">Link Microsoft</button></form>
+    }
+    @if (!Model.CanLinkGoogle && !Model.CanLinkMicrosoft)
+    {
+        <p class="muted">No more providers to link.</p>
+    }
+</div>
+<p class="muted">
+    To add another SSH key, connect from a machine where that key is set up; the BBS will
+    treat it as a TOFU registration. SSH-key self-service from the web is on the roadmap.
+</p>

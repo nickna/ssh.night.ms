@@ -4,6 +4,11 @@ public sealed class User
 {
     public long Id { get; set; }
     public required string Handle { get; set; }
+    // Optional. Populated for users who signed up via SSO (Google/Microsoft) or who add an
+    // email later from the web profile. Unique citext so a verified-email match across
+    // providers can auto-link to the same row. SSH-only users have null Email until they
+    // link an SSO credential.
+    public string? Email { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? LastSeenAt { get; set; }
     public bool IsSysop { get; set; }
@@ -29,5 +34,5 @@ public sealed class User
     public ClockFormat ClockFormat { get; set; }
     public DateFormat DateFormat { get; set; }
 
-    public List<SshKey> Keys { get; set; } = [];
+    public List<IdentityCredential> Credentials { get; set; } = [];
 }

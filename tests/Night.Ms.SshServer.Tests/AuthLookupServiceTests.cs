@@ -39,13 +39,12 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
-        db.SshKeys.Add(new SshKey
+        db.IdentityCredentials.Add(new IdentityCredential
         {
             UserId = user.Id,
-            KeyType = "ssh-ed25519",
-            PublicKeyBlob = [0x01, 0x02],
-            Fingerprint = fingerprint,
-            AddedAt = DateTimeOffset.UtcNow,
+            Provider = CredentialProvider.Ssh,
+            Subject = fingerprint,
+            CreatedAt = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync();
         return user.Id;
@@ -109,13 +108,12 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
         var userId = await SeedUserAsync(handle: "multi", fingerprint: "SHA256:laptop");
         await using (var db = new AppDbContext(_dbOptions!))
         {
-            db.SshKeys.Add(new SshKey
+            db.IdentityCredentials.Add(new IdentityCredential
             {
                 UserId = userId,
-                KeyType = "ssh-rsa",
-                PublicKeyBlob = [0x03, 0x04],
-                Fingerprint = "SHA256:desktop",
-                AddedAt = DateTimeOffset.UtcNow,
+                Provider = CredentialProvider.Ssh,
+                Subject = "SHA256:desktop",
+                CreatedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -132,8 +130,8 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     [Fact]
     public async Task Fingerprint_lookup_is_case_sensitive()
     {
-        // SshKey.Fingerprint is plain text (not citext) — base64 is case-sensitive on
-        // purpose; flipping case would change the underlying binary.
+        // IdentityCredential.Subject is plain text (not citext) — fingerprints embed base64,
+        // which is case-sensitive on purpose; flipping case would change the underlying key.
         await SeedUserAsync(handle: "exact", fingerprint: "SHA256:abc123XYZ");
 
         var lower = await _sut!.LookupAsync(Query("sha256:abc123xyz"), default);
