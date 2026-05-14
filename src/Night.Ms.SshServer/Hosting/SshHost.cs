@@ -1,11 +1,12 @@
 using Night.Ms.SshServer.Auth;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Tui;
 using Night.Ms.SshTransport;
 
 namespace Night.Ms.SshServer.Hosting;
 
 public sealed class SshHost(
-    IConfiguration configuration,
+    NightMsOptions options,
     ILoggerFactory loggerFactory,
     ILogger<SshHost> logger,
     AuthLookupService authLookup,
@@ -16,12 +17,11 @@ public sealed class SshHost(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var port = ResolveListenerPort();
-        var hostKeyDir = configuration["NIGHTMS_HOST_KEY_DIR"] ?? configuration["HostKeyDirectory"];
         _server = new BbsSshServer(
             new BbsSshServerOptions
             {
                 Port = port,
-                HostKeyDirectory = hostKeyDir,
+                HostKeyDirectory = options.HostKeyDirectory,
                 AuthLookup = authLookup.LookupAsync,
             },
             loggerFactory.CreateLogger<BbsSshServer>());
@@ -54,10 +54,7 @@ public sealed class SshHost(
     {
         // BBS_SSH_PORT env var (or appsettings key) overrides the default. run.ps1 sets
         // it from its -SshPort parameter; otherwise we fall back to 2222.
-        if (int.TryParse(configuration["BBS_SSH_PORT"], out var explicitPort) && explicitPort is > 0 and <= 65535)
-        {
-            return explicitPort;
-        }
+        if (options.SshPort is { } p && p is > 0 and <= 65535) return p;
         return 2222;
     }
 

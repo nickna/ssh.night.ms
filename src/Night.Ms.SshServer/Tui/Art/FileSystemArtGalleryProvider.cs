@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Night.Ms.SshServer.Configuration;
 
 namespace Night.Ms.SshServer.Tui.Art;
 
@@ -12,12 +13,12 @@ internal sealed class FileSystemArtGalleryProvider : IArtGalleryProvider
     // "welcome". Supports plain digits and digit-separator forms ("010-", "010_", "010 ").
     private static readonly Regex OrderingPrefix = new(@"^\d+[-_\s]+", RegexOptions.Compiled);
 
-    private readonly IConfiguration _configuration;
+    private readonly NightMsOptions _options;
     private readonly ILogger<FileSystemArtGalleryProvider> _logger;
 
-    public FileSystemArtGalleryProvider(IConfiguration configuration, ILogger<FileSystemArtGalleryProvider> logger)
+    public FileSystemArtGalleryProvider(NightMsOptions options, ILogger<FileSystemArtGalleryProvider> logger)
     {
-        _configuration = configuration;
+        _options = options;
         _logger = logger;
     }
 
@@ -82,10 +83,7 @@ internal sealed class FileSystemArtGalleryProvider : IArtGalleryProvider
         }
     }
 
-    private string? ResolveDirectory() =>
-        _configuration["NIGHTMS_ART_DIR"]
-        ?? _configuration["ArtGallery:Path"]
-        ?? DefaultDirectory();
+    private string? ResolveDirectory() => _options.ArtGalleryPath ?? DefaultDirectory();
 
     private static string DefaultDirectory() => Path.Combine(AppContext.BaseDirectory, "art", "gallery");
 

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Night.Ms.SshServer.Caching;
+using Night.Ms.SshServer.Configuration;
 
 namespace Night.Ms.SshServer.Providers;
 
@@ -13,7 +14,7 @@ namespace Night.Ms.SshServer.Providers;
 //   NIGHTMS_WEATHER_LAT     (decimal degrees, default 40.7128 = NYC)
 //   NIGHTMS_WEATHER_LON     (decimal degrees, default -74.0060)
 //   NIGHTMS_WEATHER_LABEL   (display name, default "New York")
-public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<OpenMeteoWeatherProvider> logger)
+public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactory, NightMsOptions options, ILogger<OpenMeteoWeatherProvider> logger)
     : IWeatherProvider
 {
     public static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
@@ -21,9 +22,9 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
 
     private readonly TtlAsyncCache<(double lat, double lon), WeatherSnapshot> _cache = new(CacheTtl);
 
-    public string FallbackLabel => configuration["NIGHTMS_WEATHER_LABEL"] ?? "New York";
-    public double FallbackLatitude => TryParse(configuration["NIGHTMS_WEATHER_LAT"], fallback: 40.7128);
-    public double FallbackLongitude => TryParse(configuration["NIGHTMS_WEATHER_LON"], fallback: -74.0060);
+    public string FallbackLabel => options.WeatherLabel ?? "New York";
+    public double FallbackLatitude => options.WeatherLatitude ?? 40.7128;
+    public double FallbackLongitude => options.WeatherLongitude ?? -74.0060;
 
     public async Task<WeatherSnapshot?> GetCurrentAsync(
         double? latitude = null,
@@ -109,9 +110,6 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
         96 or 99 => "Thunderstorm with hail",
         _ => $"Code {code}",
     };
-
-    private static double TryParse(string? s, double fallback) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
     private sealed record OpenMeteoResponse([property: JsonPropertyName("current")] OpenMeteoCurrent? Current);
     private sealed record OpenMeteoCurrent(

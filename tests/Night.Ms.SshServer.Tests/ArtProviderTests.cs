@@ -1,18 +1,20 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Tui;
 
 namespace Night.Ms.SshServer.Tests;
 
 public class ArtProviderTests
 {
-    private static IConfiguration ConfigWith(Dictionary<string, string?>? values = null) =>
-        new ConfigurationBuilder().AddInMemoryCollection(values ?? new Dictionary<string, string?>()).Build();
+    private static NightMsOptions OptionsWith(Dictionary<string, string?>? values = null) =>
+        NightMsOptions.FromConfiguration(
+            new ConfigurationBuilder().AddInMemoryCollection(values ?? new Dictionary<string, string?>()).Build());
 
     [Fact]
     public void Returns_the_built_in_default_when_no_path_is_configured()
     {
-        var sut = new ArtProvider(ConfigWith(), NullLogger<ArtProvider>.Instance);
+        var sut = new ArtProvider(OptionsWith(), NullLogger<ArtProvider>.Instance);
 
         Assert.Equal(ArtProvider.DefaultArt, sut.Art);
         Assert.Equal(5, sut.LineCount);
@@ -24,7 +26,7 @@ public class ArtProviderTests
     {
         var missing = Path.Combine(Path.GetTempPath(), $"nightms-art-missing-{Guid.NewGuid():N}.txt");
         var sut = new ArtProvider(
-            ConfigWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = missing }),
+            OptionsWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = missing }),
             NullLogger<ArtProvider>.Instance);
 
         Assert.Equal(ArtProvider.DefaultArt, sut.Art);
@@ -39,7 +41,7 @@ public class ArtProviderTests
         {
             File.WriteAllText(tmp, "line-one\nline-two\nline-three\n");
             var sut = new ArtProvider(
-                ConfigWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
+                OptionsWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
                 NullLogger<ArtProvider>.Instance);
 
             Assert.Equal("line-one\nline-two\nline-three", sut.Art);
@@ -56,7 +58,7 @@ public class ArtProviderTests
     public void Falls_back_to_default_when_the_file_read_throws()
     {
         var sut = new ArtProvider(
-            ConfigWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = Path.GetTempPath() }),
+            OptionsWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = Path.GetTempPath() }),
             NullLogger<ArtProvider>.Instance);
 
         Assert.Equal(ArtProvider.DefaultArt, sut.Art);
@@ -71,7 +73,7 @@ public class ArtProviderTests
         {
             File.WriteAllText(tmp, "configured\nvia\nappsettings");
             var sut = new ArtProvider(
-                ConfigWith(new() { ["LoginArt:Path"] = tmp }),
+                OptionsWith(new() { ["LoginArt:Path"] = tmp }),
                 NullLogger<ArtProvider>.Instance);
 
             Assert.Equal("configured\nvia\nappsettings", sut.Art);
@@ -92,7 +94,7 @@ public class ArtProviderTests
             const string ESC = "";
             File.WriteAllText(tmp, $"{ESC}[31ma{ESC}[0mb\ncd");
             var sut = new ArtProvider(
-                ConfigWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
+                OptionsWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
                 NullLogger<ArtProvider>.Instance);
 
             Assert.True(sut.IsColor);
@@ -115,7 +117,7 @@ public class ArtProviderTests
         {
             File.WriteAllText(tmp, "x");
             var sut = new ArtProvider(
-                ConfigWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
+                OptionsWith(new() { ["NIGHTMS_LOGIN_ART_PATH"] = tmp }),
                 NullLogger<ArtProvider>.Instance);
 
             Assert.True(sut.IsColor);

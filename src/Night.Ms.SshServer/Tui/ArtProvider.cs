@@ -1,3 +1,4 @@
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Tui.Art;
 
 namespace Night.Ms.SshServer.Tui;
@@ -30,9 +31,9 @@ public sealed class ArtProvider
     internal CellGrid? Grid { get; }
     internal bool IsColor => Grid is not null;
 
-    public ArtProvider(IConfiguration configuration, ILogger<ArtProvider> logger)
+    public ArtProvider(NightMsOptions options, ILogger<ArtProvider> logger)
     {
-        var path = configuration["NIGHTMS_LOGIN_ART_PATH"] ?? configuration["LoginArt:Path"];
+        var path = options.LoginArtPath;
 
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
         {

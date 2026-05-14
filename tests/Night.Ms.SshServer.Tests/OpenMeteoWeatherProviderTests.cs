@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Providers;
 
 namespace Night.Ms.SshServer.Tests;
@@ -9,7 +10,8 @@ public class OpenMeteoWeatherProviderTests
     private static OpenMeteoWeatherProvider Build(FakeHttpMessageHandler handler, Dictionary<string, string?>? config = null)
     {
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(config ?? new()).Build();
-        return new OpenMeteoWeatherProvider(new StaticHttpClientFactory(handler), cfg, NullLogger<OpenMeteoWeatherProvider>.Instance);
+        var options = NightMsOptions.FromConfiguration(cfg);
+        return new OpenMeteoWeatherProvider(new StaticHttpClientFactory(handler), options, NullLogger<OpenMeteoWeatherProvider>.Instance);
     }
 
     private const string SampleJson =

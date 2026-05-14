@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
@@ -10,6 +11,10 @@ using Night.Ms.SshServer.Tui;
 using StackExchange.Redis;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+// Single typed view of the NIGHTMS_* env vars + their appsettings aliases. Bound once at
+// boot so consumers don't each repeat the env-or-config fallback lookup.
+builder.Services.AddSingleton(NightMsOptions.FromConfiguration(builder.Configuration));
 
 // Postgres + EF Core. Connection string lives under ConnectionStrings:bbs (set by
 // run.ps1, or via appsettings in production). Snake-case convention matches the

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Tui.Art;
 
 namespace Night.Ms.SshServer.Tests;
@@ -19,20 +20,19 @@ public class FileSystemArtGalleryProviderTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { /* best-effort */ }
     }
 
+    private static NightMsOptions OptionsWith(Dictionary<string, string?> values) =>
+        NightMsOptions.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(values).Build());
+
     private FileSystemArtGalleryProvider Build() =>
         new(
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["NIGHTMS_ART_DIR"] = _dir })
-                .Build(),
+            OptionsWith(new Dictionary<string, string?> { ["NIGHTMS_ART_DIR"] = _dir }),
             NullLogger<FileSystemArtGalleryProvider>.Instance);
 
     [Fact]
     public void Returns_empty_when_directory_is_missing()
     {
         var sut = new FileSystemArtGalleryProvider(
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["NIGHTMS_ART_DIR"] = Path.Combine(_dir, "does-not-exist") })
-                .Build(),
+            OptionsWith(new Dictionary<string, string?> { ["NIGHTMS_ART_DIR"] = Path.Combine(_dir, "does-not-exist") }),
             NullLogger<FileSystemArtGalleryProvider>.Instance);
 
         Assert.Empty(sut.List());
@@ -128,9 +128,7 @@ public class FileSystemArtGalleryProviderTests : IDisposable
         File.WriteAllText(Path.Combine(_dir, "010-art.ans"), "x");
 
         var sut = new FileSystemArtGalleryProvider(
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ArtGallery:Path"] = _dir })
-                .Build(),
+            OptionsWith(new Dictionary<string, string?> { ["ArtGallery:Path"] = _dir }),
             NullLogger<FileSystemArtGalleryProvider>.Instance);
 
         Assert.Single(sut.List());

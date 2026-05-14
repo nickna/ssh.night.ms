@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 
@@ -8,9 +9,9 @@ namespace Night.Ms.SshServer.Auth;
 // handle has IsSysop = true, and (b) RegisterScreen sets IsSysop = true if a brand-new
 // registration matches the handle. Useful for first-time deploys where you need an account
 // that can self-promote others without manual SQL.
-public sealed class SysopBootstrap(IConfiguration configuration, IServiceProvider services, ILogger<SysopBootstrap> logger) : IHostedService
+public sealed class SysopBootstrap(NightMsOptions options, IServiceProvider services, ILogger<SysopBootstrap> logger) : IHostedService
 {
-    public string? Handle { get; } = configuration["NIGHTMS_BOOTSTRAP_SYSOP_HANDLE"]?.Trim();
+    public string? Handle { get; } = options.BootstrapSysopHandle;
 
     public bool IsBootstrapHandle(string handle) =>
         !string.IsNullOrEmpty(Handle) && string.Equals(handle, Handle, StringComparison.OrdinalIgnoreCase);
