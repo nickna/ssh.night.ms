@@ -216,3 +216,62 @@ NIGHTMS_MICROSOFT_CLIENT_SECRET=…
 ```
 
 `run.ps1` is dev-only; production usually means systemd or a container. The included `src/Night.Ms.SshServer/Dockerfile` is a multi-stage build; expose `2222/tcp` and `5080/tcp` and mount `NIGHTMS_HOST_KEY_DIR` + `NIGHTMS_PFP_DIR` as volumes so data survives restarts.
+
+## Continuous deployment
+
+`.github/workflows/deploy.yml` is a **manually-triggered** workflow that builds the Docker image on a GitHub runner, pushes it to GHCR (`ghcr.io/nickna/ssh.night.ms`), then SSHes to the VPS and runs `docker compose pull && up -d`. Triggered from the Actions tab → **deploy** → **Run workflow** (optional `ref` input to deploy a non-`main` branch / tag / SHA).
+
+### One-time GitHub setup
+
+1. **Generate a deploy SSH keypair.** On a workstation:
+   ```sh
+   ssh-keygen -t ed25519 -f ./nightms-deploy -C "nightms-deploy" -N ""
+   ```
+   This produces `nightms-deploy` (private) and `nightms-deploy.pub` (public).
+
+2. **Authorize the public key on the VPS.** As the deploy user (e.g. `deploy`):
+   ```sh
+   # On the VPS:
+   mkdir -p ~/.ssh && chmod 700 ~/.ssh
+   cat >> ~/.ssh/authorized_keys <<'KEY'
+   <paste contents of nightms-deploy.pub here>
+   KEY
+   chmod 600 ~/.ssh/authorized_keys
+   ```
+   The deploy user needs `docker` group membership and write access to the repo checkout under `DEPLOY_PATH`.
+
+3. **Add secrets to the repo.** Settings → Secrets and variables → Actions → New repository secret. Create a `production` environment first (Settings → Environments → New environment → `production`) if you want the deploy job gated by environment protection rules; otherwise the secrets can live on the repo directly.
+
+   | Secret              | Example value                          | Notes                                                                                          |
+   |---------------------|----------------------------------------|------------------------------------------------------------------------------------------------|
+   | `SSH_PRIVATE_KEY`   | contents of `nightms-deploy`           | Whole file including the `-----BEGIN…/END…-----` lines.                                        |
+   | `SSH_HOST`          | `vps.night.ms` or the IP               | Resolvable from the GitHub runner.                                                              |
+   | `SSH_USER`          | `deploy`                               | The Linux user the runner will `ssh` in as.                                                     |
+   | `SSH_PORT`          | `2200`                                 | Optional; defaults to `22`. Set if you moved sshd off `:22` to free it for the BBS container.   |
+   | `DEPLOY_PATH`       | `/home/deploy/ssh.night.ms`            | Absolute path to the repo checkout on the VPS.                                                  |
+
+4. **Make the GHCR package public** (one-time, after the first successful workflow run). GHCR creates packages as private by default. Open `https://github.com/users/nickna/packages/container/ssh.night.ms/settings` → **Change visibility** → **Public**. Otherwise the VPS needs to `docker login ghcr.io` with a PAT to pull.
+
+### One-time VPS prep
+
+```sh
+# As the deploy user, on the VPS:
+git clone https://github.com/nickna/ssh.night.ms.git
+cd ssh.night.ms
+cp deploy/.env.example deploy/.env   # then edit deploy/.env with real secrets
+docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+```
+
+After that, every workflow run will `git fetch + checkout` the requested ref, pull the new image, and recreate the `app` container. Postgres and Redis are unaffected (their volumes survive).
+
+### Rolling back
+
+The build job tags every image with both `latest` and `sha-<short>`. To roll back, SSH to the VPS yourself and override the tag:
+
+```sh
+docker compose -f deploy/compose.yml --env-file deploy/.env pull
+# Edit deploy/compose.yml: change `:latest` to `:sha-abc1234` for the previous good build
+docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+```
+
+Or simply re-run the workflow against the previous good commit SHA via the `ref` input.

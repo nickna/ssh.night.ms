@@ -4,9 +4,13 @@
 # terminated at Cloudflare (proxy ON, SSL/TLS mode "Flexible") — Cloudflare ↔
 # this VPS rides plain HTTP on port 80, then HTTPS browser ↔ Cloudflare.
 #
+# Image is built + pushed to GHCR by .github/workflows/deploy.yml; the VPS
+# only pulls. For an ad-hoc local build, run:
+#   docker build -f src/Night.Ms.SshServer/Dockerfile -t ghcr.io/nickna/ssh.night.ms:latest .
+#
 # Usage on the VPS:
 #   cp deploy/.env.example deploy/.env   # then fill in secrets
-#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build
+#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d
 #
 # IMPORTANT: this binds host port 22 for SSH. If the VPS's own sshd is on :22,
 # move it first (edit /etc/ssh/sshd_config, set Port 2200, restart sshd, update
@@ -17,10 +21,8 @@ name: nightms
 
 services:
   app:
-    build:
-      context: ..
-      dockerfile: src/Night.Ms.SshServer/Dockerfile
-    image: ssh.night.ms:latest
+    image: ghcr.io/nickna/ssh.night.ms:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       postgres:
