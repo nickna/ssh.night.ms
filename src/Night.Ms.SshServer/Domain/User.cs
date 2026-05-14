@@ -41,4 +41,5 @@ public sealed class User
     public DateFormat DateFormat { get; set; }
 
     public List<IdentityCredential> Credentials { get; set; } = [];
+    public List<UserSavedLocation> SavedLocations { get; set; } = [];
 }

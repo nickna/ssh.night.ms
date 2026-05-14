@@ -17,6 +17,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Post> Posts => Set<Post>();
     public DbSet<PostRead> PostReads => Set<PostRead>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<UserSavedLocation> UserSavedLocations => Set<UserSavedLocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -152,6 +153,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(a => a.TargetType).HasMaxLength(64);
             b.Property(a => a.Details).HasColumnType("jsonb");
             b.HasOne(a => a.Actor).WithMany().HasForeignKey(a => a.ActorId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<UserSavedLocation>(b =>
+        {
+            b.ToTable("user_saved_locations");
+            b.Property(s => s.Label).HasMaxLength(64);
+            b.Property(s => s.Canonical).HasMaxLength(160);
+            // Per-user uniqueness on label so "Tokyo" can't appear twice under one user.
+            // SortOrder drives the F1..F9 keypad mapping on WeatherScreen; an index on the
+            // FK + sort helps the per-user "list my favorites in order" query that runs
+            // once per screen open.
+            b.HasIndex(s => new { s.UserId, s.Label }).IsUnique();
+            b.HasIndex(s => new { s.UserId, s.SortOrder });
+            b.HasOne(s => s.User).WithMany(u => u.SavedLocations).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

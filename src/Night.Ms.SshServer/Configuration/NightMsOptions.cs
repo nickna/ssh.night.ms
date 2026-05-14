@@ -23,6 +23,7 @@ public sealed class NightMsOptions
     public string? ArtGalleryPath { get; init; }
     public string? LobbyIconsPath { get; init; }
     public string? ProfilePictureDirectory { get; init; }
+    public string? WeatherArtPath { get; init; }
     public string? WeatherLabel { get; init; }
     public double? WeatherLatitude { get; init; }
     public double? WeatherLongitude { get; init; }
@@ -58,6 +59,7 @@ public sealed class NightMsOptions
         ArtGalleryPath       = First(cfg, "NIGHTMS_ART_DIR", "ArtGallery:Path"),
         LobbyIconsPath       = First(cfg, "NIGHTMS_LOBBY_ICONS_DIR", "LobbyIcons:Path"),
         ProfilePictureDirectory = First(cfg, "NIGHTMS_PFP_DIR", "ProfilePictures:Path"),
+        WeatherArtPath       = First(cfg, "NIGHTMS_WEATHER_ART_DIR", "WeatherArt:Path"),
         WeatherLabel         = NullIfEmpty(cfg["NIGHTMS_WEATHER_LABEL"]),
         WeatherLatitude      = ParseDouble(cfg["NIGHTMS_WEATHER_LAT"]),
         WeatherLongitude     = ParseDouble(cfg["NIGHTMS_WEATHER_LON"]),
