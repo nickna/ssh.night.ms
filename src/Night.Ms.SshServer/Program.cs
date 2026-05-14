@@ -17,6 +17,7 @@ using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
 using Night.Ms.SshServer.Tui.Map;
+using Night.Ms.SshServer.Web;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -170,11 +171,32 @@ var app = builder.Build();
 
 app.UseForwardedHeaders();
 app.UseStaticFiles();
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/healthz", () => Results.Ok("ok"));
 app.MapRazorPages();
+
+// In-browser BBS terminal: cookie-authed WS upgrade, then hand the WebSocket to
+// WebSocketTuiSession and run the same BbsSessionRunner that the SSH path uses.
+app.MapGet("/ws/bbs", async (HttpContext ctx, IServiceProvider sp, ILoggerFactory lf, AppDbContext db) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    if (!ctx.WebSockets.IsWebSocketRequest) return Results.BadRequest("websocket required");
+
+    using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+    var logger = lf.CreateLogger("ws.bbs");
+    await using var session = await WebSocketTuiSession.CreateAsync(ws, ctx, db, logger, ctx.RequestAborted);
+    if (session is null) return Results.Empty;
+
+    try
+    {
+        await BbsSessionRunner.RunAsync(sp, session, logger, ctx.RequestAborted);
+    }
+    catch (OperationCanceledException) { /* client tab closed */ }
+    return Results.Empty;
+}).RequireAuthorization();
 
 // --- Auth action endpoints ----------------------------------------------------------------
 // These are kept as Minimal API endpoints because they don't render a view; each one either

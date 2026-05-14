@@ -35,7 +35,7 @@ internal static class BbsSessionRunner
 
     public static async Task RunAsync(
         IServiceProvider services,
-        BbsSession session,
+        ITuiSession session,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -77,14 +77,28 @@ internal static class BbsSessionRunner
 
                 if (session.AuthDecision is AuthDecision.Unknown)
                 {
+                    // RegisterScreen needs the SSH-specific credential inputs (algorithm,
+                    // fingerprint, public-key blob). Only the SSH transport surfaces those,
+                    // so the runner branches via the adapter. Web sessions are gated to
+                    // Authorize at /ws/bbs and synthesize AuthDecision.Known — they never
+                    // hit this path. If they ever do, fail loudly rather than render the
+                    // wrong screen with empty credentials.
+                    if (session is not SshSessionAdapter ssh)
+                    {
+                        logger.LogError("AuthDecision.Unknown reached a non-SSH session ({Session}); refusing to register.", session.DisplayName);
+                        return;
+                    }
+                    var inputs = ssh.CredentialInputs;
                     var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
-                    var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider, session, db, sysopBootstrap, art));
+                    var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider,
+                        inputs.KeyAlgorithm, inputs.Fingerprint, inputs.PublicKeyBlob,
+                        db, sysopBootstrap, art));
                     if (registerResult is User registered)
                     {
                         user = registered;
                         justRegistered = true;
-                        logger.LogInformation("Registered new account: handle={Handle} fingerprint={Fingerprint}",
-                            registered.Handle, session.Fingerprint);
+                        logger.LogInformation("Registered new account: handle={Handle} session={Session}",
+                            registered.Handle, session.DisplayName);
                     }
                     else
                     {
@@ -94,7 +108,7 @@ internal static class BbsSessionRunner
 
                 if (user is null)
                 {
-                    logger.LogWarning("AuthDecision.Known but user row missing for fingerprint={Fingerprint}", session.Fingerprint);
+                    logger.LogWarning("AuthDecision.Known but user row missing for session={Session}", session.DisplayName);
                     return;
                 }
 
@@ -102,12 +116,12 @@ internal static class BbsSessionRunner
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Terminal.Gui session crashed for fingerprint={Fingerprint}", session.Fingerprint);
+                logger.LogError(ex, "Terminal.Gui session crashed for session={Session}", session.DisplayName);
             }
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, BbsSession session)
+    private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, ITuiSession session)
     {
         var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, art));
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Sysop)
@@ -194,7 +208,7 @@ internal static class BbsSessionRunner
         }
     }
 
-    private static Size GetPtySize(BbsSession session)
+    private static Size GetPtySize(ITuiSession session)
     {
         var cols = (int)(session.Pty?.Cols ?? 80);
         var rows = (int)(session.Pty?.Rows ?? 24);

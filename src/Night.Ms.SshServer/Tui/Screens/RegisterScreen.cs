@@ -18,15 +18,19 @@ namespace Night.Ms.SshServer.Tui.Screens;
 public sealed class RegisterScreen : BbsWindow
 {
     private readonly IApplication _app;
-    private readonly BbsSession _session;
+    private readonly string _keyAlgorithm;
+    private readonly string _fingerprint;
+    private readonly byte[] _publicKeyBlob;
     private readonly AppDbContext _db;
     private readonly SysopBootstrap _sysopBootstrap;
 
-    public RegisterScreen(IApplication app, IServiceProvider services, BbsSession session, AppDbContext db, SysopBootstrap sysopBootstrap, ArtProvider art)
+    public RegisterScreen(IApplication app, IServiceProvider services, string keyAlgorithm, string fingerprint, byte[] publicKeyBlob, AppDbContext db, SysopBootstrap sysopBootstrap, ArtProvider art)
         : base(app, services, user: null)
     {
         _app = app;
-        _session = session;
+        _keyAlgorithm = keyAlgorithm;
+        _fingerprint = fingerprint;
+        _publicKeyBlob = publicKeyBlob;
         _db = db;
         _sysopBootstrap = sysopBootstrap;
         Title = "ssh.night.ms — register a handle";
@@ -59,7 +63,7 @@ public sealed class RegisterScreen : BbsWindow
         {
             X = 2,
             Y = contentTop + 4,
-            Text = $"key  {session.KeyAlgorithm}\nfp   {session.Fingerprint}",
+            Text = $"key  {keyAlgorithm}\nfp   {fingerprint}",
         };
         fp.SetScheme(BbsTheme.Faint_);
 
@@ -168,14 +172,14 @@ public sealed class RegisterScreen : BbsWindow
         // render details without an extra schema.
         var metadata = System.Text.Json.JsonSerializer.Serialize(new
         {
-            algorithm = _session.KeyAlgorithm,
-            blob_b64 = Convert.ToBase64String(_session.PublicKeyBlob),
+            algorithm = _keyAlgorithm,
+            blob_b64 = Convert.ToBase64String(_publicKeyBlob),
         });
         var credential = new IdentityCredential
         {
             User = user,
             Provider = CredentialProvider.Ssh,
-            Subject = _session.Fingerprint,
+            Subject = _fingerprint,
             Metadata = metadata,
             Label = "registered at signup",
             CreatedAt = now,

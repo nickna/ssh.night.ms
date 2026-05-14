@@ -7,6 +7,18 @@
 <h1>ssh.night.ms</h1>
 <p class="muted">A small BBS that lives over SSH.</p>
 
+@if (User.Identity?.IsAuthenticated == true)
+{
+    <div class="box">
+        <h2>Welcome back, @User.Identity.Name</h2>
+        <p>Jump straight in:</p>
+        <div class="actions">
+            <a href="/terminal" class="btn">Open web terminal</a>
+            <a href="/profile" class="btn">Profile</a>
+        </div>
+    </div>
+}
+
 <div class="box">
     <h2>Connect from your terminal</h2>
     <pre>ssh -p 2222 &lt;handle&gt;@@@Model.PublicHost</pre>

@@ -60,9 +60,10 @@ public sealed class SshHost(
 
     private async Task HandleSessionAsync(BbsSession session, CancellationToken cancellationToken)
     {
+        var adapter = new SshSessionAdapter(session);
         try
         {
-            await BbsSessionRunner.RunAsync(services, session, logger, cancellationToken);
+            await BbsSessionRunner.RunAsync(services, adapter, logger, cancellationToken);
         }
         finally
         {
