@@ -45,8 +45,12 @@ services:
       # First-run sysop (only meaningful on a fresh database; harmless after).
       NIGHTMS_BOOTSTRAP_SYSOP_HANDLE: "${NIGHTMS_BOOTSTRAP_SYSOP_HANDLE:-}"
 
-      # Display only — the "Connect via SSH" hint on the web pages.
-      NIGHTMS_PUBLIC_BASE_URL: "${NIGHTMS_PUBLIC_BASE_URL:-}"
+      # Display only — the "upload your picture at …" hint in the TUI uses the web
+      # base URL; the "ssh <handle>@…" hints on the web pages use the SSH host +
+      # public-facing port (22 in this stack — host :22 maps to container :2222).
+      NIGHTMS_WEB_BASE_URL: "${NIGHTMS_WEB_BASE_URL:-}"
+      NIGHTMS_SSH_HOST: "${NIGHTMS_SSH_HOST:-}"
+      NIGHTMS_SSH_PORT_PUBLIC: "${NIGHTMS_SSH_PORT_PUBLIC:-22}"
 
       # Optional SSO. The provider button is hidden when its pair is unset.
       NIGHTMS_GOOGLE_CLIENT_ID: "${NIGHTMS_GOOGLE_CLIENT_ID:-}"

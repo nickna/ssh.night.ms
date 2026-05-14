@@ -28,14 +28,19 @@ public sealed class NightMsOptions
 
     // Optional. When all four (GoogleClientId, GoogleClientSecret, MicrosoftClientId,
     // MicrosoftClientSecret) are set, the web auth handlers register; otherwise the
-    // corresponding "Sign in with X" button is hidden. PublicBaseUrl is the externally-
-    // visible origin (e.g. https://night.ms) for callback URL construction in prod; in dev
-    // it's null and ASP.NET uses the request scheme/host (recovered from forwarded headers).
+    // corresponding "Sign in with X" button is hidden. WebBaseUrl + SshHost are display-only
+    // hints — the auth path derives callback URLs from request scheme/host (via forwarded
+    // headers), so this never affects auth. They're split because the web origin and the
+    // SSH origin can be different aliases of the same host (e.g. https://k.night.ms vs
+    // ssh.night.ms). SshPortPublic is the externally-visible SSH port — it can differ from
+    // the listener port (BBS_SSH_PORT) when a docker port mapping or NAT rule is in front.
     public string? GoogleClientId { get; init; }
     public string? GoogleClientSecret { get; init; }
     public string? MicrosoftClientId { get; init; }
     public string? MicrosoftClientSecret { get; init; }
-    public string? PublicBaseUrl { get; init; }
+    public string? WebBaseUrl { get; init; }
+    public string? SshHost { get; init; }
+    public int? SshPortPublic { get; init; }
 
     public bool IsGoogleConfigured =>
         !string.IsNullOrWhiteSpace(GoogleClientId) && !string.IsNullOrWhiteSpace(GoogleClientSecret);
@@ -58,7 +63,9 @@ public sealed class NightMsOptions
         GoogleClientSecret   = First(cfg, "NIGHTMS_GOOGLE_CLIENT_SECRET", "Authentication:Google:ClientSecret"),
         MicrosoftClientId    = First(cfg, "NIGHTMS_MICROSOFT_CLIENT_ID", "Authentication:Microsoft:ClientId"),
         MicrosoftClientSecret= First(cfg, "NIGHTMS_MICROSOFT_CLIENT_SECRET", "Authentication:Microsoft:ClientSecret"),
-        PublicBaseUrl        = First(cfg, "NIGHTMS_PUBLIC_BASE_URL", "PublicBaseUrl"),
+        WebBaseUrl           = First(cfg, "NIGHTMS_WEB_BASE_URL", "WebBaseUrl"),
+        SshHost              = First(cfg, "NIGHTMS_SSH_HOST", "SshHost"),
+        SshPortPublic        = ParseInt(cfg["NIGHTMS_SSH_PORT_PUBLIC"]),
     };
 
     private static string? First(IConfiguration cfg, params string[] keys)

@@ -24,7 +24,8 @@ public sealed class ProfileModel(ProfileService profile, NightMsOptions options,
     public int TopicCount { get; set; }
     public int PostCount { get; set; }
     public long AvatarVersion { get; set; }
-    public string PublicHost { get; set; } = "localhost";
+    public string SshHost { get; set; } = "localhost";
+    public int SshPort { get; set; } = 22;
 
     public async Task<IActionResult> OnGetAsync(string handle)
     {
@@ -48,16 +49,8 @@ public sealed class ProfileModel(ProfileService profile, NightMsOptions options,
         TopicCount = snap.TopicCount;
         PostCount = snap.PostCount;
         AvatarVersion = snap.ProfilePictureUpdatedAt?.UtcTicks ?? 0;
-        PublicHost = ResolvePublicHost(options);
+        SshHost = options.SshHost ?? "localhost";
+        SshPort = options.SshPortPublic ?? options.SshPort ?? 2222;
         return Page();
-    }
-
-    private static string ResolvePublicHost(NightMsOptions options)
-    {
-        if (options.PublicBaseUrl is { } url && Uri.TryCreate(url, UriKind.Absolute, out var u))
-        {
-            return u.Host;
-        }
-        return "localhost";
     }
 }

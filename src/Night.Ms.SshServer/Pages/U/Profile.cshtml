@@ -34,4 +34,11 @@
     </tbody>
 </table>
 
-<p class="muted">Connect over SSH: <code>ssh -p 2222 @Model.Handle@@@Model.PublicHost</code></p>
+@if (Model.SshPort == 22)
+{
+    <p class="muted">Connect over SSH: <code>ssh @Model.Handle@@@Model.SshHost</code></p>
+}
+else
+{
+    <p class="muted">Connect over SSH: <code>ssh -p @Model.SshPort @Model.Handle@@@Model.SshHost</code></p>
+}

@@ -21,7 +21,14 @@
 
 <div class="box">
     <h2>Connect from your terminal</h2>
-    <pre>ssh -p 2222 &lt;handle&gt;@@@Model.PublicHost</pre>
+    @if (Model.SshPort == 22)
+    {
+        <pre>ssh &lt;handle&gt;@@@Model.SshHost</pre>
+    }
+    else
+    {
+        <pre>ssh -p @Model.SshPort &lt;handle&gt;@@@Model.SshHost</pre>
+    }
     <p class="muted">
         First connection from a new key drops you into the registration screen — pick a handle
         and you're in. There's no email recovery; lose the key, lose the account.

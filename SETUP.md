@@ -112,9 +112,13 @@ The status bar can render weather for users who haven't set their own location. 
 
 ### Public-facing URL (display only)
 
-| Env var                    | Equivalent appsetting key | Purpose                                                                                                              |
-|----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `NIGHTMS_PUBLIC_BASE_URL`  | `PublicBaseUrl`           | The externally-visible origin, e.g. `https://night.ms`. Used by display strings only — the "Connect via SSH" hint on `/` and `/u/{handle}`, plus the "upload at …" line in the TUI ProfileEditScreen. Not required for SSO callbacks (they derive from the request URL via `UseForwardedHeaders`). |
+The web origin and the SSH origin are configured separately so they can point at different aliases of the same host (e.g. `https://k.night.ms` for the browser, `ssh.night.ms` for SSH). All three are display-only — the auth path derives callback URLs from the request via `UseForwardedHeaders`.
+
+| Env var                     | Equivalent appsetting key | Purpose                                                                                                                                               |
+|-----------------------------|---------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NIGHTMS_WEB_BASE_URL`      | `WebBaseUrl`              | Externally-visible web origin, e.g. `https://k.night.ms`. Used by the TUI ProfileEditScreen to print "upload at …".                                   |
+| `NIGHTMS_SSH_HOST`          | `SshHost`                 | Externally-visible SSH hostname, e.g. `ssh.night.ms`. Used by the `ssh <handle>@…` hint on `/` and `/u/{handle}`. Defaults to `localhost`.            |
+| `NIGHTMS_SSH_PORT_PUBLIC`   | —                         | Externally-visible SSH port. Defaults to `BBS_SSH_PORT`. Set when a port mapping fronts the listener (compose binds host `:22` → container `:2222`, so set `22`). When the port is `22` the hint omits `-p` entirely. |
 
 ### Logging
 
@@ -196,7 +200,7 @@ The server is HTTP-only — TLS terminates upstream at a reverse proxy (Caddy, C
 
 - Cookies use `SameSite=Lax`, `SecurePolicy=SameAsRequest`. With TLS upstream, the cookie is marked Secure automatically.
 - SSO redirect URIs must match the externally-visible URL (`https://your.domain/signin-google`).
-- `NIGHTMS_PUBLIC_BASE_URL` is purely cosmetic — it's what the UI puts in the "Connect via SSH" hint and the "upload at …" line. The auth path doesn't need it.
+- `NIGHTMS_WEB_BASE_URL`, `NIGHTMS_SSH_HOST`, and `NIGHTMS_SSH_PORT_PUBLIC` are purely cosmetic — they shape the "Connect via SSH" hint and the "upload at …" line. The auth path doesn't need them.
 
 Example deploy environment:
 
@@ -208,7 +212,9 @@ BBS_HTTP_PORT=5080
 NIGHTMS_HOST_KEY_DIR=/var/lib/nightms/host-keys
 NIGHTMS_PFP_DIR=/var/lib/nightms/pfp
 NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=nick
-NIGHTMS_PUBLIC_BASE_URL=https://night.ms
+NIGHTMS_WEB_BASE_URL=https://k.night.ms
+NIGHTMS_SSH_HOST=ssh.night.ms
+NIGHTMS_SSH_PORT_PUBLIC=22
 NIGHTMS_GOOGLE_CLIENT_ID=…
 NIGHTMS_GOOGLE_CLIENT_SECRET=…
 NIGHTMS_MICROSOFT_CLIENT_ID=…

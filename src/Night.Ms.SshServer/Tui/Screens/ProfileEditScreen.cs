@@ -379,7 +379,7 @@ public sealed class ProfileEditScreen : BbsWindow
     private static string ResolvePublicUrl(IServiceProvider services)
     {
         var options = services.GetRequiredService<NightMsOptions>();
-        var baseUrl = options.PublicBaseUrl?.TrimEnd('/') ?? $"http://localhost:{options.HttpPort ?? 5080}";
+        var baseUrl = options.WebBaseUrl?.TrimEnd('/') ?? $"http://localhost:{options.HttpPort ?? 5080}";
         return $"{baseUrl}/profile";
     }
 }
