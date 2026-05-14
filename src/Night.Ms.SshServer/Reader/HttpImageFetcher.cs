@@ -106,3 +106,17 @@ public sealed class HttpImageFetcher(
         }
     }
 }
+
+public static class HttpImageFetcherRegistration
+{
+    public static IServiceCollection AddHttpImageFetcher(this IServiceCollection services)
+    {
+        services.AddHttpClient(HttpImageFetcher.HttpClientName, c =>
+        {
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
+            c.DefaultRequestHeaders.Accept.ParseAdd("image/*");
+        });
+        services.AddSingleton<IImageFetcher, HttpImageFetcher>();
+        return services;
+    }
+}

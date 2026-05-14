@@ -93,3 +93,14 @@ public sealed class IpApiCoGeolocationProvider(IHttpClientFactory httpClientFact
         [property: JsonPropertyName("country_name")] string? CountryName,
         [property: JsonPropertyName("error")] bool? Error);
 }
+
+public static class IpApiCoGeolocationProviderRegistration
+{
+    public static IServiceCollection AddIpApiCoGeolocation(this IServiceCollection services)
+    {
+        services.AddHttpClient(IpApiCoGeolocationProvider.HttpClientName, c =>
+            c.BaseAddress = new Uri("https://ipapi.co/"));
+        services.AddSingleton<IIpGeolocationProvider, IpApiCoGeolocationProvider>();
+        return services;
+    }
+}

@@ -218,3 +218,22 @@ internal sealed class OpenFreeMapVectorTileFetcher(
         }
     }
 }
+
+internal static class OpenFreeMapVectorTileFetcherRegistration
+{
+    public static IServiceCollection AddOpenFreeMapVectorTileFetcher(this IServiceCollection services)
+    {
+        services.AddHttpClient(OpenFreeMapVectorTileFetcher.HttpClientName, c =>
+        {
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-map/0.1 (+https://night.ms; contact=nick@night.ms)");
+            c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.mapbox-vector-tile,application/x-protobuf;q=0.9,application/json;q=0.5");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            // OpenFreeMap serves .pbf with Content-Encoding: gzip by default; HttpClient won't
+            // transparently decompress unless we opt in here. Brotli covers the TileJSON manifest.
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Brotli,
+        });
+        services.AddSingleton<IVectorTileFetcher, OpenFreeMapVectorTileFetcher>();
+        return services;
+    }
+}

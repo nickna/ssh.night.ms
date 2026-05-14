@@ -116,3 +116,17 @@ public sealed class OpenMeteoWeatherProvider(IHttpClientFactory httpClientFactor
         [property: JsonPropertyName("temperature_2m")] double Temperature2m,
         [property: JsonPropertyName("weather_code")] int WeatherCode);
 }
+
+public static class OpenMeteoWeatherProviderRegistration
+{
+    // Wires the named HttpClient + IWeatherProvider→OpenMeteoWeatherProvider binding so
+    // Program.cs doesn't need to know the API base URL or HTTP-client name. Re-bind
+    // IWeatherProvider after this call to swap implementations.
+    public static IServiceCollection AddOpenMeteoWeather(this IServiceCollection services)
+    {
+        services.AddHttpClient(OpenMeteoWeatherProvider.HttpClientName, c =>
+            c.BaseAddress = new Uri("https://api.open-meteo.com/"));
+        services.AddSingleton<IWeatherProvider, OpenMeteoWeatherProvider>();
+        return services;
+    }
+}

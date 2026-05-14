@@ -76,3 +76,14 @@ public sealed class HackerNewsProvider(IHttpClientFactory httpClientFactory, ILo
         [property: JsonPropertyName("score")] int? Score,
         [property: JsonPropertyName("time")] long Time);
 }
+
+public static class HackerNewsProviderRegistration
+{
+    public static IServiceCollection AddHackerNews(this IServiceCollection services)
+    {
+        services.AddHttpClient(HackerNewsProvider.HttpClientName, c =>
+            c.BaseAddress = new Uri("https://hacker-news.firebaseio.com/"));
+        services.AddSingleton<INewsProvider, HackerNewsProvider>();
+        return services;
+    }
+}

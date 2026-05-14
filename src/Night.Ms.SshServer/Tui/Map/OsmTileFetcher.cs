@@ -89,3 +89,20 @@ internal sealed class OsmTileFetcher(
         }
     }
 }
+
+internal static class OsmTileFetcherRegistration
+{
+    public static IServiceCollection AddOsmTileFetcher(this IServiceCollection services)
+    {
+        services.AddHttpClient(OsmTileFetcher.HttpClientName, c =>
+        {
+            // OSM Tile Usage Policy requires a project-identifying User-Agent. Without one, the
+            // tile server may rate-limit or block; with one, sysadmins can reach us if our usage
+            // becomes a problem. See https://operations.osmfoundation.org/policies/tiles/.
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-map/0.1 (+https://night.ms; contact=nick@night.ms)");
+            c.DefaultRequestHeaders.Accept.ParseAdd("image/png,image/*;q=0.8");
+        });
+        services.AddSingleton<IOsmTileFetcher, OsmTileFetcher>();
+        return services;
+    }
+}

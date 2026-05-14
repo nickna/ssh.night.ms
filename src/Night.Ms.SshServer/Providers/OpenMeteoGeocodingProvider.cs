@@ -64,3 +64,14 @@ public sealed class OpenMeteoGeocodingProvider(IHttpClientFactory httpClientFact
         [property: JsonPropertyName("country")] string? Country,
         [property: JsonPropertyName("admin1")] string? Admin1);
 }
+
+public static class OpenMeteoGeocodingProviderRegistration
+{
+    public static IServiceCollection AddOpenMeteoGeocoding(this IServiceCollection services)
+    {
+        services.AddHttpClient(OpenMeteoGeocodingProvider.HttpClientName, c =>
+            c.BaseAddress = new Uri("https://geocoding-api.open-meteo.com/"));
+        services.AddSingleton<IGeocodingProvider, OpenMeteoGeocodingProvider>();
+        return services;
+    }
+}

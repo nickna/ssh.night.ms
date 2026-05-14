@@ -173,3 +173,20 @@ public sealed class SmartReaderArticleReader(
 
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
+
+public static class SmartReaderArticleReaderRegistration
+{
+    public static IServiceCollection AddSmartReaderArticleReader(this IServiceCollection services)
+    {
+        services.AddHttpClient(SmartReaderArticleReader.HttpClientName, c =>
+        {
+            // Identify ourselves so site operators can trace traffic back to a known BBS rather
+            // than seeing an unbranded HttpClient. AutoRedirect is on by default — articles often
+            // sit behind one or two 301 hops.
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("ssh.night.ms-reader/0.1 (+https://night.ms)");
+            c.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
+        });
+        services.AddSingleton<IArticleReader, SmartReaderArticleReader>();
+        return services;
+    }
+}
