@@ -1,17 +1,10 @@
 # Multi-stage build for the ssh.night.ms SshServer.
 #
 # Build:    docker build -f src/Night.Ms.SshServer/Dockerfile -t ssh.night.ms:dev .
-# Run:      docker run -d --rm \
-#             -p 2222:2222 \
-#             -v $(pwd)/host-keys:/data/host-keys \
-#             -e ConnectionStrings__bbs="Host=postgres;Port=5432;Database=bbs;Username=postgres;Password=postgres" \
-#             -e ConnectionStrings__redis="redis:6379,abortConnect=false" \
-#             -e NIGHTMS_HOST_KEY_DIR=/data/host-keys \
-#             -e NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=youroperator \
-#             --name ssh.night.ms \
-#             ssh.night.ms:dev
 #
-# Production: front port 2222 with iptables/nftables to expose on :22.
+# The intended way to run this in prod is via deploy/compose.yml, which wires
+# the app together with Postgres and Redis. This Dockerfile only builds the app
+# image; TLS for the web side is expected to terminate at Cloudflare's edge.
 
 ARG DOTNET_VERSION=10.0
 ARG DOTNET_SDK_VERSION=10.0-preview
@@ -21,10 +14,9 @@ WORKDIR /src
 
 # Copy manifests first so package restore caches across source changes.
 COPY global.json ./
-COPY src/Night.Ms.AppHost/Night.Ms.AppHost.csproj                 src/Night.Ms.AppHost/
-COPY src/Night.Ms.ServiceDefaults/Night.Ms.ServiceDefaults.csproj src/Night.Ms.ServiceDefaults/
-COPY src/Night.Ms.SshServer/Night.Ms.SshServer.csproj             src/Night.Ms.SshServer/
-COPY src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj       src/Night.Ms.SshTransport/
+COPY src/Night.Ms.Imaging/Night.Ms.Imaging.csproj           src/Night.Ms.Imaging/
+COPY src/Night.Ms.SshServer/Night.Ms.SshServer.csproj       src/Night.Ms.SshServer/
+COPY src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj src/Night.Ms.SshTransport/
 RUN dotnet restore src/Night.Ms.SshServer
 
 COPY . .
@@ -38,13 +30,17 @@ FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
 WORKDIR /app
 COPY --from=build /app/publish ./
 
-# /data is the volume mount point for host keys (and any future runtime state).
-RUN mkdir -p /data/host-keys && chown -R 1000:1000 /data
+# /data is the volume mount point for runtime state that must survive container
+# restarts: SSH host keys (so reconnects don't trip clients' known_hosts warning)
+# and uploaded profile pictures.
+RUN mkdir -p /data/host-keys /data/pfp && chown -R 1000:1000 /data
 USER 1000:1000
 
-# Default to the SSH listener on 2222 (host front-side maps :22 → :2222).
-EXPOSE 2222
+EXPOSE 2222 5080
 
-ENV NIGHTMS_HOST_KEY_DIR=/data/host-keys
+ENV NIGHTMS_HOST_KEY_DIR=/data/host-keys \
+    NIGHTMS_PFP_DIR=/data/pfp \
+    BBS_SSH_PORT=2222 \
+    BBS_HTTP_PORT=5080
 
 ENTRYPOINT ["dotnet", "Night.Ms.SshServer.dll"]

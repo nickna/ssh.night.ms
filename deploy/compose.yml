@@ -1,0 +1,107 @@
+# Production deployment stack for ssh.night.ms.
+#
+# One BBS app container + Postgres + Redis on a private network. TLS is
+# terminated at Cloudflare (proxy ON, SSL/TLS mode "Flexible") — Cloudflare ↔
+# this VPS rides plain HTTP on port 80, then HTTPS browser ↔ Cloudflare.
+#
+# Usage on the VPS:
+#   cp deploy/.env.example deploy/.env   # then fill in secrets
+#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build
+#
+# IMPORTANT: this binds host port 22 for SSH. If the VPS's own sshd is on :22,
+# move it first (edit /etc/ssh/sshd_config, set Port 2200, restart sshd, update
+# your firewall + your shell config to use the new port) BEFORE bringing this
+# stack up — otherwise the docker-proxy port bind will fail.
+
+name: nightms
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: src/Night.Ms.SshServer/Dockerfile
+    image: ssh.night.ms:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      # Connection strings reach the sibling containers over the compose network.
+      ConnectionStrings__bbs: "Host=postgres;Port=5432;Database=bbs;Username=bbs;Password=${POSTGRES_PASSWORD:?set in .env}"
+      ConnectionStrings__redis: "redis:6379,abortConnect=false"
+
+      # Listener ports — match what the Dockerfile EXPOSEs.
+      BBS_SSH_PORT: "2222"
+      BBS_HTTP_PORT: "5080"
+
+      # Persistent paths — both inside the app-data volume.
+      NIGHTMS_HOST_KEY_DIR: /data/host-keys
+      NIGHTMS_PFP_DIR: /data/pfp
+
+      # First-run sysop (only meaningful on a fresh database; harmless after).
+      NIGHTMS_BOOTSTRAP_SYSOP_HANDLE: "${NIGHTMS_BOOTSTRAP_SYSOP_HANDLE:-}"
+
+      # Display only — the "Connect via SSH" hint on the web pages.
+      NIGHTMS_PUBLIC_BASE_URL: "${NIGHTMS_PUBLIC_BASE_URL:-}"
+
+      # Optional SSO. The provider button is hidden when its pair is unset.
+      NIGHTMS_GOOGLE_CLIENT_ID: "${NIGHTMS_GOOGLE_CLIENT_ID:-}"
+      NIGHTMS_GOOGLE_CLIENT_SECRET: "${NIGHTMS_GOOGLE_CLIENT_SECRET:-}"
+      NIGHTMS_MICROSOFT_CLIENT_ID: "${NIGHTMS_MICROSOFT_CLIENT_ID:-}"
+      NIGHTMS_MICROSOFT_CLIENT_SECRET: "${NIGHTMS_MICROSOFT_CLIENT_SECRET:-}"
+
+      Logging__LogLevel__Default: "${LOG_LEVEL:-Information}"
+    volumes:
+      - app-data:/data
+    ports:
+      # Host :22 → container :2222. Move the VPS sshd off :22 first (see header).
+      - "22:2222"
+      # Host :80 → container :5080. Cloudflare's edge fetches from this in
+      # Flexible mode. Lock down host port 80 to Cloudflare's IP ranges in the
+      # VPS firewall so the origin can't be reached directly (see runbook).
+      - "80:5080"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bbs
+      POSTGRES_DB: bbs
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set in .env}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bbs -d bbs"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  app-data:
+  pg-data:
+  redis-data:

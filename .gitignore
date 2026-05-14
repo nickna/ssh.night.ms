@@ -45,6 +45,9 @@ host-keys/
 *.key
 !**/Properties/launchSettings.json
 
+## Production secrets — committed example only, never the filled-in .env
+deploy/.env
+
 ## run.ps1 smoke-test output redirected by Tee-Object / dotnet run > file
 .run-output.log
 .run-error.log
