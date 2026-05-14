@@ -9,7 +9,10 @@
 ARG DOTNET_VERSION=10.0
 ARG DOTNET_SDK_VERSION=10.0-preview
 
-FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_SDK_VERSION} AS build
+# Nightly registry — has the 10.0.3xx preview SDK band that global.json pins.
+# The public mcr.microsoft.com/dotnet/sdk:10.0-preview image is still on
+# 10.0.1xx, which doesn't satisfy `rollForward: latestFeature`.
+FROM mcr.microsoft.com/dotnet/nightly/sdk:${DOTNET_SDK_VERSION} AS build
 WORKDIR /src
 
 # Copy manifests first so package restore caches across source changes.
