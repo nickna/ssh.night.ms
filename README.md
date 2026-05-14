@@ -1,62 +1,52 @@
 # ssh.night.ms
 
-A modern .NET BBS over SSH. Public-key gated; the TUI hosts public chat and a
-threaded messageboard. Designed to feel like the 80s/90s era — without forcing
-clients to install a CP437 font.
+A modern .NET BBS over SSH, with a companion web surface. Public-key (or SSO)
+gated; the TUI hosts public chat, a threaded messageboard, news, weather, an
+ANSI art gallery, and a sysop console. Designed to feel like the 80s/90s era —
+without forcing clients to install a CP437 font.
+
+One process, two listeners: an SSH server for the TUI and a Kestrel HTTP
+server for the web (profile pages, avatars, SSO, and an in-browser SSH
+client). Both share state via Postgres + Redis.
 
 ## Stack
 
-- .NET 10 + Aspire (AppHost orchestrates Postgres + Redis + the SshServer)
-- `Microsoft.DevTunnels.Ssh` (NuGet) for the SSH protocol, extended in
-  `Night.Ms.SshTransport` with an `ed25519` user-auth algorithm built on
-  `BouncyCastle.Cryptography`
+- .NET 10 SDK (pinned in `global.json`)
+- `Microsoft.DevTunnels.Ssh` for the SSH protocol, extended in
+  `Night.Ms.SshTransport` with `ed25519` user-auth (BouncyCastle) and a gated
+  `curve25519-sha256` KEX
 - Terminal.Gui v2 driven over the SSH channel via a custom
   `IComponentFactory<char>` (`SshChannelComponentFactory`)
+- ASP.NET Core for the web surface — cookie auth + Google / Microsoft OIDC,
+  plus a WebSocket transport that runs the same `BbsSessionRunner` in the
+  browser at `/terminal`
 - EF Core 10 + `EFCore.NamingConventions` against Postgres (snake_case + citext)
 - `StackExchange.Redis` pub/sub for chat fan-out
+- `Night.Ms.Imaging` — shared half-block image renderer powering profile
+  avatars in the TUI and the ANSI art pipeline
 
-## Running locally with Aspire
+## Running locally
 
-Requires Docker Desktop running. Aspire spawns its own Postgres + Redis +
-pgAdmin containers (separate from anything `run.ps1` started) and launches
-SshServer with the right connection strings injected.
-
-```sh
-dotnet run --project src/Night.Ms.AppHost
-```
-
-The dashboard URL with login token is printed at startup. SSH listener defaults
-to `:2223` under Aspire (override via `BBS_SSH_PORT` env on the project).
-Connect with:
+Requires Docker Desktop running (for the Postgres + Redis containers).
 
 ```sh
-ssh -p 2223 nick@localhost
+./run.ps1
 ```
 
-Note: SshServer binds the SSH port directly — we deliberately don't declare it
-as an Aspire endpoint, because `WithEndpoint(scheme: "tcp", port: …)` causes
-DCP (Aspire's launcher) to also bind the port for proxying, and connections
-land on DCP instead of the SSH server (the kernel routes the more-specific
-loopback bind ahead of the project's `0.0.0.0` bind). The trade-off is that
-the SSH service doesn't show up as a clickable endpoint on the Aspire
-dashboard; everything else does.
+That spins up `nightms-pg` + `nightms-redis`, builds, and starts
+`Night.Ms.SshServer` on:
 
-## Running standalone (no Aspire)
+- SSH — `:2222` → `ssh -p 2222 <handle>@localhost`
+- HTTP — `:5080` → `http://localhost:5080/` (login, profile, `/terminal`)
 
-Useful for quick iteration when you already have Postgres + Redis running:
+First connection from an unknown public key lands on the TOFU `RegisterScreen`
+— pick a handle, hit Submit, and the key is bound to the new account. The
+handle in `NIGHTMS_BOOTSTRAP_SYSOP_HANDLE` (default `nick`) is auto-promoted to
+sysop on registration (or at startup if it already exists).
 
-```sh
-ConnectionStrings__bbs="Host=127.0.0.1;Port=5432;Database=bbs;Username=postgres;Password=postgres" \
-ConnectionStrings__redis="127.0.0.1:6379,abortConnect=false" \
-NIGHTMS_HOST_KEY_DIR="$PWD/data/host-keys" \
-NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=nick \
-  dotnet run --project src/Night.Ms.SshServer
-```
-
-The first SSH connection from any unknown public key lands on a `RegisterScreen`
-(TOFU). Pick a handle, hit Submit, and that key is bound to the new account.
-The handle in `NIGHTMS_BOOTSTRAP_SYSOP_HANDLE` is auto-promoted to sysop on
-registration (or at startup if it already exists).
+`run.ps1 -Reset` drops and recreates the `bbs` database; `-Stop` tears the dev
+containers down. See [`SETUP.md`](SETUP.md) for the full env-var reference,
+SSO setup walkthrough, and production-deploy notes.
 
 ## Sysop console
 
@@ -71,32 +61,43 @@ refresh           | help
 
 All actions write to the `audit_log` table.
 
-## Container build
+## Production deployment
+
+A docker-compose stack lives at [`deploy/compose.yml`](deploy/compose.yml) —
+one app container + Postgres + Redis on a private network, designed for a
+single VPS with Cloudflare terminating TLS. Copy `deploy/.env.example` to
+`deploy/.env`, fill in secrets, then:
 
 ```sh
-docker build -f src/Night.Ms.SshServer/Dockerfile -t ssh.night.ms:dev .
-docker run -d --rm \
-  -p 2222:2222 \
-  -v $(pwd)/data/host-keys:/data/host-keys \
-  -e ConnectionStrings__bbs="Host=postgres;Port=5432;Database=bbs;Username=postgres;Password=postgres" \
-  -e ConnectionStrings__redis="redis:6379,abortConnect=false" \
-  -e NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=youroperator \
-  --name ssh.night.ms \
-  ssh.night.ms:dev
+docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build
 ```
 
-Front the container's `:2222` with iptables/nftables to expose on `:22`.
+The container exposes `2222/tcp` (SSH) and `5080/tcp` (HTTP); compose maps
+them to host `:22` and `:80`. Move the VPS's own `sshd` off `:22` first, or
+the docker-proxy bind will collide. See `SETUP.md` for the full deploy
+checklist.
 
-## Known limitations (carryovers)
+## Adding new ANSI art
+
+`Night.Ms.Tools.AnsiConvert` converts a PNG/JPEG to a half-block `.ans` file
+that the lobby banner and gallery can render:
+
+```sh
+dotnet run --project src/Night.Ms.Tools.AnsiConvert -- <input.png> \
+  [--width 80] [--depth truecolor|256|16] [--dither none|floyd] [--out path]
+```
+
+Convert offline, commit the `.ans`, drop it into `NIGHTMS_ART_DIR` (gallery)
+or point `NIGHTMS_LOGIN_ART_PATH` at it (login banner). The server never
+converts raster images at runtime.
+
+## Known limitations
 
 - `curve25519-sha256` KEX is implemented but disabled — DevTunnels'
   `KeyExchangeService.ComputeExchangeHash` wraps `Q_C`/`Q_S` as bigints, which
   breaks RFC 8731 for X25519 keys with the high bit set. Clients fall back to
   `ecdh-sha2-nistp256` cleanly. Re-enabling needs an upstream patch.
-- Mouse-click handling is wired but not exercised in interactive testing.
-- `window-change` PTY resize isn't wired — the initial `pty-req` size is the
-  fixed render size for the session.
-- DM channels and `/join #private` aren't implemented; one default `#lobby`
-  channel only.
-- News, weather, file area, profiles/finger, ANSI gallery, door games — all
-  designed-for-but-deferred per the original plan.
+- `MouseClick` is wired but not exercised in interactive testing.
+- DM channels and `/join #private` are designed-for-but-deferred — only the
+  default `#lobby` channel is exposed today.
+- File area and door games — planned, not yet shipped.
