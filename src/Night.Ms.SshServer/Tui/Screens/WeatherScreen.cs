@@ -197,6 +197,12 @@ public sealed class WeatherScreen : BbsWindow
             }
             return;
         }
+        if (key == Key.M || key == Key.M.WithShift)
+        {
+            key.Handled = true;
+            OpenFavoritesManager();
+            return;
+        }
 
         var fnIndex = MapFunctionKey(key);
         if (fnIndex >= 0)
@@ -260,6 +266,21 @@ public sealed class WeatherScreen : BbsWindow
             return;
         }
         var fav = _favorites[index];
+        _activeLocation = new ActiveLocation(fav.Latitude, fav.Longitude, fav.Canonical ?? fav.Label);
+        RefreshAsync().FireAndLog(_services, nameof(RefreshAsync));
+    }
+
+    private void OpenFavoritesManager()
+    {
+        var pick = _app.Run(new FavoritesManagementScreen(_app, _services, _user)) as FavoritesManagementResult;
+
+        // Always reload — the manager may have deleted/renamed/reordered rows even if the
+        // user didn't pick one to activate.
+        LoadFavoritesAsync().FireAndLog(_services, nameof(LoadFavoritesAsync));
+
+        if (pick is null) return;
+
+        var fav = pick.Selected;
         _activeLocation = new ActiveLocation(fav.Latitude, fav.Longitude, fav.Canonical ?? fav.Label);
         RefreshAsync().FireAndLog(_services, nameof(RefreshAsync));
     }
@@ -515,13 +536,13 @@ public sealed class WeatherScreen : BbsWindow
     {
         if (_favorites.Count == 0)
         {
-            _hintBar.Text = "[T] travel   [S] save   [R] refresh   [Esc] back";
+            _hintBar.Text = "[T] travel   [S] save   [M] manage   [R] refresh   [Esc] back";
             return;
         }
         var names = string.Join(" ", _favorites
             .Take(MaxFavorites)
             .Select((f, i) => $"F{i + 1}:{Truncate(f.Label, 12)}"));
-        _hintBar.Text = $"[T] travel  [S] save  [R] refresh  [Esc] back   {names}";
+        _hintBar.Text = $"[T] travel  [S] save  [M] manage  [R] refresh  [Esc] back   {names}";
     }
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
