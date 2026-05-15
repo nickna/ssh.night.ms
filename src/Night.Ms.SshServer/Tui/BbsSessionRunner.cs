@@ -123,8 +123,9 @@ internal static class BbsSessionRunner
 
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, ITuiSession session)
     {
-        var nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered, art));
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Sysop)
+        var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
+        var nav = (LobbyNavigation?)app.Run(lobbyScreen);
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -166,11 +167,18 @@ internal static class BbsSessionRunner
                 using var scope = services.CreateScope();
                 app.Run(new WeatherScreen(app, scope.ServiceProvider, user));
             }
+            else if (nav == LobbyNavigation.Alerts)
+            {
+                var alerts = lobbyScreen.LoadedAlerts;
+                if (alerts is { Count: > 0 })
+                    app.Run(new AlertsScreen(app, services, user, alerts));
+            }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {
                 app.Run(new AdminScreen(services, app, user));
             }
-            nav = (LobbyNavigation?)app.Run(new LobbyScreen(app, services, user, justRegistered: false, art));
+            lobbyScreen = new LobbyScreen(app, services, user, justRegistered: false, art);
+            nav = (LobbyNavigation?)app.Run(lobbyScreen);
         }
     }
 

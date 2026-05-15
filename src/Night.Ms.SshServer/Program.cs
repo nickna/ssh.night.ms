@@ -156,6 +156,7 @@ builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IWeatherAnimationProvid
 // HttpClient (BaseAddress, User-Agent) so swapping a provider doesn't leak the prior
 // vendor's URL into Program.cs.
 builder.Services.AddOpenMeteoWeather();
+builder.Services.AddNwsWeatherAlerts();
 builder.Services.AddHackerNews();
 builder.Services.AddOpenMeteoGeocoding();
 builder.Services.AddIpApiCoGeolocation();

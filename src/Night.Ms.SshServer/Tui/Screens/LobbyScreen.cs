@@ -1,5 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Tui.Art;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
@@ -10,14 +13,14 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Map, Weather, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Map, Weather, Alerts, Sysop, Logout }
 
 public sealed class LobbyScreen : BbsWindow
 {
     private readonly IApplication _app;
 
-    // The carousel entries are table-driven so a tenth destination is one row, and so the
-    // hotkey loop + the per-card icon lookup share a single source of truth.
+    public IReadOnlyList<WeatherAlert>? LoadedAlerts { get; private set; }
+
     private readonly record struct LobbyEntry(
         string Label,
         string IconName,
@@ -59,6 +62,15 @@ public sealed class LobbyScreen : BbsWindow
 
         Add(artView, welcome);
 
+        var alertsBanner = new AlertsBannerView
+        {
+            X = 0,
+            Y = contentTop + 2,
+            Width = Dim.Fill(),
+            Visible = false,
+        };
+        Add(alertsBanner);
+
         var entries = new[]
         {
             new LobbyEntry("Chat",     "chat",    Key.C, LobbyNavigation.Chat),
@@ -78,10 +90,11 @@ public sealed class LobbyScreen : BbsWindow
             .Select(e => new LobbyCarouselView.Entry(e.Label, e.Hotkey, e.Target, icons.Get(e.IconName)))
             .ToList();
 
+        var carouselY = contentTop + 2;
         var carousel = new LobbyCarouselView(carouselEntries)
         {
             X = 0,
-            Y = contentTop + 2,
+            Y = carouselY,
             Width = Dim.Fill(),
         };
         carousel.EntryActivated += (_, target) => Choose(target);
@@ -90,7 +103,7 @@ public sealed class LobbyScreen : BbsWindow
         var sysopBadge = new Label
         {
             X = 2,
-            Y = contentTop + 2 + LobbyCarouselView.RowHeight + 1,
+            Y = carouselY + LobbyCarouselView.RowHeight + 1,
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
@@ -98,9 +111,26 @@ public sealed class LobbyScreen : BbsWindow
 
         carousel.SetFocus();
 
+        LoadAlertsAsync(app, services, user, alertsBanner, carousel, sysopBadge, carouselY)
+            .FireAndLog(services, nameof(LoadAlertsAsync));
+
+        app.AddTimeout(TimeSpan.FromSeconds(4), () =>
+        {
+            if (alertsBanner.AlertCount > 1)
+                app.Invoke(() => alertsBanner.Advance());
+            return true;
+        });
+
         KeyDown += (_, key) =>
         {
             if (key == Key.Esc) { key.Handled = true; Choose(LobbyNavigation.Logout); return; }
+            if (key == Key.A || key == Key.A.WithShift)
+            {
+                key.Handled = true;
+                if (LoadedAlerts is { Count: > 0 })
+                    Choose(LobbyNavigation.Alerts);
+                return;
+            }
 
             foreach (var entry in entries)
             {
@@ -113,6 +143,58 @@ public sealed class LobbyScreen : BbsWindow
                 }
             }
         };
+    }
+
+    private async Task LoadAlertsAsync(
+        IApplication app, IServiceProvider services, User user,
+        AlertsBannerView banner, LobbyCarouselView carousel, Label sysopBadge, int carouselY)
+    {
+        var alertProvider = services.GetRequiredService<IWeatherAlertProvider>();
+
+        var locations = new List<(double Lat, double Lon)>();
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var saved = await db.UserSavedLocations
+                .Where(s => s.UserId == user.Id)
+                .OrderBy(s => s.SortOrder)
+                .Take(9)
+                .Select(s => new { s.Latitude, s.Longitude })
+                .ToListAsync();
+            foreach (var s in saved)
+                locations.Add((s.Latitude, s.Longitude));
+        }
+
+        if (locations.Count == 0 && user.LocationLatitude.HasValue && user.LocationLongitude.HasValue)
+            locations.Add((user.LocationLatitude.Value, user.LocationLongitude.Value));
+
+        if (locations.Count == 0) return;
+
+        var unique = locations
+            .Select(l => (Math.Round(l.Lat, 2), Math.Round(l.Lon, 2)))
+            .Distinct()
+            .ToList();
+
+        var tasks = unique.Select(c => alertProvider.GetActiveAlertsAsync(c.Item1, c.Item2));
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        var all = results
+            .SelectMany(r => r)
+            .DistinctBy(a => a.Id)
+            .OrderByDescending(a => a.Severity)
+            .ToList();
+
+        if (all.Count == 0) return;
+
+        app.Invoke(() =>
+        {
+            LoadedAlerts = all;
+            banner.SetAlerts(all);
+            banner.Visible = true;
+            var newCarouselY = carouselY + AlertsBannerView.BannerHeight;
+            carousel.Y = newCarouselY;
+            sysopBadge.Y = newCarouselY + LobbyCarouselView.RowHeight + 1;
+        });
     }
 
     private void Choose(LobbyNavigation target)
