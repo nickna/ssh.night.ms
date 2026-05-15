@@ -1,16 +1,19 @@
 using System.Drawing;
 using System.Reflection;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Drivers;
 using Night.Ms.SshServer.Tui.Screens;
 using Night.Ms.SshTransport;
 using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Time;
+using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui;
 
@@ -123,6 +126,12 @@ internal static class BbsSessionRunner
 
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, ITuiSession session)
     {
+        using var wallCts = new CancellationTokenSource();
+        RunWallSubscriptionAsync(services, app, wallCts.Token)
+            .FireAndLog(services, nameof(RunWallSubscriptionAsync));
+
+        try
+        {
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
         var nav = (LobbyNavigation?)app.Run(lobbyScreen);
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Sysop)
@@ -180,6 +189,11 @@ internal static class BbsSessionRunner
             lobbyScreen = new LobbyScreen(app, services, user, justRegistered: false, art);
             nav = (LobbyNavigation?)app.Run(lobbyScreen);
         }
+        }
+        finally
+        {
+            wallCts.Cancel();
+        }
     }
 
     private static void RunForumLoop(IServiceProvider services, IApplication app, User user)
@@ -218,6 +232,28 @@ internal static class BbsSessionRunner
 
                 app.Run(new ThreadScreen(services, app, user, topic));
             }
+        }
+    }
+
+    private static async Task RunWallSubscriptionAsync(
+        IServiceProvider services, IApplication app, CancellationToken ct)
+    {
+        var bus = services.GetRequiredService<IRealtimeBus>();
+        await foreach (var payload in bus.SubscribeAsync(SystemTopics.Wall, ct))
+        {
+            WallBroadcastDto? dto;
+            try { dto = JsonSerializer.Deserialize<WallBroadcastDto>(payload); }
+            catch { continue; }
+            if (dto is null) continue;
+
+            app.Invoke(() =>
+            {
+                MessageBox.Query(
+                    app,
+                    title: "System Broadcast",
+                    message: $"From sysop {dto.SysopHandle}:\n\n{dto.Message}",
+                    "_OK");
+            });
         }
     }
 

@@ -1,7 +1,9 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
+using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
@@ -74,7 +76,7 @@ public sealed class AdminScreen : BbsWindow
             X = 0,
             Y = Pos.AnchorEnd(3),
             Width = Dim.Fill(),
-            Text = "Commands: ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh",
+            Text = "Commands: ban | unban | sysop | unsysop <handle> | wall <msg> | refresh",
         };
 
         _command = new TextField
@@ -125,7 +127,7 @@ public sealed class AdminScreen : BbsWindow
             {
                 case "help":
                 case "?":
-                    SetStatus("ban <handle> | unban <handle> | sysop <handle> | unsysop <handle> | refresh");
+                    SetStatus("ban | unban | sysop | unsysop <handle> | wall <msg> | refresh");
                     return;
                 case "refresh":
                     await LoadAsync();
@@ -142,6 +144,9 @@ public sealed class AdminScreen : BbsWindow
                     return;
                 case "unsysop":
                     await TogglePropertyAsync(target, isBan: false, expectedAfter: false);
+                    return;
+                case "wall":
+                    await WallAsync(target);
                     return;
                 default:
                     SetStatus($"[!] Unknown command: '{verb}'. Type 'help'.");
@@ -198,6 +203,55 @@ public sealed class AdminScreen : BbsWindow
         });
         await db.SaveChangesAsync();
         SetStatus($"{action} {target.Handle}");
+        await LoadAsync();
+    }
+
+    private async Task WallAsync(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            SetStatus("[!] wall requires a message. Usage: wall <message>");
+            return;
+        }
+        if (message.Length > 500)
+        {
+            SetStatus("[!] Wall message too long (max 500 chars).");
+            return;
+        }
+
+        int? choice = -1;
+        _app.Invoke(() =>
+        {
+            choice = MessageBox.Query(
+                _app,
+                title: "Confirm broadcast",
+                message: $"Send to ALL connected sessions?\n\n\"{message}\"",
+                "_Send", "_Cancel");
+        });
+        if (choice != 0)
+        {
+            SetStatus("Wall broadcast cancelled.");
+            return;
+        }
+
+        var bus = _services.GetRequiredService<IRealtimeBus>();
+        var dto = new WallBroadcastDto(_actor.Handle, message, DateTimeOffset.UtcNow);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(dto);
+        await bus.PublishAsync(SystemTopics.Wall, bytes);
+
+        await using var scope = _services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = _actor.Id,
+            Action = "wall.broadcast",
+            TargetType = "system",
+            TargetId = null,
+            Details = JsonDocument.Parse(JsonSerializer.Serialize(new { message })),
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        SetStatus("Wall broadcast sent.");
         await LoadAsync();
     }
 

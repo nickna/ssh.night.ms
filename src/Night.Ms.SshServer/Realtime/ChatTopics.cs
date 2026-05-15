@@ -74,3 +74,10 @@ public static class PresenceEventKind
     // "alice is typing…" and auto-clear after a few seconds of silence.
     public const string Typing    = "typing";
 }
+
+public static class SystemTopics
+{
+    public const string Wall = "system:wall";
+}
+
+public sealed record WallBroadcastDto(string SysopHandle, string Message, DateTimeOffset SentAt);
