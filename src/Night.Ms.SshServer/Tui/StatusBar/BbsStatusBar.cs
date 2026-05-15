@@ -95,6 +95,12 @@ public sealed class BbsStatusBar : View
         _slot.SetNeedsDraw();
     });
 
+    // Forces an immediate weather refresh — call from screens that just changed the user's
+    // home location so the footer reflects it without waiting up to 5 minutes for the next
+    // periodic tick.
+    public void Refresh() =>
+        RefreshWeatherAsync().FireAndLog(_services, nameof(RefreshWeatherAsync));
+
     private bool Tick()
     {
         if (_disposed) return false;
@@ -114,12 +120,22 @@ public sealed class BbsStatusBar : View
             return;
         }
 
+        if (_user?.LocationLatitude is not double lat || _user.LocationLongitude is not double lon)
+        {
+            _app.Invoke(() =>
+            {
+                _weatherLabel.Text = "weather: set a city in profile";
+                _weatherLabel.SetNeedsDraw();
+            });
+            return;
+        }
+
         try
         {
             var snap = await _weather.GetCurrentAsync(
-                latitude: _user?.LocationLatitude,
-                longitude: _user?.LocationLongitude,
-                label: _user?.LocationCanonical ?? _user?.Location,
+                latitude: lat,
+                longitude: lon,
+                label: _user.LocationCanonical ?? _user.Location,
                 cancellationToken: _shutdown.Token).ConfigureAwait(false);
             _app.Invoke(() =>
             {

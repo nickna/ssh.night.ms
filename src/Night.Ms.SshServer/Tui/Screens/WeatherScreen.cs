@@ -61,6 +61,10 @@ public sealed class WeatherScreen : BbsWindow
 
     private ActiveLocation _activeLocation;
     private List<UserSavedLocation> _favorites = new();
+    // Tracks whether the user has dismissed the "make this your default location?" offer
+    // during this session. Without it, the prompt would re-fire on every travel pick until
+    // the user accepts — which is more noise than help.
+    private bool _defaultLocationPromptDismissed;
 
     public WeatherScreen(IApplication app, IServiceProvider services, User user)
         : base(app, services, user)
@@ -232,6 +236,8 @@ public sealed class WeatherScreen : BbsWindow
         var result = _app.Run(new TravelLocationScreen(_app, _services, _user)) as TravelLocationResult;
         if (result is null) return;
 
+        var hadNoHomeLocation = _user.LocationLatitude is null || _user.LocationLongitude is null;
+
         _activeLocation = new ActiveLocation(result.Latitude, result.Longitude, result.Canonical);
 
         if (result.SaveAsFavorite)
@@ -241,6 +247,68 @@ public sealed class WeatherScreen : BbsWindow
         else
         {
             RefreshAsync().FireAndLog(_services, nameof(RefreshAsync));
+        }
+
+        if (hadNoHomeLocation && !_defaultLocationPromptDismissed)
+        {
+            OfferAsDefaultLocation(result.Latitude, result.Longitude, result.Canonical);
+        }
+    }
+
+    private void OfferAsDefaultLocation(double latitude, double longitude, string canonical)
+    {
+        var choice = Terminal.Gui.Views.MessageBox.Query(
+            _app,
+            title: "Default location",
+            message: $"Make '{canonical}' your default location?\nIt'll be used for the lobby weather and the status bar.",
+            "_Yes", "_No");
+        if (choice != 0)
+        {
+            _defaultLocationPromptDismissed = true;
+            return;
+        }
+        SaveAsDefaultLocationAsync(latitude, longitude, canonical).FireAndLog(_services, nameof(SaveAsDefaultLocationAsync));
+    }
+
+    private async Task SaveAsDefaultLocationAsync(double latitude, double longitude, string canonical)
+    {
+        try
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == _user.Id, _shutdown.Token);
+            if (user is null)
+            {
+                _app.Invoke(() => _status.SetWarning("[!] couldn't load user to save."));
+                return;
+            }
+            user.Location = canonical;
+            user.LocationCanonical = canonical;
+            user.LocationLatitude = latitude;
+            user.LocationLongitude = longitude;
+            user.LocationSource = LocationSource.Manual;
+            await db.SaveChangesAsync(_shutdown.Token);
+
+            _app.Invoke(() =>
+            {
+                _user.Location = canonical;
+                _user.LocationCanonical = canonical;
+                _user.LocationLatitude = latitude;
+                _user.LocationLongitude = longitude;
+                _user.LocationSource = LocationSource.Manual;
+                _status.SetSuccess($"Saved '{canonical}' as your default location.");
+                // Re-run refresh so SyncStatusBarSlot sees the new home and clears the
+                // "viewing: ..." badge (active location is now the home location).
+                RefreshAsync().FireAndLog(_services, nameof(RefreshAsync));
+                // Nudge the footer so the lobby weather appears immediately instead of
+                // waiting for the next 5-minute tick.
+                StatusBar.Refresh();
+            });
+        }
+        catch (OperationCanceledException) { /* shutting down */ }
+        catch (Exception ex)
+        {
+            _app.Invoke(() => _status.SetWarning($"[!] save failed: {ex.Message}"));
         }
     }
 
