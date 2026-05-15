@@ -47,14 +47,6 @@ public sealed class ForumListScreen : BbsWindow
         Add(listView);
         listView.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                Result = null;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-        };
+        InstallEscapeHandler(() => Result = null);
     }
 }

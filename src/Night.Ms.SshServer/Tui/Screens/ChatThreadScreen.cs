@@ -110,15 +110,7 @@ public sealed class ChatThreadScreen : BbsWindow
         Add(_log, _status, _input);
         _input.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _shutdown.Cancel();
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler(() => _shutdown.Cancel());
 
         LoadAndSubscribeAsync().FireAndLog(_services, nameof(LoadAndSubscribeAsync));
     }

@@ -2,6 +2,7 @@ using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Tui.StatusBar;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
+using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -16,10 +17,17 @@ namespace Night.Ms.SshServer.Tui;
 // the status bar then formats time and weather using global defaults (UTC, °C, 24h, ISO).
 public abstract class BbsWindow : Window
 {
+    // BbsWindow keeps its own non-null IApplication reference rather than relying on the
+    // inherited View.App, which is nullable and only populated once the view is wired into
+    // a SuperView chain — by then ctor-time wiring helpers like InstallEscapeHandler have
+    // already needed it.
+    private readonly IApplication _app;
+
     protected BbsStatusBar StatusBar { get; }
 
     protected BbsWindow(IApplication app, IServiceProvider services, User? user)
     {
+        _app = app;
         BbsTheme.ApplyWindow(this);
 
         StatusBar = new BbsStatusBar(app, services, user)
@@ -30,5 +38,22 @@ public abstract class BbsWindow : Window
             Height = 1,
         };
         Add(StatusBar);
+    }
+
+    // Wires Esc → optional cleanup → App.RequestStop. Use for screens whose only Esc
+    // semantics are "leave this screen." Screens that bind Esc alongside Q/Shift+Q or
+    // dispatch Esc through a state machine (LobbyScreen, viewer screens) keep their own
+    // handlers.
+    protected void InstallEscapeHandler(Action? onEscape = null)
+    {
+        KeyDown += (_, key) =>
+        {
+            if (key == Key.Esc)
+            {
+                onEscape?.Invoke();
+                _app.RequestStop();
+                key.Handled = true;
+            }
+        };
     }
 }

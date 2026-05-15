@@ -200,22 +200,12 @@ internal static class BbsSessionRunner
     {
         while (true)
         {
-            Forum? forum;
-            using (var scope = services.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                forum = app.Run(new ForumListScreen(app, services, db, user)) as Forum;
-            }
+            var forum = WithDbScope(services, db => app.Run(new ForumListScreen(app, services, db, user)) as Forum);
             if (forum is null) return;
 
             while (true)
             {
-                TopicListScreen topicListScreen;
-                using (var scope = services.CreateScope())
-                {
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    topicListScreen = new TopicListScreen(app, services, db, user, forum);
-                }
+                var topicListScreen = WithDbScope(services, db => new TopicListScreen(app, services, db, user, forum));
                 var listResult = (TopicListResult?)app.Run(topicListScreen);
                 if (listResult == TopicListResult.Back) break;
 
@@ -262,5 +252,16 @@ internal static class BbsSessionRunner
         var cols = (int)(session.Pty?.Cols ?? 80);
         var rows = (int)(session.Pty?.Rows ?? 24);
         return new Size(Math.Max(cols, 20), Math.Max(rows, 5));
+    }
+
+    // Resolves AppDbContext inside a fresh scope, hands it to the action, then disposes
+    // the scope. Safe only when the action does not retain the db beyond its return — list
+    // screens here pull rows into in-memory lists in their constructors, so the screen
+    // outlives the scope without issue.
+    private static T WithDbScope<T>(IServiceProvider services, Func<AppDbContext, T> action)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return action(db);
     }
 }

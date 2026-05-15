@@ -103,14 +103,7 @@ public sealed class AdminScreen : BbsWindow
         Add(leftHeader, _userPane, rightHeader, _audit, _status, _command);
         _command.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler();
 
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }

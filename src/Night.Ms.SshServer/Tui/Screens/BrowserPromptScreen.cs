@@ -75,15 +75,7 @@ public sealed class BrowserPromptScreen : BbsWindow
         Add(prompt, _url, _status, open, cancel);
         _url.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                Result = null;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-        };
+        InstallEscapeHandler(() => Result = null);
     }
 
     private void TrySubmit()

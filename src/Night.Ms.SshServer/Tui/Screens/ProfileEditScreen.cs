@@ -219,14 +219,10 @@ public sealed class ProfileEditScreen : BbsWindow
         Add(_realName, _location, _bio, _timeZoneList, _temperature, _clockFormat, _dateFormat, _status, save, cancel);
         _realName.SetFocus();
 
+        InstallEscapeHandler();
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _app.RequestStop();
-            }
-            else if (key == Key.S.WithCtrl)
+            if (key == Key.S.WithCtrl)
             {
                 key.Handled = true;
                 SaveAsync().FireAndLog(_services, nameof(SaveAsync));

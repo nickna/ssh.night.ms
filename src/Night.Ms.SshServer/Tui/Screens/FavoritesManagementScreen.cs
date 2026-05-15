@@ -75,15 +75,7 @@ public sealed class FavoritesManagementScreen : BbsWindow
         Add(header, _list, _status);
         _list.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                Result = null;
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler(() => Result = null);
 
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }

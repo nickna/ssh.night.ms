@@ -74,15 +74,7 @@ public sealed class SaveFavoritePromptScreen : BbsWindow
         Add(prompt, _label, save, cancel);
         _label.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                Result = null;
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler(() => Result = null);
     }
 
     private void Submit()

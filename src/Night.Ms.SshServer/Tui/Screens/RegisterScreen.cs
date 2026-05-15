@@ -141,14 +141,7 @@ public sealed class RegisterScreen : BbsWindow
 
         Add(artView, greeting, fp, prompt, handleField, status, submit, cancel);
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                _app.RequestStop();
-                key.Handled = true;
-            }
-        };
+        InstallEscapeHandler();
     }
 
     private static bool IsValidHandle(string handle) =>

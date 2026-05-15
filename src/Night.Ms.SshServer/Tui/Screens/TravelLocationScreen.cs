@@ -103,15 +103,7 @@ public sealed class TravelLocationScreen : BbsWindow
         Add(prompt, _query, resultsHeader, _results, _saveAsFavorite, _status);
         _query.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                Result = null;
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler(() => Result = null);
     }
 
     private async Task SearchAsync()

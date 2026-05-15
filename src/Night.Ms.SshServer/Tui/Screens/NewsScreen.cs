@@ -79,14 +79,10 @@ public sealed class NewsScreen : BbsWindow
         Add(_weather, headlinesHeader, _headlines, _status);
         _headlines.SetFocus();
 
+        InstallEscapeHandler();
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _app.RequestStop();
-            }
-            else if (key == Key.R || key == Key.R.WithShift)
+            if (key == Key.R || key == Key.R.WithShift)
             {
                 key.Handled = true;
                 ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));

@@ -152,6 +152,7 @@ public sealed class WeatherScreen : BbsWindow
         foreach (var row in _dailyRows) Add(row);
         Add(_status);
 
+        InstallEscapeHandler();
         KeyDown += OnKeyDown;
 
         LoadFavoritesAsync().FireAndLog(_services, nameof(LoadFavoritesAsync));
@@ -170,12 +171,6 @@ public sealed class WeatherScreen : BbsWindow
 
     private void OnKeyDown(object? sender, Key key)
     {
-        if (key == Key.Esc)
-        {
-            key.Handled = true;
-            _app.RequestStop();
-            return;
-        }
         if (key == Key.T || key == Key.T.WithShift)
         {
             key.Handled = true;

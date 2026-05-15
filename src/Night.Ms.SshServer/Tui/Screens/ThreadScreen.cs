@@ -73,14 +73,7 @@ public sealed class ThreadScreen : BbsWindow
         Add(_log, _status, _input);
         _input.SetFocus();
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _app.RequestStop();
-            }
-        };
+        InstallEscapeHandler();
 
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }

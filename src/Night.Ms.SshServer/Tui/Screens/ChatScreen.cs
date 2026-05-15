@@ -222,15 +222,9 @@ public sealed class ChatScreen : BbsWindow
         Add(_channelsPane, _log, _sidebar, _status, _preview, _input);
         _input.SetFocus();
 
+        InstallEscapeHandler(() => _shutdown.Cancel());
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                _shutdown.Cancel();
-                _app.RequestStop();
-                return;
-            }
             // Alt+1..Alt+9 jumps to the Nth channel in the sidebar; Alt+0 is the 10th slot.
             // Alt+digit is universal across PuTTY/WT/iTerm; plain digits would conflict with
             // input typing.

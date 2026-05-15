@@ -86,15 +86,10 @@ public sealed class NewTopicScreen : BbsWindow
         Add(_title, _body, _status, submit, cancel);
         _title.SetFocus();
 
+        InstallEscapeHandler(() => Result = null);
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
-            {
-                Result = null;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.S.WithCtrl)
+            if (key == Key.S.WithCtrl)
             {
                 SubmitAsync().FireAndLog(_services, nameof(SubmitAsync));
                 key.Handled = true;

@@ -71,15 +71,10 @@ public sealed class TopicListScreen : BbsWindow
         Add(listView);
         listView.SetFocus();
 
+        InstallEscapeHandler(() => Result = TopicListResult.Back);
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc)
-            {
-                Result = TopicListResult.Back;
-                _app.RequestStop();
-                key.Handled = true;
-            }
-            else if (key == Key.N || key == Key.N.WithShift)
+            if (key == Key.N || key == Key.N.WithShift)
             {
                 Result = TopicListResult.NewTopic;
                 _app.RequestStop();

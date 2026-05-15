@@ -61,14 +61,7 @@ public sealed class FingerScreen : BbsWindow
         // the view via Application.Invoke. Same pattern as ProfileEditScreen.
         LoadAvatarAsync(app, services, subject, AvatarCols, avatar);
 
-        KeyDown += (_, key) =>
-        {
-            if (key == Key.Esc)
-            {
-                key.Handled = true;
-                app.RequestStop();
-            }
-        };
+        InstallEscapeHandler();
     }
 
     private void AddLine(string text, int x, int y, Terminal.Gui.Drawing.Scheme? scheme = null)
