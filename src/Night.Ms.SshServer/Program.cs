@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Configuration;
+using Night.Ms.SshServer.Diagnostics;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
@@ -138,6 +139,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
         ?? throw new InvalidOperationException("ConnectionStrings:redis is not configured.")));
 
 builder.Services.AddSingleton<AuthLookupService>();
+builder.Services.AddSingleton<SystemMetricsCollector>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<ChatMutationService>();

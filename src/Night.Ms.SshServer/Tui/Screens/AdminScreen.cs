@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Night.Ms.SshServer.Diagnostics;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Realtime;
@@ -20,8 +21,11 @@ public sealed class AdminScreen : BbsWindow
     private readonly User _actor;
     private readonly TextView _userPane;
     private readonly TextView _audit;
+    private readonly Label _metrics;
     private readonly BbsStatusLine _status;
     private readonly TextField _command;
+    private readonly SystemMetricsCollector _metricsCollector;
+    private readonly CancellationTokenSource _shutdown = new();
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
         : base(app, services, actor)
@@ -45,7 +49,7 @@ public sealed class AdminScreen : BbsWindow
             X = 0,
             Y = Pos.Bottom(leftHeader),
             Width = Dim.Percent(50),
-            Height = Dim.Fill(3),
+            Height = Dim.Fill(4),
             ReadOnly = true,
             WordWrap = false,
             CanFocus = false,
@@ -65,11 +69,20 @@ public sealed class AdminScreen : BbsWindow
             X = Pos.Right(_userPane),
             Y = Pos.Bottom(rightHeader),
             Width = Dim.Fill(),
-            Height = Dim.Fill(3),
+            Height = Dim.Fill(4),
             ReadOnly = true,
             WordWrap = false,
             CanFocus = false,
         };
+
+        _metrics = new Label
+        {
+            X = 0,
+            Y = Pos.AnchorEnd(4),
+            Width = Dim.Fill(),
+            Text = string.Empty,
+        };
+        _metrics.SetScheme(BbsTheme.Status);
 
         _status = new BbsStatusLine
         {
@@ -100,12 +113,47 @@ public sealed class AdminScreen : BbsWindow
             }
         };
 
-        Add(leftHeader, _userPane, rightHeader, _audit, _status, _command);
+        Add(leftHeader, _userPane, rightHeader, _audit, _metrics, _status, _command);
         _command.SetFocus();
 
         InstallEscapeHandler();
 
+        _metricsCollector = _services.GetRequiredService<SystemMetricsCollector>();
+        UpdateMetricsLabel(_metricsCollector.Sample());
+        Task.Run(() => MetricsLoopAsync(_shutdown.Token))
+            .FireAndLog(_services, nameof(MetricsLoopAsync));
+
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
+    }
+
+    private async Task MetricsLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                var snap = _metricsCollector.Sample();
+                _app.Invoke(() => UpdateMetricsLabel(snap));
+            }
+        }
+        catch (OperationCanceledException) { /* expected on screen exit */ }
+    }
+
+    private void UpdateMetricsLabel(SystemMetricsSnapshot snap)
+    {
+        _metrics.Text = snap.FormatCompact();
+        _metrics.SetNeedsDraw();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            try { _shutdown.Cancel(); } catch { /* ignore */ }
+            _shutdown.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     private async Task ExecuteAsync(string line)
