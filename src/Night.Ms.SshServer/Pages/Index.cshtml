@@ -43,11 +43,11 @@
         <div class="actions">
             @if (Model.GoogleConfigured)
             {
-                <form method="post" action="/login/google" class="inline"><button class="btn">Sign in with Google</button></form>
+                <form method="post" action="/login/google" class="inline">@Html.AntiForgeryToken()<button class="btn">Sign in with Google</button></form>
             }
             @if (Model.MicrosoftConfigured)
             {
-                <form method="post" action="/login/microsoft" class="inline"><button class="btn">Sign in with Microsoft</button></form>
+                <form method="post" action="/login/microsoft" class="inline">@Html.AntiForgeryToken()<button class="btn">Sign in with Microsoft</button></form>
             }
         </div>
     </div>

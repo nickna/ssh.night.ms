@@ -16,6 +16,7 @@
             {
                 <a href="/profile">@User.Identity.Name</a>
                 <form method="post" action="/logout" class="inline">
+                    @Html.AntiForgeryToken()
                     <button type="submit" class="link">sign out</button>
                 </form>
             }

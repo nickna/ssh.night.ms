@@ -17,6 +17,7 @@
             <p><strong>sysop</strong></p>
         }
         <form method="post" enctype="multipart/form-data" action="/profile/avatar" class="avatar-form">
+            @Html.AntiForgeryToken()
             <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required />
             <button class="btn" type="submit">@(Model.HasProfilePicture ? "Replace picture" : "Upload picture")</button>
             @if (Model.HasProfilePicture)
@@ -61,6 +62,7 @@
                     @if (Model.Credentials.Count > 1)
                     {
                         <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                            @Html.AntiForgeryToken()
                             <button type="submit" class="btn danger">unlink</button>
                         </form>
                     }
@@ -78,11 +80,11 @@
 <div class="actions">
     @if (Model.CanLinkGoogle)
     {
-        <form method="post" action="/profile/link/google" class="inline"><button class="btn">Link Google</button></form>
+        <form method="post" action="/profile/link/google" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Google</button></form>
     }
     @if (Model.CanLinkMicrosoft)
     {
-        <form method="post" action="/profile/link/microsoft" class="inline"><button class="btn">Link Microsoft</button></form>
+        <form method="post" action="/profile/link/microsoft" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Microsoft</button></form>
     }
     @if (!Model.CanLinkGoogle && !Model.CanLinkMicrosoft)
     {
