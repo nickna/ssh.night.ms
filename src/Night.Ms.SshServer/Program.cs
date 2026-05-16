@@ -421,7 +421,13 @@ static bool TryReadExternalClaims(
     if (string.IsNullOrEmpty(subjectClaim)) return false;
     subject = subjectClaim;
 
-    var scheme = ext.Properties?.Items["LoginProvider"] ?? ext.Principal!.Identity?.AuthenticationType;
+    // Items["LoginProvider"] is a dictionary indexer that throws on missing keys — the OAuth
+    // handler doesn't reliably populate it in modern ASP.NET. AuthenticationType is the durable
+    // signal ("Google" / "Microsoft" set by the remote handler when it builds the ticket).
+    string? scheme = null;
+    if (ext.Properties is { } props && props.Items.TryGetValue("LoginProvider", out var lp))
+        scheme = lp;
+    scheme ??= ext.Principal!.Identity?.AuthenticationType;
     if (string.Equals(scheme, GoogleDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
         provider = CredentialProvider.Google;
     else if (string.Equals(scheme, MicrosoftAccountDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
