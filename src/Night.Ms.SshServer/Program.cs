@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -106,6 +107,7 @@ if (nightMsOptions.IsMicrosoftConfigured)
 }
 
 builder.Services.AddAuthorization();
+builder.Services.AddAntiforgery();
 builder.Services.AddRazorPages();
 builder.Services.AddScoped<IdentityResolutionService>();
 builder.Services.AddSingleton<ProfilePictureService>();
@@ -180,6 +182,7 @@ app.UseStaticFiles();
 app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 
 app.MapGet("/healthz", () => Results.Ok("ok"));
 app.MapRazorPages();
@@ -211,8 +214,9 @@ app.MapGet("/ws/bbs", async (HttpContext ctx, IServiceProvider sp, ILoggerFactor
 
 // POST /login/{provider} — issues an OIDC challenge for the named provider. The provider
 // handler signs into the "External" scheme on return and redirects to /signin/complete.
-app.MapPost("/login/{provider}", (string provider, HttpContext ctx) =>
+app.MapPost("/login/{provider}", async (string provider, HttpContext ctx, IAntiforgery antiforgery) =>
 {
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/login");
     var scheme = ResolveOidcScheme(provider);
     if (scheme is null) return Results.Redirect("/login");
     var props = new AuthenticationProperties { RedirectUri = "/signin/complete" };
@@ -226,16 +230,15 @@ app.MapPost("/login/{provider}", (string provider, HttpContext ctx) =>
 app.MapGet("/signin/complete", async (HttpContext ctx, IdentityResolutionService resolver) =>
 {
     var ext = await ctx.AuthenticateAsync(ExternalScheme);
-    if (!ext.Succeeded || ext.Principal is null) return Results.Redirect("/login");
-
-    if (!TryReadExternalClaims(ext, out var provider, out var subject, out var email, out var emailVerified))
+    if (!ExternalClaimsReader.TryRead(ext, out var ticket))
     {
         await ctx.SignOutAsync(ExternalScheme);
         return Results.Redirect("/login");
     }
 
     var resolution = await resolver.ResolveAsync(
-        provider, subject, email, emailVerified, extraMetadata: null, ctx.RequestAborted);
+        ticket.Provider, ticket.Subject, ticket.Email, ticket.EmailVerified,
+        extraMetadata: null, ctx.RequestAborted);
 
     switch (resolution)
     {
@@ -274,17 +277,19 @@ app.MapGet("/cancel-signin", async (HttpContext ctx) =>
 });
 
 // POST /logout — clears the durable cookie.
-app.MapPost("/logout", async (HttpContext ctx) =>
+app.MapPost("/logout", async (HttpContext ctx, IAntiforgery antiforgery) =>
 {
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/");
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.Redirect("/");
 });
 
 // POST /profile/link/{provider} — logged-in user issues a challenge to add another credential
 // to their existing account. The callback returns to /profile/link-complete.
-app.MapPost("/profile/link/{provider}", (string provider, HttpContext ctx) =>
+app.MapPost("/profile/link/{provider}", async (string provider, HttpContext ctx, IAntiforgery antiforgery) =>
 {
     if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile");
     var scheme = ResolveOidcScheme(provider);
     if (scheme is null) return Results.Redirect("/profile");
     var props = new AuthenticationProperties { RedirectUri = "/profile/link-complete" };
@@ -299,32 +304,32 @@ app.MapGet("/profile/link-complete", async (HttpContext ctx, IdentityResolutionS
     if (!long.TryParse(currentUserIdStr, out var currentUserId)) return Results.Redirect("/login");
 
     var ext = await ctx.AuthenticateAsync(ExternalScheme);
-    if (!ext.Succeeded || ext.Principal is null) return Results.Redirect("/profile");
-
-    if (!TryReadExternalClaims(ext, out var provider, out var subject, out var email, out var emailVerified))
+    if (!ExternalClaimsReader.TryRead(ext, out var ticket))
     {
         await ctx.SignOutAsync(ExternalScheme);
         return Results.Redirect("/profile");
     }
 
-    var outcome = await resolver.LinkToUserAsync(currentUserId, provider, subject, email, emailVerified,
+    var outcome = await resolver.LinkToUserAsync(
+        currentUserId, ticket.Provider, ticket.Subject, ticket.Email, ticket.EmailVerified,
         extraMetadata: null, ctx.RequestAborted);
     await ctx.SignOutAsync(ExternalScheme);
 
     var flash = outcome switch
     {
-        LinkOutcome.Linked => $"Linked {provider}.",
-        LinkOutcome.AlreadyLinkedToYou => $"{provider} is already linked to your account.",
-        LinkOutcome.AlreadyLinkedToOther => $"That {provider} account is linked to a different handle. Sign in with that one to manage it.",
+        LinkOutcome.Linked => $"Linked {ticket.Provider}.",
+        LinkOutcome.AlreadyLinkedToYou => $"{ticket.Provider} is already linked to your account.",
+        LinkOutcome.AlreadyLinkedToOther => $"That {ticket.Provider} account is linked to a different handle. Sign in with that one to manage it.",
         _ => null,
     };
     return Results.Redirect($"/profile{(flash is null ? "" : $"?flash={Uri.EscapeDataString(flash)}")}");
 });
 
 // POST /profile/unlink/{credentialId} — refuses if it's the user's last credential.
-app.MapPost("/profile/unlink/{credentialId:long}", async (long credentialId, HttpContext ctx, IdentityResolutionService resolver) =>
+app.MapPost("/profile/unlink/{credentialId:long}", async (long credentialId, HttpContext ctx, IdentityResolutionService resolver, IAntiforgery antiforgery) =>
 {
     if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile");
     var currentUserIdStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
     if (!long.TryParse(currentUserIdStr, out var currentUserId)) return Results.Redirect("/login");
 
@@ -361,12 +366,13 @@ app.MapPost("/profile/avatar", async (HttpContext ctx, ProfilePictureService pfp
     var ok = await pfp.SaveAsync(userId, src, ctx.RequestAborted);
     var flash = ok ? "Picture updated." : "Couldn't process that image. PNG, JPEG, or WebP only.";
     return Results.Redirect("/profile?flash=" + Uri.EscapeDataString(flash));
-}).DisableAntiforgery();
+});
 
 // POST /profile/avatar/delete — removes the current upload (next render shows the identicon).
-app.MapPost("/profile/avatar/delete", async (HttpContext ctx, ProfilePictureService pfp) =>
+app.MapPost("/profile/avatar/delete", async (HttpContext ctx, ProfilePictureService pfp, IAntiforgery antiforgery) =>
 {
     if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile");
     var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
     if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
 
@@ -407,49 +413,14 @@ static string? ResolveOidcScheme(string provider) => provider.ToLowerInvariant()
     _ => null,
 };
 
-static bool TryReadExternalClaims(
-    AuthenticateResult ext,
-    out CredentialProvider provider,
-    out string subject,
-    out string? email,
-    out bool emailVerified)
+// Endpoints with `[FromForm]` parameters are auto-validated by UseAntiforgery() middleware;
+// route-only POSTs (link/unlink/logout/etc.) need to call this themselves. Razor `<form
+// method="post">` already injects __RequestVerificationToken via FormTagHelper, so the token
+// is always in the request body for forms rendered by our pages.
+static async ValueTask<bool> ValidateAntiforgeryAsync(HttpContext ctx, IAntiforgery antiforgery)
 {
-    provider = default;
-    subject = "";
-    email = null;
-    emailVerified = false;
-
-    var subjectClaim = ext.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-    if (string.IsNullOrEmpty(subjectClaim)) return false;
-    subject = subjectClaim;
-
-    // Items["LoginProvider"] is a dictionary indexer that throws on missing keys — the OAuth
-    // handler doesn't reliably populate it in modern ASP.NET. AuthenticationType is the durable
-    // signal ("Google" / "Microsoft" set by the remote handler when it builds the ticket).
-    string? scheme = null;
-    if (ext.Properties is { } props && props.Items.TryGetValue("LoginProvider", out var lp))
-        scheme = lp;
-    scheme ??= ext.Principal!.Identity?.AuthenticationType;
-    if (string.Equals(scheme, GoogleDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
-        provider = CredentialProvider.Google;
-    else if (string.Equals(scheme, MicrosoftAccountDefaults.AuthenticationScheme, StringComparison.OrdinalIgnoreCase))
-        provider = CredentialProvider.Microsoft;
-    else
-        return false;
-
-    var principal = ext.Principal!;
-    email = principal.FindFirstValue(ClaimTypes.Email);
-    emailVerified = provider switch
-    {
-        CredentialProvider.Google =>
-            string.Equals(principal.FindFirstValue("email_verified"), "true", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(principal.FindFirstValue("urn:google:email_verified"), "true", StringComparison.OrdinalIgnoreCase),
-        // Microsoft accounts require verified email at signup; the handler does not surface a
-        // separate email_verified claim. Treat the presence of an email as verified.
-        CredentialProvider.Microsoft => !string.IsNullOrWhiteSpace(email),
-        _ => false,
-    };
-    return true;
+    try { await antiforgery.ValidateRequestAsync(ctx); return true; }
+    catch (AntiforgeryValidationException) { return false; }
 }
 
 static ClaimsPrincipal BuildCookiePrincipal(long userId, string handle, bool isSysop)
