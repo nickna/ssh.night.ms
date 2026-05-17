@@ -16,6 +16,9 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
     public string? Email { get; set; }
     public bool IsSysop { get; set; }
     public bool HasProfilePicture { get; set; }
+    public bool HasPassword { get; set; }
+    public DateTimeOffset? PasswordUpdatedAt { get; set; }
+    public int PasswordMinLength { get; private set; }
     // Cache-bust value the avatar <img> appends as ?v=… so a fresh upload reloads instantly.
     // Ticks-from-UTC when set, "0" otherwise (identicon).
     public long AvatarVersion { get; set; }
@@ -38,6 +41,9 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
         Email = user.Email;
         IsSysop = user.IsSysop;
         HasProfilePicture = user.ProfilePictureUpdatedAt is not null;
+        HasPassword = user.PasswordHash is not null;
+        PasswordUpdatedAt = user.PasswordUpdatedAt;
+        PasswordMinLength = options.PasswordHashing.MinPasswordLength;
         AvatarVersion = user.ProfilePictureUpdatedAt?.UtcTicks ?? 0;
         Flash = flash;
         Credentials = user.Credentials
@@ -46,6 +52,7 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
                 c.Id,
                 c.Provider.ToString(),
                 ShortenSubject(c.Subject),
+                c.Label,
                 c.CreatedAt,
                 c.LastUsedAt))
             .ToList();
@@ -69,5 +76,5 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
         return $"{subject[..12]}…";
     }
 
-    public sealed record CredentialRow(long Id, string Provider, string SubjectShort, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
+    public sealed record CredentialRow(long Id, string Provider, string SubjectShort, string? Label, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
 }

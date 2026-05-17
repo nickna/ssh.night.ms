@@ -14,6 +14,15 @@ public sealed class User
     public bool IsSysop { get; set; }
     public bool IsBanned { get; set; }
 
+    // Argon2id-hashed password for SSH (and future web-form) auth. Nullable so existing
+    // key-only users keep working; null means "no password set, can only log in via a
+    // registered SSH key or an external OIDC provider". PasswordAlgo carries the full
+    // parameter string ("argon2id:m=65536,t=3,p=1") so the hasher can detect parameter
+    // drift and rehash on next successful login if NeedsRehash returns true.
+    public byte[]? PasswordHash { get; set; }
+    public string? PasswordAlgo { get; set; }
+    public DateTimeOffset? PasswordUpdatedAt { get; set; }
+
     // Public profile fields, all optional — shown by /finger and editable on the profile screen.
     public string? Bio { get; set; }
     public string? Location { get; set; }

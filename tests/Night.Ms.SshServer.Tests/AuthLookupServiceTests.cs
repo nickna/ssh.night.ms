@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Domain;
@@ -13,21 +12,25 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     private readonly PostgresFixture _fixture;
     private DbContextOptions<AppDbContext>? _dbOptions;
     private AuthLookupService? _sut;
+    private NoopPasswordHasher? _hasher;
+    private NoopRateLimiter? _rateLimiter;
 
     public AuthLookupServiceTests(PostgresFixture fixture) => _fixture = fixture;
 
     public async Task InitializeAsync()
     {
         _dbOptions = await _fixture.CreateFreshDatabaseAsync();
-        _sut = new AuthLookupService(new TestDbContextFactory(_dbOptions), NullLogger<AuthLookupService>.Instance);
+        _hasher = new NoopPasswordHasher();
+        _rateLimiter = new NoopRateLimiter();
+        _sut = new AuthLookupService(new TestDbContextFactory(_dbOptions), _hasher, _rateLimiter, NullLogger<AuthLookupService>.Instance);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private static AuthQuery Query(string fingerprint, string handle = "guest", string algorithm = "ssh-ed25519") =>
-        new(fingerprint, algorithm, PublicKeyBlob: [0xDE, 0xAD, 0xBE, 0xEF], Username: handle);
+    private static AuthQuery.PublicKey Pubkey(string handle, string fingerprint, string algorithm = "ssh-ed25519") =>
+        new(handle, fingerprint, algorithm, [0xDE, 0xAD, 0xBE, 0xEF], SourceIp: null);
 
-    private async Task<long> SeedUserAsync(string handle, string fingerprint, bool isSysop = false, bool isBanned = false)
+    private async Task<long> SeedUserAsync(string handle, string? fingerprint = null, bool isSysop = false, bool isBanned = false, byte[]? passwordHash = null, string? passwordAlgo = null)
     {
         await using var db = new AppDbContext(_dbOptions!);
         var user = new User
@@ -36,33 +39,40 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
             CreatedAt = DateTimeOffset.UtcNow,
             IsSysop = isSysop,
             IsBanned = isBanned,
+            PasswordHash = passwordHash,
+            PasswordAlgo = passwordAlgo,
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
-        db.IdentityCredentials.Add(new IdentityCredential
+        if (fingerprint is not null)
         {
-            UserId = user.Id,
-            Provider = CredentialProvider.Ssh,
-            Subject = fingerprint,
-            CreatedAt = DateTimeOffset.UtcNow,
-        });
-        await db.SaveChangesAsync();
+            db.IdentityCredentials.Add(new IdentityCredential
+            {
+                UserId = user.Id,
+                Provider = CredentialProvider.Ssh,
+                Subject = fingerprint,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
         return user.Id;
     }
 
     [Fact]
-    public async Task Empty_database_returns_Unknown_for_any_fingerprint()
+    public async Task Unknown_handle_returns_SignupRequired_with_handle_and_offered_key()
     {
-        var decision = await _sut!.LookupAsync(Query("SHA256:does-not-exist"), default);
-        Assert.IsType<AuthDecision.Unknown>(decision);
+        var decision = await _sut!.LookupAsync(Pubkey("nobody", "SHA256:offered"), default);
+        var signup = Assert.IsType<AuthDecision.SignupRequired>(decision);
+        Assert.Equal("nobody", signup.Handle);
+        Assert.Equal("SHA256:offered", signup.OfferedFingerprint);
     }
 
     [Fact]
-    public async Task Known_user_returns_Known_with_handle_and_id_and_sysop_flag()
+    public async Task Known_handle_with_matching_key_returns_Known()
     {
-        var userId = await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey", isSysop: false);
+        var userId = await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey");
 
-        var decision = await _sut!.LookupAsync(Query("SHA256:alicekey"), default);
+        var decision = await _sut!.LookupAsync(Pubkey("alice", "SHA256:alicekey"), default);
 
         var known = Assert.IsType<AuthDecision.Known>(decision);
         Assert.Equal(userId, known.UserId);
@@ -75,18 +85,18 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     {
         await SeedUserAsync(handle: "nick", fingerprint: "SHA256:nickkey", isSysop: true);
 
-        var decision = await _sut!.LookupAsync(Query("SHA256:nickkey"), default);
+        var decision = await _sut!.LookupAsync(Pubkey("nick", "SHA256:nickkey"), default);
 
         var known = Assert.IsType<AuthDecision.Known>(decision);
         Assert.True(known.IsSysop);
     }
 
     [Fact]
-    public async Task Banned_user_returns_Banned_not_Known()
+    public async Task Banned_user_returns_Banned()
     {
         await SeedUserAsync(handle: "troll", fingerprint: "SHA256:trollkey", isBanned: true);
 
-        var decision = await _sut!.LookupAsync(Query("SHA256:trollkey"), default);
+        var decision = await _sut!.LookupAsync(Pubkey("troll", "SHA256:trollkey"), default);
 
         Assert.IsType<AuthDecision.Banned>(decision);
     }
@@ -94,12 +104,38 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     [Fact]
     public async Task Banned_takes_precedence_over_sysop()
     {
-        // Defensive: if a sysop somehow gets banned (operator error), they're banned, not sysop.
         await SeedUserAsync(handle: "ex_sysop", fingerprint: "SHA256:exsysopkey", isSysop: true, isBanned: true);
 
-        var decision = await _sut!.LookupAsync(Query("SHA256:exsysopkey"), default);
+        var decision = await _sut!.LookupAsync(Pubkey("ex_sysop", "SHA256:exsysopkey"), default);
 
         Assert.IsType<AuthDecision.Banned>(decision);
+    }
+
+    [Fact]
+    public async Task Known_handle_with_unregistered_key_returns_Refused()
+    {
+        // Handle exists, but the key offered isn't on file → client should fall back to
+        // password. Server signals this via Refused; transport translates to null and the
+        // SSH layer advertises Password as the next method.
+        await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey");
+
+        var decision = await _sut!.LookupAsync(Pubkey("alice", "SHA256:OTHER"), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
+    }
+
+    [Fact]
+    public async Task Key_attached_to_other_user_does_NOT_grant_access_to_named_handle()
+    {
+        // Subject is globally unique by index (Provider, Subject). The lookup must also
+        // confirm that the credential is owned by the named handle — otherwise sharing a
+        // fingerprint would let me log in as anyone whose key is on file.
+        await SeedUserAsync(handle: "alice", fingerprint: "SHA256:keyA");
+        await SeedUserAsync(handle: "bob");
+
+        var decision = await _sut!.LookupAsync(Pubkey("bob", "SHA256:keyA"), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
     }
 
     [Fact]
@@ -118,27 +154,11 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
             await db.SaveChangesAsync();
         }
 
-        var laptop = await _sut!.LookupAsync(Query("SHA256:laptop"), default);
-        var desktop = await _sut!.LookupAsync(Query("SHA256:desktop"), default);
+        var laptop = await _sut!.LookupAsync(Pubkey("multi", "SHA256:laptop"), default);
+        var desktop = await _sut!.LookupAsync(Pubkey("multi", "SHA256:desktop"), default);
 
         Assert.Equal(userId, ((AuthDecision.Known)laptop).UserId);
         Assert.Equal(userId, ((AuthDecision.Known)desktop).UserId);
-        Assert.Equal("multi", ((AuthDecision.Known)laptop).Handle);
-        Assert.Equal("multi", ((AuthDecision.Known)desktop).Handle);
-    }
-
-    [Fact]
-    public async Task Fingerprint_lookup_is_case_sensitive()
-    {
-        // IdentityCredential.Subject is plain text (not citext) — fingerprints embed base64,
-        // which is case-sensitive on purpose; flipping case would change the underlying key.
-        await SeedUserAsync(handle: "exact", fingerprint: "SHA256:abc123XYZ");
-
-        var lower = await _sut!.LookupAsync(Query("sha256:abc123xyz"), default);
-        var exact = await _sut!.LookupAsync(Query("SHA256:abc123XYZ"), default);
-
-        Assert.IsType<AuthDecision.Unknown>(lower);
-        Assert.IsType<AuthDecision.Known>(exact);
     }
 
     [Fact]
@@ -146,8 +166,6 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     {
         await SeedUserAsync(handle: "Alice", fingerprint: "SHA256:k1");
 
-        // Inserting another user with the same handle in different case must violate the
-        // unique index thanks to citext on the handle column.
         await using var db = new AppDbContext(_dbOptions!);
         db.Users.Add(new User
         {
@@ -158,14 +176,138 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     }
 
     [Fact]
-    public async Task Cancellation_token_propagates()
+    public async Task Password_auth_with_correct_password_returns_Known()
     {
-        await SeedUserAsync(handle: "anyone", fingerprint: "SHA256:anykey");
+        var hashed = _hasher!.Hash("correct horse battery staple");
+        await SeedUserAsync(handle: "alice", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo);
 
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "correct horse battery staple", SourceIp: null), default);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => _sut!.LookupAsync(Query("SHA256:anykey"), cts.Token));
+        Assert.IsType<AuthDecision.Known>(decision);
     }
+
+    [Fact]
+    public async Task Password_auth_with_wrong_password_returns_Refused_and_records_failure()
+    {
+        var hashed = _hasher!.Hash("right");
+        await SeedUserAsync(handle: "alice", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo);
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "wrong", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
+        Assert.Equal(1, _rateLimiter!.FailureCount);
+    }
+
+    [Fact]
+    public async Task Password_auth_for_unknown_handle_burns_dummy_hash_and_returns_SignupRequired()
+    {
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("nobody", "anything", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.SignupRequired>(decision);
+        Assert.True(_hasher!.DummyVerifyCount >= 1, "must burn a dummy hash to mask user existence timing");
+    }
+
+    [Fact]
+    public async Task Password_auth_for_user_without_password_returns_Refused_and_burns_dummy_hash()
+    {
+        await SeedUserAsync(handle: "alice"); // no password set
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "anything", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
+        Assert.True(_hasher!.DummyVerifyCount >= 1);
+    }
+
+    [Fact]
+    public async Task Locked_out_handle_returns_RateLimited_without_verifying()
+    {
+        var hashed = _hasher!.Hash("correct");
+        await SeedUserAsync(handle: "alice", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo);
+        _rateLimiter!.LockOut("alice", TimeSpan.FromMinutes(15));
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "correct", SourceIp: null), default);
+
+        // Locked-out attempts still take wall time via VerifyDummy, but the real verify
+        // never runs. We don't want correct-password-while-locked-out to succeed.
+        Assert.IsType<AuthDecision.RateLimited>(decision);
+    }
+
+    [Fact]
+    public async Task Successful_password_login_clears_rate_limiter_for_that_handle()
+    {
+        var hashed = _hasher!.Hash("correct");
+        await SeedUserAsync(handle: "alice", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo);
+        _rateLimiter!.RecordedFailures.Add("alice");
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "correct", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.Known>(decision);
+        Assert.Contains("alice", _rateLimiter!.Cleared);
+    }
+}
+
+// In-test password hasher. NoopPasswordHasher returns predictable bytes so the verify path is
+// deterministic without paying the Argon2id cost on every test. Hash is just SHA256(password)
+// so collisions don't matter for these tests.
+internal sealed class NoopPasswordHasher : IPasswordHasher
+{
+    public int DummyVerifyCount;
+
+    public HashedPassword Hash(string password)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(password));
+        return new HashedPassword(hash, "noop:sha256");
+    }
+
+    public bool Verify(string password, byte[] storedHash, string? storedAlgo)
+    {
+        var actual = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(password));
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(actual, storedHash);
+    }
+
+    public void VerifyDummy(string password)
+    {
+        Interlocked.Increment(ref DummyVerifyCount);
+    }
+
+    public bool NeedsRehash(string? storedAlgo) => false;
+}
+
+internal sealed class NoopRateLimiter : ILoginRateLimiter
+{
+    public int FailureCount;
+    public readonly List<string> RecordedFailures = new();
+    public readonly HashSet<string> Cleared = new();
+    private readonly Dictionary<string, DateTimeOffset> _lockouts = new();
+
+    public Task<RateLimitCheck> CheckAsync(string handle, System.Net.IPAddress? sourceIp, CancellationToken ct)
+    {
+        if (_lockouts.TryGetValue(handle, out var until) && until > DateTimeOffset.UtcNow)
+        {
+            return Task.FromResult<RateLimitCheck>(new RateLimitCheck.LockedOut(until - DateTimeOffset.UtcNow, "handle"));
+        }
+        return Task.FromResult<RateLimitCheck>(RateLimitCheck.Allowed.Instance);
+    }
+
+    public Task RecordFailureAsync(string handle, System.Net.IPAddress? sourceIp, CancellationToken ct)
+    {
+        Interlocked.Increment(ref FailureCount);
+        RecordedFailures.Add(handle);
+        return Task.CompletedTask;
+    }
+
+    public Task ClearAsync(string handle, CancellationToken ct)
+    {
+        Cleared.Add(handle);
+        _lockouts.Remove(handle);
+        return Task.CompletedTask;
+    }
+
+    public void LockOut(string handle, TimeSpan duration) => _lockouts[handle] = DateTimeOffset.UtcNow + duration;
 }

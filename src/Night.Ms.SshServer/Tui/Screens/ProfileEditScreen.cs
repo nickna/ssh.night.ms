@@ -216,7 +216,31 @@ public sealed class ProfileEditScreen : BbsWindow
         var cancel = new Button { X = Pos.Right(save) + 2, Y = Pos.AnchorEnd(4), Text = "_Cancel" };
         cancel.Accepting += (_, e) => { e.Handled = true; _app.RequestStop(); };
 
-        Add(_realName, _location, _bio, _timeZoneList, _temperature, _clockFormat, _dateFormat, _status, save, cancel);
+        // Password + keys live in modal sub-screens — the main profile form is dense enough
+        // without inlining them. Both modals operate on a fresh DbContext from a new scope
+        // so they don't mutate the screen-scoped one and confuse a subsequent Save.
+        var pwButton = new Button { X = Pos.Right(cancel) + 4, Y = Pos.AnchorEnd(4), Text = user.PasswordHash is null ? "Set _password..." : "Change _password..." };
+        pwButton.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            using var scope = _services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Persistence.AppDbContext>();
+            var hasher = scope.ServiceProvider.GetRequiredService<Auth.IPasswordHasher>();
+            var options = scope.ServiceProvider.GetRequiredService<NightMsOptions>();
+            _app.Run(new PasswordChangeScreen(_app, _services, _user, db, hasher, options));
+            pwButton.Text = _user.PasswordHash is null ? "Set _password..." : "Change _password...";
+        };
+
+        var keysButton = new Button { X = Pos.Right(pwButton) + 2, Y = Pos.AnchorEnd(4), Text = "Manage _keys..." };
+        keysButton.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            using var scope = _services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Persistence.AppDbContext>();
+            _app.Run(new KeysManagementScreen(_app, _services, _user, db));
+        };
+
+        Add(_realName, _location, _bio, _timeZoneList, _temperature, _clockFormat, _dateFormat, _status, save, cancel, pwButton, keysButton);
         _realName.SetFocus();
 
         InstallEscapeHandler();

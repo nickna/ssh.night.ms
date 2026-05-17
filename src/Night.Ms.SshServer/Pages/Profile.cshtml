@@ -39,7 +39,71 @@
     <div class="box"><p>@Model.Flash</p></div>
 }
 
-<h2>Linked identities</h2>
+<h2>@(Model.HasPassword ? "Change password" : "Set a password")</h2>
+<p class="muted">
+    @if (Model.HasPassword)
+    {
+        <text>Last changed @(Model.PasswordUpdatedAt?.ToString("yyyy-MM-dd") ?? "—"). Used to log in over SSH (and the web) when your key isn't on hand.</text>
+    }
+    else
+    {
+        <text>Without a password, you can only log in via a registered SSH key or your linked SSO provider. Set one to use SSH password fallback.</text>
+    }
+</p>
+<form method="post" action="/profile/password" class="box">
+    @Html.AntiForgeryToken()
+    @if (Model.HasPassword)
+    {
+        <p>Current password: <input type="password" name="current" required /></p>
+    }
+    <p>New password (min @Model.PasswordMinLength chars): <input type="password" name="next" required minlength="@Model.PasswordMinLength" /></p>
+    <p>Confirm new password: <input type="password" name="confirm" required /></p>
+    <button class="btn" type="submit">@(Model.HasPassword ? "Change password" : "Set password")</button>
+</form>
+
+<h2>SSH keys</h2>
+<table>
+    <thead>
+        <tr>
+            <th>label</th>
+            <th>fingerprint</th>
+            <th>added</th>
+            <th>last used</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var c in Model.Credentials.Where(c => c.Provider == "Ssh"))
+        {
+            <tr>
+                <td>@(string.IsNullOrEmpty(c.Label) ? "—" : c.Label)</td>
+                <td><code>@c.SubjectShort</code></td>
+                <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
+                <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
+                <td>
+                    <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn danger">remove</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        @if (!Model.Credentials.Any(c => c.Provider == "Ssh"))
+        {
+            <tr><td colspan="5" class="muted">No SSH keys yet — paste one below to enable key-based SSH login.</td></tr>
+        }
+    </tbody>
+</table>
+
+<form method="post" action="/profile/ssh-key" class="box">
+    @Html.AntiForgeryToken()
+    <p>Paste a single OpenSSH public key (the contents of <code>~/.ssh/id_ed25519.pub</code> on your machine).</p>
+    <p><textarea name="publicKey" rows="3" cols="80" required placeholder="ssh-ed25519 AAAA..."></textarea></p>
+    <p>Optional label: <input type="text" name="label" maxlength="80" placeholder="e.g. laptop" /></p>
+    <button class="btn" type="submit">Add SSH key</button>
+</form>
+
+<h2>Linked SSO identities</h2>
 <table>
     <thead>
         <tr>
@@ -51,7 +115,7 @@
         </tr>
     </thead>
     <tbody>
-        @foreach (var c in Model.Credentials)
+        @foreach (var c in Model.Credentials.Where(c => c.Provider != "Ssh"))
         {
             <tr>
                 <td>@c.Provider</td>
@@ -59,24 +123,17 @@
                 <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
                 <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
                 <td>
-                    @if (Model.Credentials.Count > 1)
-                    {
-                        <form method="post" action="/profile/unlink/@c.Id" class="inline">
-                            @Html.AntiForgeryToken()
-                            <button type="submit" class="btn danger">unlink</button>
-                        </form>
-                    }
-                    else
-                    {
-                        <span class="muted">last one</span>
-                    }
+                    <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn danger">unlink</button>
+                    </form>
                 </td>
             </tr>
         }
     </tbody>
 </table>
 
-<h2>Add another</h2>
+<h2>Add another SSO provider</h2>
 <div class="actions">
     @if (Model.CanLinkGoogle)
     {
@@ -88,10 +145,6 @@
     }
     @if (!Model.CanLinkGoogle && !Model.CanLinkMicrosoft)
     {
-        <p class="muted">No more providers to link.</p>
+        <p class="muted">No more SSO providers available to link.</p>
     }
 </div>
-<p class="muted">
-    To add another SSH key, connect from a machine where that key is set up; the BBS will
-    treat it as a TOFU registration. SSH-key self-service from the web is on the roadmap.
-</p>

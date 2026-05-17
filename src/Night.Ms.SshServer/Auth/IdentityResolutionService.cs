@@ -248,8 +248,15 @@ public sealed class IdentityResolutionService(AppDbContext db)
             .FirstOrDefaultAsync(c => c.Id == credentialId && c.UserId == currentUserId, cancellationToken);
         if (credential is null) return new UnlinkOutcome.NotFound();
 
-        var remaining = await db.IdentityCredentials.CountAsync(c => c.UserId == currentUserId, cancellationToken);
-        if (remaining <= 1)
+        // Count both kinds of "way to log in": registered credentials (SSH key / OIDC) AND
+        // a password if one is set. The user must retain at least one way to authenticate
+        // after the removal — otherwise we'd lock them out of their own account. Without
+        // the password check, a password-only user (no OIDC, only-SSH-key-then-removed)
+        // could un-knot themselves and have no way back in.
+        var remainingCredentials = await db.IdentityCredentials.CountAsync(c => c.UserId == currentUserId, cancellationToken);
+        var hasPassword = await db.Users.AnyAsync(u => u.Id == currentUserId && u.PasswordHash != null, cancellationToken);
+        var remainingAuthMethods = (remainingCredentials - 1) + (hasPassword ? 1 : 0);
+        if (remainingAuthMethods < 1)
         {
             return new UnlinkOutcome.RefusedLastCredential();
         }

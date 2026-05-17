@@ -78,24 +78,25 @@ internal static class BbsSessionRunner
 
                 var art = scope.ServiceProvider.GetRequiredService<ArtProvider>();
 
-                if (session.AuthDecision is AuthDecision.Unknown)
+                if (session.AuthDecision is AuthDecision.SignupRequired signup)
                 {
-                    // RegisterScreen needs the SSH-specific credential inputs (algorithm,
-                    // fingerprint, public-key blob). Only the SSH transport surfaces those,
-                    // so the runner branches via the adapter. Web sessions are gated to
-                    // Authorize at /ws/bbs and synthesize AuthDecision.Known — they never
-                    // hit this path. If they ever do, fail loudly rather than render the
-                    // wrong screen with empty credentials.
+                    // SSH-side signup: SSH transport handed us a SignupRequired with the
+                    // requested handle prefilled. The offered key (if any) lives on the
+                    // BbsSession's Offered* fields — exposed via the SshSessionAdapter.
+                    // Web sessions are gated to Authorize at /ws/bbs and synthesize
+                    // AuthDecision.Known — they never hit this path. If they ever do, fail
+                    // loudly rather than render the wrong screen with empty credentials.
                     if (session is not SshSessionAdapter ssh)
                     {
-                        logger.LogError("AuthDecision.Unknown reached a non-SSH session ({Session}); refusing to register.", session.DisplayName);
+                        logger.LogError("AuthDecision.SignupRequired reached a non-SSH session ({Session}); refusing to register.", session.DisplayName);
                         return;
                     }
-                    var inputs = ssh.CredentialInputs;
                     var sysopBootstrap = scope.ServiceProvider.GetRequiredService<Auth.SysopBootstrap>();
+                    var passwordHasher = scope.ServiceProvider.GetRequiredService<Auth.IPasswordHasher>();
+                    var nightMsOptions = scope.ServiceProvider.GetRequiredService<Configuration.NightMsOptions>();
                     var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider,
-                        inputs.KeyAlgorithm, inputs.Fingerprint, inputs.PublicKeyBlob,
-                        db, sysopBootstrap, art));
+                        signup, ssh.Inner.OfferedFingerprint, ssh.Inner.OfferedAlgorithm, ssh.Inner.OfferedBlob,
+                        db, sysopBootstrap, passwordHasher, nightMsOptions, art));
                     if (registerResult is User registered)
                     {
                         user = registered;
@@ -115,6 +116,16 @@ internal static class BbsSessionRunner
                     return;
                 }
 
+                // Adopt-key prompt: if the user logged in via password (or signed up) and
+                // their session carried an SSH key the account doesn't yet know about, ask
+                // before dropping them into the lobby. Skip if just-registered with adoption
+                // already done in RegisterScreen, if the key isn't actually unknown to this
+                // user, or if they previously chose "Never for this key".
+                if (!justRegistered && session is SshSessionAdapter adopter)
+                {
+                    MaybeRunKeyAdoptionPrompt(services, app, user, adopter, db, logger);
+                }
+
                 RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, art, session);
             }
             catch (Exception ex)
@@ -122,6 +133,39 @@ internal static class BbsSessionRunner
                 logger.LogError(ex, "Terminal.Gui session crashed for session={Session}", session.DisplayName);
             }
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Synchronous wrapper around the adopt-key flow. Runs on the Terminal.Gui UI thread —
+    // db queries here block, but they're small and uncontended at session-start time.
+    private static void MaybeRunKeyAdoptionPrompt(IServiceProvider services, IApplication app, User user, SshSessionAdapter adapter, AppDbContext db, ILogger logger)
+    {
+        var fingerprint = adapter.Inner.OfferedFingerprint;
+        var algorithm = adapter.Inner.OfferedAlgorithm;
+        var blob = adapter.Inner.OfferedBlob;
+        if (string.IsNullOrEmpty(fingerprint) || string.IsNullOrEmpty(algorithm) || blob is null || blob.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var alreadyOnAccount = db.IdentityCredentials.Any(c =>
+                c.UserId == user.Id && c.Provider == CredentialProvider.Ssh && c.Subject == fingerprint);
+            if (alreadyOnAccount) return;
+
+            var dismissals = services.GetRequiredService<Auth.IDismissedKeyStore>();
+            // Dismissals stored in Redis — synchronous wait here is intentional. Block size
+            // is one tiny key roundtrip; the UI thread is already idle at lobby entry.
+            if (dismissals.IsDismissedAsync(user.Id, fingerprint, default).GetAwaiter().GetResult()) return;
+
+            var prompt = new KeyAdoptionPrompt(app, services, user, fingerprint, algorithm, blob, db, dismissals);
+            app.Run(prompt);
+        }
+        catch (Exception ex)
+        {
+            // Adoption is a nice-to-have, never block login on its failure.
+            logger.LogWarning(ex, "Adopt-key prompt failed for user={Handle}", user.Handle);
+        }
     }
 
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, ITuiSession session)

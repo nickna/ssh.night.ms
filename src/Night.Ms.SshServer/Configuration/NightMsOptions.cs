@@ -44,6 +44,16 @@ public sealed class NightMsOptions
     public string? SshHost { get; init; }
     public int? SshPortPublic { get; init; }
 
+    // Plaintext password set on first run for the sysop handle. Hashed once via
+    // IPasswordHasher.Hash on boot in SysopBootstrap; never re-applied if the user already
+    // has a password_hash so an admin who changed their password via UI isn't reset on
+    // container restart.
+    public string? BootstrapSysopPassword { get; init; }
+
+    public PasswordHashingOptions PasswordHashing { get; init; } = new();
+    public LoginLockoutOptions Lockout { get; init; } = new();
+    public KeyAdoptionOptions KeyAdoption { get; init; } = new();
+
     public bool IsGoogleConfigured =>
         !string.IsNullOrWhiteSpace(GoogleClientId) && !string.IsNullOrWhiteSpace(GoogleClientSecret);
     public bool IsMicrosoftConfigured =>
@@ -70,6 +80,10 @@ public sealed class NightMsOptions
         WebBaseUrl           = First(cfg, "NIGHTMS_WEB_BASE_URL", "WebBaseUrl"),
         SshHost              = First(cfg, "NIGHTMS_SSH_HOST", "SshHost"),
         SshPortPublic        = ParseInt(cfg["NIGHTMS_SSH_PORT_PUBLIC"]),
+        BootstrapSysopPassword = NullIfEmpty(cfg["NIGHTMS_BOOTSTRAP_SYSOP_PASSWORD"]),
+        PasswordHashing      = PasswordHashingOptions.FromConfiguration(cfg),
+        Lockout              = LoginLockoutOptions.FromConfiguration(cfg),
+        KeyAdoption          = KeyAdoptionOptions.FromConfiguration(cfg),
     };
 
     private static string? First(IConfiguration cfg, params string[] keys)
@@ -92,4 +106,63 @@ public sealed class NightMsOptions
     private static int? ParseInt(string? s) => int.TryParse(s, out var v) ? v : null;
     private static double? ParseDouble(string? s) =>
         double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
+    internal static int ParseIntOr(string? s, int fallback) => int.TryParse(s, out var v) ? v : fallback;
+}
+
+// Argon2id parameters. Defaults follow OWASP 2024 guidance for interactive logins: 64 MiB
+// memory, 3 iterations, 1 lane. Bump MemoryKb / Iterations for slower-but-stronger hashing if
+// you run on beefier hardware. The verify path keeps a precomputed throwaway hash with these
+// same params so unknown-user verifies are timing-equivalent to real verifies.
+public sealed class PasswordHashingOptions
+{
+    public int MemoryKb { get; init; } = 65536;        // 64 MiB
+    public int Iterations { get; init; } = 3;
+    public int Parallelism { get; init; } = 1;
+    public int SaltBytes { get; init; } = 16;
+    public int HashBytes { get; init; } = 32;
+    public int MinPasswordLength { get; init; } = 10;
+
+    public static PasswordHashingOptions FromConfiguration(IConfiguration cfg) => new()
+    {
+        MemoryKb = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ARGON2_MEM_KB"], 65536),
+        Iterations = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ARGON2_ITERATIONS"], 3),
+        Parallelism = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ARGON2_PARALLELISM"], 1),
+        SaltBytes = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ARGON2_SALT_BYTES"], 16),
+        HashBytes = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ARGON2_HASH_BYTES"], 32),
+        MinPasswordLength = NightMsOptions.ParseIntOr(cfg["NIGHTMS_PASSWORD_MIN_LENGTH"], 10),
+    };
+}
+
+// Sliding-window lockout for SSH password auth. Failures are counted in Redis with a TTL
+// equal to WindowSeconds; reaching FailureThreshold within the window sets a lockout key
+// with TTL = LockoutSeconds. Counted per-handle AND per-source-IP separately — the IP
+// thresholds are deliberately higher so a shared NAT doesn't lock out an entire household
+// after one user mistypes a password.
+public sealed class LoginLockoutOptions
+{
+    public int HandleFailureThreshold { get; init; } = 5;
+    public int IpFailureThreshold { get; init; } = 20;
+    public int WindowSeconds { get; init; } = 900;     // 15 min
+    public int LockoutSeconds { get; init; } = 900;    // 15 min
+
+    public static LoginLockoutOptions FromConfiguration(IConfiguration cfg) => new()
+    {
+        HandleFailureThreshold = NightMsOptions.ParseIntOr(cfg["NIGHTMS_LOCKOUT_HANDLE_THRESHOLD"], 5),
+        IpFailureThreshold = NightMsOptions.ParseIntOr(cfg["NIGHTMS_LOCKOUT_IP_THRESHOLD"], 20),
+        WindowSeconds = NightMsOptions.ParseIntOr(cfg["NIGHTMS_LOCKOUT_WINDOW_SECONDS"], 900),
+        LockoutSeconds = NightMsOptions.ParseIntOr(cfg["NIGHTMS_LOCKOUT_SECONDS"], 900),
+    };
+}
+
+// How long a user's "Never for this key" dismissal of the adopt-key prompt sticks. Lives in
+// Redis under dismissed:{userId}:{fingerprint}. Default 90 days — long enough not to be
+// annoying, short enough that a user who deliberately rotates keys gets re-prompted.
+public sealed class KeyAdoptionOptions
+{
+    public int DismissalTtlDays { get; init; } = 90;
+
+    public static KeyAdoptionOptions FromConfiguration(IConfiguration cfg) => new()
+    {
+        DismissalTtlDays = NightMsOptions.ParseIntOr(cfg["NIGHTMS_ADOPT_KEY_DISMISS_DAYS"], 90),
+    };
 }

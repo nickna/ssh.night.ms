@@ -141,6 +141,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("redis")
         ?? throw new InvalidOperationException("ConnectionStrings:redis is not configured.")));
 
+builder.Services.AddSingleton<IPasswordHasher, Argon2idPasswordHasher>();
+builder.Services.AddSingleton<ILoginRateLimiter, RedisLoginRateLimiter>();
+builder.Services.AddSingleton<IDismissedKeyStore, RedisDismissedKeyStore>();
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<SystemMetricsCollector>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
@@ -329,6 +332,118 @@ app.MapGet("/profile/link-complete", async (HttpContext ctx, IdentityResolutionS
         _ => null,
     };
     return Results.Redirect($"/profile{(flash is null ? "" : $"?flash={Uri.EscapeDataString(flash)}")}");
+});
+
+// POST /profile/password — set or change the user's password. Required for SSH password
+// auth and lets web-only users (Google/Microsoft) gain SSH access without first having to
+// upload a key. Verifies current password if one is set.
+app.MapPost("/profile/password", async (HttpContext ctx, AppDbContext db, IPasswordHasher hasher, NightMsOptions nightMsOptions, IAntiforgery antiforgery, [FromForm] string? current, [FromForm] string? next, [FromForm] string? confirm) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile");
+    var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
+
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+    if (user is null) return Results.Redirect("/login");
+
+    next ??= string.Empty;
+    confirm ??= string.Empty;
+
+    var minLen = nightMsOptions.PasswordHashing.MinPasswordLength;
+    if (next.Length < minLen)
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString($"Password must be at least {minLen} characters."));
+    }
+    if (next != confirm)
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Passwords don't match."));
+    }
+    if (user.PasswordHash is not null && user.PasswordAlgo is not null)
+    {
+        if (string.IsNullOrEmpty(current) || !hasher.Verify(current, user.PasswordHash, user.PasswordAlgo))
+        {
+            return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Current password is incorrect."));
+        }
+    }
+
+    var hashed = hasher.Hash(next);
+    user.PasswordHash = hashed.Hash;
+    user.PasswordAlgo = hashed.Algo;
+    user.PasswordUpdatedAt = DateTimeOffset.UtcNow;
+    db.AuditLogs.Add(new AuditLog
+    {
+        ActorId = userId,
+        Action = "password.changed",
+        TargetType = "user",
+        TargetId = userId,
+        CreatedAt = DateTimeOffset.UtcNow,
+    });
+    await db.SaveChangesAsync(ctx.RequestAborted);
+    return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Password updated."));
+});
+
+// POST /profile/ssh-key — paste an OpenSSH-format public key, parse it, refuse if already
+// attached to another user, and write a new IdentityCredential row owned by the caller.
+app.MapPost("/profile/ssh-key", async (HttpContext ctx, AppDbContext db, IAntiforgery antiforgery, [FromForm] string? publicKey, [FromForm] string? label) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile");
+    var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
+
+    if (string.IsNullOrWhiteSpace(publicKey))
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Paste an SSH public key."));
+    }
+    if (!OpenSshPublicKeyParser.TryParse(publicKey, out var parsed))
+    {
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Couldn't parse that — paste the contents of an ssh-ed25519 or ssh-rsa .pub file."));
+    }
+
+    // (Provider, Subject) is globally unique — refuse if the key is already attached to
+    // anyone, including the caller. The friendly error wins over a raw DbUpdateException.
+    var existing = await db.IdentityCredentials
+        .FirstOrDefaultAsync(c => c.Provider == CredentialProvider.Ssh && c.Subject == parsed.Fingerprint, ctx.RequestAborted);
+    if (existing is not null)
+    {
+        var msg = existing.UserId == userId ? "Key is already on your account." : "Key is already attached to a different account.";
+        return Results.Redirect("/profile?flash=" + Uri.EscapeDataString(msg));
+    }
+
+    var metadata = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        algorithm = parsed.Algorithm,
+        blob_b64 = Convert.ToBase64String(parsed.Blob),
+        comment = parsed.Comment,
+    });
+    var resolvedLabel = string.IsNullOrWhiteSpace(label)
+        ? (string.IsNullOrWhiteSpace(parsed.Comment) ? $"added {DateTimeOffset.UtcNow:yyyy-MM-dd}" : parsed.Comment.Trim())
+        : label.Trim();
+    db.IdentityCredentials.Add(new IdentityCredential
+    {
+        UserId = userId,
+        Provider = CredentialProvider.Ssh,
+        Subject = parsed.Fingerprint,
+        Metadata = metadata,
+        Label = resolvedLabel,
+        CreatedAt = DateTimeOffset.UtcNow,
+    });
+    db.AuditLogs.Add(new AuditLog
+    {
+        ActorId = userId,
+        Action = "identity.linked",
+        TargetType = "identity_credential",
+        CreatedAt = DateTimeOffset.UtcNow,
+        Details = System.Text.Json.JsonSerializer.SerializeToDocument(new
+        {
+            provider = "Ssh",
+            via = "web-paste",
+            fingerprint = parsed.Fingerprint,
+        }),
+    });
+    await db.SaveChangesAsync(ctx.RequestAborted);
+    return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("SSH key added."));
 });
 
 // POST /profile/unlink/{credentialId} — refuses if it's the user's last credential.

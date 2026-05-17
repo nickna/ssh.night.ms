@@ -10,7 +10,7 @@ public class AuthDecisionTests
         var matched = decision switch
         {
             AuthDecision.Known k => $"known:{k.Handle}:{k.UserId}:{k.IsSysop}",
-            AuthDecision.Unknown => "unknown",
+            AuthDecision.SignupRequired s => $"signup:{s.Handle}",
             AuthDecision.Banned b => $"banned:{b.Reason}",
             _ => "other",
         };
@@ -19,9 +19,14 @@ public class AuthDecisionTests
     }
 
     [Fact]
-    public void Unknown_singleton_is_reference_equal()
+    public void SignupRequired_carries_handle_and_optional_offered_key()
     {
-        Assert.Same(AuthDecision.Unknown.Instance, AuthDecision.Unknown.Instance);
+        AuthDecision decision = new AuthDecision.SignupRequired("alice", "SHA256:abc", "ssh-ed25519", [1, 2, 3]);
+
+        var signup = Assert.IsType<AuthDecision.SignupRequired>(decision);
+        Assert.Equal("alice", signup.Handle);
+        Assert.Equal("SHA256:abc", signup.OfferedFingerprint);
+        Assert.NotNull(signup.OfferedBlob);
     }
 
     [Fact]
@@ -44,5 +49,6 @@ public class AuthDecisionTests
         Assert.Equal(new AuthDecision.Known(1, "nick", true), new AuthDecision.Known(1, "nick", true));
         Assert.NotEqual(new AuthDecision.Known(1, "nick", true), new AuthDecision.Known(1, "nick", false));
         Assert.Equal(new AuthDecision.Banned("x"), new AuthDecision.Banned("x"));
+        Assert.Equal(new AuthDecision.SignupRequired("nick"), new AuthDecision.SignupRequired("nick"));
     }
 }

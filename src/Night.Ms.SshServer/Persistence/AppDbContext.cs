@@ -35,6 +35,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(u => u.LocationCanonical).HasMaxLength(160);
             b.Property(u => u.LocationSource).HasDefaultValue(LocationSource.None);
             b.Property(u => u.RealName).HasMaxLength(64);
+            b.Property(u => u.PasswordAlgo).HasMaxLength(64);
             b.Property(u => u.TimeZoneId).HasMaxLength(64).HasDefaultValue("UTC");
             b.Property(u => u.TemperatureUnit).HasDefaultValue(TemperatureUnit.Celsius);
             b.Property(u => u.ClockFormat).HasDefaultValue(ClockFormat.Hours24);
