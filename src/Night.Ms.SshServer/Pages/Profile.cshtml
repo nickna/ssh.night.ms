@@ -176,6 +176,29 @@
             after a successful password login. Use the &ldquo;Add SSH key&rdquo; box on the
             Profile tab to register keys explicitly.
         </p>
+        <p>
+            <label>
+                <input type="checkbox" name="requireKey" value="true"
+                       @(Model.RequireSshKey ? "checked" : "")
+                       @(Model.SshKeyCount == 0 && !Model.RequireSshKey ? "disabled" : "") />
+                Require SSH key for login (disable password)
+            </label>
+        </p>
+        <p class="muted">
+            When on, password login is refused and only keys registered to your account can log in.
+            @if (Model.SshKeyCount == 0)
+            {
+                <strong>Add an SSH key on the Profile tab first — this toggle is disabled until you do.</strong>
+            }
+            else if (Model.SshKeyCount == 1)
+            {
+                <strong>You only have one key on file.</strong> <text>If you lose it, only a sysop can restore your account.</text>
+            }
+            else
+            {
+                <text>If you lose every key on file, only a sysop can restore your account.</text>
+            }
+        </p>
         <button class="btn" type="submit">Save settings</button>
     </form>
 </section>

@@ -54,6 +54,13 @@ public sealed class User
     // per-key dismissal store — this is the "stop asking me, for any key" toggle.
     public bool SuppressKeyAdoptionPrompts { get; set; }
 
+    // When true, password auth is refused and only public keys registered to THIS user can
+    // authenticate. ProfileEditScreen / Pages/Profile.cshtml refuse to flip this on without
+    // at least one registered SSH key; KeysManagementScreen extends its anti-orphan guard to
+    // block deletion of the last key while this is on. Recovery (when the user has lost all
+    // keys) is a sysop action via AdminScreen's `clear-passwordless` verb.
+    public bool RequireSshKey { get; set; }
+
     public List<IdentityCredential> Credentials { get; set; } = [];
     public List<UserSavedLocation> SavedLocations { get; set; } = [];
     public List<UserWatchlistItem> Watchlist { get; set; } = [];

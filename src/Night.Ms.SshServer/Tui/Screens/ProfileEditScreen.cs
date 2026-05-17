@@ -35,6 +35,7 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly OptionSelector<DateFormat> _dateFormat;
     private readonly BbsStatusLine _status;
     private readonly CheckBox _suppressKeyAdoption;
+    private readonly CheckBox _requireSshKey;
     // Two tab-content groups. Adding a widget via AddProfile/AddSettings registers it for
     // visibility toggling on tab switch. Status line + tab strip live at window level so
     // both tabs share them.
@@ -305,6 +306,27 @@ public sealed class ProfileEditScreen : BbsWindow
         suppressHint.SetScheme(BbsTheme.Faint_);
         AddSettings(suppressHint);
 
+        _requireSshKey = new CheckBox
+        {
+            X = 2,
+            Y = 8,
+            Text = "Require SSH key for login (disable password)",
+            Value = user.RequireSshKey ? CheckState.Checked : CheckState.UnChecked,
+        };
+        AddSettings(_requireSshKey);
+
+        var requireHint = new Label
+        {
+            X = 4,
+            Y = 9,
+            Width = Dim.Fill(4),
+            Text = "When on, password login is refused and only keys registered to YOUR account can\n"
+                 + "log in. You must have at least one SSH key on file to enable this; if you lose\n"
+                 + "every key, only a sysop can restore access. Manage keys from the Profile tab.",
+        };
+        requireHint.SetScheme(BbsTheme.Faint_);
+        AddSettings(requireHint);
+
         var saveSettings = new Button { X = 2, Y = Pos.AnchorEnd(4), Text = "_Save settings", IsDefault = true };
         saveSettings.Accepting += (_, e) =>
         {
@@ -373,16 +395,89 @@ public sealed class ProfileEditScreen : BbsWindow
         try
         {
             var suppress = _suppressKeyAdoption.Value == CheckState.Checked;
-            if (_user.SuppressKeyAdoptionPrompts == suppress)
+            var requireKey = _requireSshKey.Value == CheckState.Checked;
+            var suppressChanged = _user.SuppressKeyAdoptionPrompts != suppress;
+            var requireKeyChanged = _user.RequireSshKey != requireKey;
+            if (!suppressChanged && !requireKeyChanged)
             {
                 _app.Invoke(() => _status.SetSuccess("No changes."));
                 return;
             }
+
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Users.Where(u => u.Id == _user.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(u => u.SuppressKeyAdoptionPrompts, suppress));
-            _user.SuppressKeyAdoptionPrompts = suppress;
+
+            // Lockout guards only apply when turning RequireSshKey ON. Turning it off is
+            // always safe; nothing here blocks the disable path.
+            if (requireKeyChanged && requireKey)
+            {
+                var keyCount = await db.IdentityCredentials
+                    .CountAsync(c => c.UserId == _user.Id && c.Provider == CredentialProvider.Ssh);
+                if (keyCount == 0)
+                {
+                    _app.Invoke(() =>
+                    {
+                        MessageBox.ErrorQuery(
+                            _app,
+                            title: "Add a key first",
+                            message:
+                                "You have no SSH keys on file. Enabling this would lock you out\n" +
+                                "immediately. Add a key from the Profile tab (Manage keys…) — or\n" +
+                                "paste a public key on the web profile — and try again.",
+                            "_OK");
+                        _requireSshKey.Value = CheckState.UnChecked;
+                        _status.SetWarning("[!] Cannot enable without at least one SSH key.");
+                    });
+                    return;
+                }
+                if (keyCount == 1)
+                {
+                    int? confirm = -1;
+                    _app.Invoke(() =>
+                    {
+                        confirm = MessageBox.Query(
+                            _app,
+                            title: "Single point of failure",
+                            message:
+                                "You only have ONE SSH key on file. If you lose access to it,\n" +
+                                "only a sysop can restore your account.\n\n" +
+                                "Enable passwordless login anyway?",
+                            "_Cancel", "_Enable");
+                    });
+                    if (confirm != 1)
+                    {
+                        _app.Invoke(() =>
+                        {
+                            _requireSshKey.Value = CheckState.UnChecked;
+                            _status.SetSuccess("Cancelled.");
+                        });
+                        return;
+                    }
+                }
+            }
+
+            if (suppressChanged)
+            {
+                await db.Users.Where(u => u.Id == _user.Id)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.SuppressKeyAdoptionPrompts, suppress));
+                _user.SuppressKeyAdoptionPrompts = suppress;
+            }
+            if (requireKeyChanged)
+            {
+                await db.Users.Where(u => u.Id == _user.Id)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.RequireSshKey, requireKey));
+                _user.RequireSshKey = requireKey;
+                db.AuditLogs.Add(new AuditLog
+                {
+                    ActorId = _user.Id,
+                    Action = requireKey ? "user.passwordless.enabled" : "user.passwordless.disabled",
+                    TargetType = "user",
+                    TargetId = _user.Id,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { via = "tui" }),
+                });
+                await db.SaveChangesAsync();
+            }
             _app.Invoke(() => _status.SetSuccess("Settings saved."));
         }
         catch (Exception ex)

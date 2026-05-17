@@ -140,6 +140,18 @@ public sealed class AuthLookupService(
             return new AuthDecision.Refused("invalid password");
         }
 
+        // RequireSshKey ("passwordless mode") rejects password auth even with a valid
+        // password. We check AFTER the verify, not before, so the wall-clock time of an
+        // attempt against a passwordless account doesn't leak the toggle state: a wrong
+        // password and a right-but-passwordless-blocked password both pay for one full
+        // Argon2id verify. Record as a failure so brute-force still tips the rate limiter.
+        if (user.RequireSshKey)
+        {
+            await rateLimiter.RecordFailureAsync(q.Handle, q.SourceIp, ct);
+            logger.LogInformation("Password verify succeeded but RequireSshKey is on for handle={Handle}; refusing", user.Handle);
+            return new AuthDecision.Refused("account requires SSH key authentication");
+        }
+
         // Successful login. Clear the handle counter; optionally rehash if algo drift.
         await rateLimiter.ClearAsync(q.Handle, ct);
         if (hasher.NeedsRehash(user.PasswordAlgo))

@@ -27,6 +27,11 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
     public bool CanLinkMicrosoft { get; private set; }
     public string? Flash { get; set; }
     public bool SuppressKeyAdoptionPrompts { get; private set; }
+    public bool RequireSshKey { get; private set; }
+    // Drives the lockout guard in the Settings form: when zero, the checkbox is rendered
+    // disabled with an explanatory hint so the user can't post a state that the server would
+    // reject anyway. Counts only Ssh-provider credentials — SSO links don't count.
+    public int SshKeyCount { get; private set; }
     // Allow-listed: "profile" or "settings". Drives initial tab highlight + which pane is
     // visible without JS via the :target CSS fallback.
     public string ActiveTab { get; private set; } = "profile";
@@ -51,6 +56,8 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
         AvatarVersion = user.ProfilePictureUpdatedAt?.UtcTicks ?? 0;
         Flash = flash;
         SuppressKeyAdoptionPrompts = user.SuppressKeyAdoptionPrompts;
+        RequireSshKey = user.RequireSshKey;
+        SshKeyCount = user.Credentials.Count(c => c.Provider == CredentialProvider.Ssh);
         if (string.Equals(tab, "settings", StringComparison.OrdinalIgnoreCase)) ActiveTab = "settings";
         Credentials = user.Credentials
             .OrderBy(c => c.Provider).ThenBy(c => c.CreatedAt)

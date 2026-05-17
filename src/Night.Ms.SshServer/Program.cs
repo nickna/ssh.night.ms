@@ -384,9 +384,10 @@ app.MapPost("/profile/password", async (HttpContext ctx, AppDbContext db, IPassw
 });
 
 // POST /profile/settings — toggle user preferences that aren't tied to a separate domain
-// surface. Currently only the global "stop asking me to adopt SSH keys" flag; future toggles
-// land here next to it.
-app.MapPost("/profile/settings", async (HttpContext ctx, AppDbContext db, IAntiforgery antiforgery, [FromForm] string? suppress) =>
+// surface. Houses the "stop asking me to adopt SSH keys" flag and the "require SSH key for
+// login" (passwordless) flag. The passwordless toggle is server-side guarded: it refuses to
+// flip on when the user has zero SSH keys, mirroring the TUI guard in ProfileEditScreen.
+app.MapPost("/profile/settings", async (HttpContext ctx, AppDbContext db, IAntiforgery antiforgery, [FromForm] string? suppress, [FromForm] string? requireKey) =>
 {
     if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
     if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile?tab=settings");
@@ -398,10 +399,13 @@ app.MapPost("/profile/settings", async (HttpContext ctx, AppDbContext db, IAntif
 
     // Unchecked checkboxes don't submit a value at all — absence == false. Treat any
     // non-"true" value as false so the form's hidden-checkbox semantics work either way.
-    var requested = string.Equals(suppress, "true", StringComparison.OrdinalIgnoreCase);
-    if (user.SuppressKeyAdoptionPrompts != requested)
+    var requestedSuppress = string.Equals(suppress, "true", StringComparison.OrdinalIgnoreCase);
+    var requestedRequireKey = string.Equals(requireKey, "true", StringComparison.OrdinalIgnoreCase);
+
+    var changed = false;
+    if (user.SuppressKeyAdoptionPrompts != requestedSuppress)
     {
-        user.SuppressKeyAdoptionPrompts = requested;
+        user.SuppressKeyAdoptionPrompts = requestedSuppress;
         db.AuditLogs.Add(new AuditLog
         {
             ActorId = userId,
@@ -409,8 +413,41 @@ app.MapPost("/profile/settings", async (HttpContext ctx, AppDbContext db, IAntif
             TargetType = "user",
             TargetId = userId,
             CreatedAt = DateTimeOffset.UtcNow,
-            Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { suppress = requested }),
+            Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { suppress = requestedSuppress }),
         });
+        changed = true;
+    }
+
+    if (user.RequireSshKey != requestedRequireKey)
+    {
+        if (requestedRequireKey)
+        {
+            // Lockout guard: refuse to enable without ≥1 SSH key on file. Mirrors the TUI
+            // pre-save check in ProfileEditScreen.SaveSettingsAsync. The web has no modal so
+            // a flash message is the only feedback channel.
+            var keyCount = await db.IdentityCredentials
+                .CountAsync(c => c.UserId == userId && c.Provider == CredentialProvider.Ssh, ctx.RequestAborted);
+            if (keyCount == 0)
+            {
+                return Results.Redirect("/profile?tab=settings&flash=" + Uri.EscapeDataString(
+                    "Add an SSH key first — enabling passwordless mode without one would lock you out."));
+            }
+        }
+        user.RequireSshKey = requestedRequireKey;
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = userId,
+            Action = requestedRequireKey ? "user.passwordless.enabled" : "user.passwordless.disabled",
+            TargetType = "user",
+            TargetId = userId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { via = "web" }),
+        });
+        changed = true;
+    }
+
+    if (changed)
+    {
         await db.SaveChangesAsync(ctx.RequestAborted);
     }
     return Results.Redirect("/profile?tab=settings&flash=" + Uri.EscapeDataString("Settings updated."));

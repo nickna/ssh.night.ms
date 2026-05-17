@@ -89,7 +89,7 @@ public sealed class AdminScreen : BbsWindow
             X = 0,
             Y = Pos.AnchorEnd(3),
             Width = Dim.Fill(),
-            Text = "Commands: ban | unban | sysop | unsysop <handle> | wall <msg> | refresh",
+            Text = "Commands: ban | unban | sysop | unsysop | clear-passwordless <handle> | wall <msg> | refresh",
         };
 
         _command = new TextField
@@ -168,7 +168,7 @@ public sealed class AdminScreen : BbsWindow
             {
                 case "help":
                 case "?":
-                    SetStatus("ban | unban | sysop | unsysop <handle> | wall <msg> | refresh");
+                    SetStatus("ban | unban | sysop | unsysop | clear-passwordless <handle> | wall <msg> | refresh");
                     return;
                 case "refresh":
                     await LoadAsync();
@@ -185,6 +185,9 @@ public sealed class AdminScreen : BbsWindow
                     return;
                 case "unsysop":
                     await TogglePropertyAsync(target, isBan: false, expectedAfter: false);
+                    return;
+                case "clear-passwordless":
+                    await ClearPasswordlessAsync(target);
                     return;
                 case "wall":
                     await WallAsync(target);
@@ -244,6 +247,45 @@ public sealed class AdminScreen : BbsWindow
         });
         await db.SaveChangesAsync();
         SetStatus($"{action} {target.Handle}");
+        await LoadAsync();
+    }
+
+    // Recovery hatch for users who locked themselves out by enabling RequireSshKey and then
+    // losing every key on file. Idempotent — clearing an already-off flag still logs an audit
+    // row so the action is visible in the trail.
+    private async Task ClearPasswordlessAsync(string? handle)
+    {
+        if (string.IsNullOrEmpty(handle))
+        {
+            SetStatus("[!] clear-passwordless requires a handle.");
+            return;
+        }
+
+        await using var scope = _services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var target = await db.Users.FirstOrDefaultAsync(u => u.Handle == handle);
+        if (target is null)
+        {
+            SetStatus($"[!] No such user: '{handle}'.");
+            return;
+        }
+        if (!target.RequireSshKey)
+        {
+            SetStatus($"[!] {target.Handle} doesn't have passwordless mode enabled.");
+            return;
+        }
+
+        target.RequireSshKey = false;
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = _actor.Id,
+            Action = "user.passwordless.reset_by_sysop",
+            TargetType = "user",
+            TargetId = target.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        SetStatus($"clear-passwordless {target.Handle}");
         await LoadAsync();
     }
 

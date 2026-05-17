@@ -136,7 +136,7 @@ public sealed class BbsSshServer : IAsyncDisposable
                 var algorithm = e.PublicKey.KeyAlgorithmName;
                 var blob = e.PublicKey.GetPublicKeyBytes().ToArray();
                 var query = new AuthQuery.PublicKeyQuery(handle, fingerprint, algorithm, blob, sourceIp);
-                e.AuthenticationTask = HandlePublicKeyQueryAsync(query, e.Cancellation);
+                e.AuthenticationTask = HandlePublicKeyQueryAsync(query, session, e.Cancellation);
                 break;
             }
 
@@ -182,7 +182,15 @@ public sealed class BbsSshServer : IAsyncDisposable
     // (or to the next auth method). SignupRequired is also acceptable at this phase — it
     // means "we'd let this key in as part of signup", which the client treats the same as
     // "yes, sign and we'll verify."
-    private async Task<ClaimsPrincipal?> HandlePublicKeyQueryAsync(AuthQuery.PublicKeyQuery query, CancellationToken ct)
+    //
+    // On rejection we stash the offered key into _pendingAuth so a later password fallback
+    // on the same session can surface the adopt-key prompt. OpenSSH typically ENDS the
+    // attempt for a key when the server says no at this phase — it never sends the signed
+    // PublicKey message — so without this stash, an unknown key + password-fallback login
+    // would discard the offered key entirely. RejectRefused on the signed path covers the
+    // "client sent a signature anyway" case; this covers the standard query-then-give-up.
+    // Multiple keys: the last one offered wins, which matches the client's iteration order.
+    private async Task<ClaimsPrincipal?> HandlePublicKeyQueryAsync(AuthQuery.PublicKeyQuery query, SshSession? session, CancellationToken ct)
     {
         AuthDecision decision;
         try { decision = await _options.AuthLookup(query, ct).ConfigureAwait(false); }
@@ -195,8 +203,25 @@ public sealed class BbsSshServer : IAsyncDisposable
         return decision switch
         {
             AuthDecision.Known or AuthDecision.SignupRequired => new ClaimsPrincipal(new ClaimsIdentity()),
-            _ => null,
+            _ => RememberOfferedKey(session, query.Fingerprint, query.Algorithm, query.Blob),
         };
+    }
+
+    // Returns null (the rejection signal for the query phase) after preserving the offered
+    // key on the session. Safe to call when fingerprint is empty — the no-op early return
+    // keeps the existing _pendingAuth row intact if one already exists.
+    private ClaimsPrincipal? RememberOfferedKey(SshSession? session, string fingerprint, string algorithm, byte[] blob)
+    {
+        if (session is null || string.IsNullOrEmpty(fingerprint) || blob.Length == 0) return null;
+        _pendingAuth[session] = new PendingAuth(
+            Decision: new AuthDecision.Refused("publickey-query: not registered"),
+            Fingerprint: "",
+            KeyAlgorithm: "",
+            PublicKeyBlob: [],
+            OfferedFingerprint: fingerprint,
+            OfferedAlgorithm: algorithm,
+            OfferedBlob: blob);
+        return null;
     }
 
     private async Task<ClaimsPrincipal?> HandlePublicKeyAsync(AuthQuery.PublicKey query, SshSession? session, CancellationToken ct)

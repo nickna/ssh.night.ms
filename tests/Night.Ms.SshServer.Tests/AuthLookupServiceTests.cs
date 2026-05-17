@@ -30,7 +30,7 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
     private static AuthQuery.PublicKey Pubkey(string handle, string fingerprint, string algorithm = "ssh-ed25519") =>
         new(handle, fingerprint, algorithm, [0xDE, 0xAD, 0xBE, 0xEF], SourceIp: null);
 
-    private async Task<long> SeedUserAsync(string handle, string? fingerprint = null, bool isSysop = false, bool isBanned = false, byte[]? passwordHash = null, string? passwordAlgo = null)
+    private async Task<long> SeedUserAsync(string handle, string? fingerprint = null, bool isSysop = false, bool isBanned = false, byte[]? passwordHash = null, string? passwordAlgo = null, bool requireSshKey = false)
     {
         await using var db = new AppDbContext(_dbOptions!);
         var user = new User
@@ -41,6 +41,7 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
             IsBanned = isBanned,
             PasswordHash = passwordHash,
             PasswordAlgo = passwordAlgo,
+            RequireSshKey = requireSshKey,
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
@@ -235,6 +236,65 @@ public class AuthLookupServiceTests : IClassFixture<PostgresFixture>, IAsyncLife
         // Locked-out attempts still take wall time via VerifyDummy, but the real verify
         // never runs. We don't want correct-password-while-locked-out to succeed.
         Assert.IsType<AuthDecision.RateLimited>(decision);
+    }
+
+    [Fact]
+    public async Task RequireSshKey_refuses_password_login_even_with_correct_password()
+    {
+        // Passwordless mode: a known handle with a verifiable password and the toggle ON
+        // must be Refused — the right password does not let you in. Burning the full
+        // verify ensures the timing matches a successful non-passwordless login, so the
+        // toggle state isn't leakable via wall-clock side-channel.
+        var hashed = _hasher!.Hash("correct horse battery staple");
+        await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo, requireSshKey: true);
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "correct horse battery staple", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
+        Assert.Equal(1, _rateLimiter!.FailureCount);
+    }
+
+    [Fact]
+    public async Task RequireSshKey_with_wrong_password_still_returns_Refused()
+    {
+        // Wrong password takes its normal Refused path — we don't want the toggle to mask
+        // a wrong-password attempt as something different, since both outcomes are the same
+        // failure shape from the client's view.
+        var hashed = _hasher!.Hash("right");
+        await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey", passwordHash: hashed.Hash, passwordAlgo: hashed.Algo, requireSshKey: true);
+
+        var decision = await _sut!.LookupAsync(
+            new AuthQuery.Password("alice", "wrong", SourceIp: null), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
+    }
+
+    [Fact]
+    public async Task RequireSshKey_allows_matching_registered_key()
+    {
+        // The whole point of passwordless mode: a registered key still authenticates.
+        // No change from non-passwordless on the key path.
+        var userId = await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey", requireSshKey: true);
+
+        var decision = await _sut!.LookupAsync(Pubkey("alice", "SHA256:alicekey"), default);
+
+        var known = Assert.IsType<AuthDecision.Known>(decision);
+        Assert.Equal(userId, known.UserId);
+    }
+
+    [Fact]
+    public async Task RequireSshKey_still_refuses_key_not_in_users_keyring()
+    {
+        // Strict per-user already refuses cross-user key login; the passwordless toggle
+        // shouldn't change that path either. This test exists to pin the behavior so a
+        // future refactor of EvaluateKeyAsync doesn't accidentally relax it.
+        await SeedUserAsync(handle: "alice", fingerprint: "SHA256:alicekey", requireSshKey: true);
+        await SeedUserAsync(handle: "bob", fingerprint: "SHA256:bobkey");
+
+        var decision = await _sut!.LookupAsync(Pubkey("alice", "SHA256:bobkey"), default);
+
+        Assert.IsType<AuthDecision.Refused>(decision);
     }
 
     [Fact]

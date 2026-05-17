@@ -94,10 +94,19 @@ public sealed class KeysManagementScreen : BbsWindow
         var credential = _keys[idx];
 
         // Last-credential guard: a user must always have ≥1 way back in. Other SSH keys
-        // or a set password both qualify.
+        // or a set password both qualify — unless RequireSshKey is on, in which case the
+        // password fallback isn't usable and the user must keep ≥1 key.
         var otherKeys = _keys.Count - 1;
-        var hasPassword = await _db.Users
-            .AnyAsync(u => u.Id == _user.Id && u.PasswordHash != null);
+        var userRow = await _db.Users
+            .Where(u => u.Id == _user.Id)
+            .Select(u => new { u.PasswordHash, u.RequireSshKey })
+            .FirstAsync();
+        if (userRow.RequireSshKey && otherKeys < 1)
+        {
+            _app.Invoke(() => _status.Text = "[!] Passwordless mode is on — disable it first or you'll lock yourself out.");
+            return;
+        }
+        var hasPassword = userRow.PasswordHash != null;
         if (otherKeys + (hasPassword ? 1 : 0) < 1)
         {
             _app.Invoke(() => _status.Text = "[!] Set a password first — you'd lock yourself out.");
