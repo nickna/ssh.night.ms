@@ -18,6 +18,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PostRead> PostReads => Set<PostRead>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<UserSavedLocation> UserSavedLocations => Set<UserSavedLocation>();
+    public DbSet<UserWatchlistItem> UserWatchlistItems => Set<UserWatchlistItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -167,6 +168,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(s => new { s.UserId, s.Label }).IsUnique();
             b.HasIndex(s => new { s.UserId, s.SortOrder });
             b.HasOne(s => s.User).WithMany(u => u.SavedLocations).HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserWatchlistItem>(b =>
+        {
+            b.ToTable("user_watchlist_items");
+            b.Property(w => w.Symbol).HasMaxLength(32);
+            b.Property(w => w.Canonical).HasMaxLength(64);
+            // Per-user uniqueness on Canonical: "BTC" and "c:bitcoin" both resolve to
+            // "bitcoin" and should collide. The raw Symbol is allowed to vary across users.
+            // The sort index serves the "list this user's rows in order" query that runs
+            // every time FinanceScreen opens.
+            b.HasIndex(w => new { w.UserId, w.Canonical }).IsUnique();
+            b.HasIndex(w => new { w.UserId, w.SortOrder });
+            b.HasOne(w => w.User).WithMany(u => u.Watchlist).HasForeignKey(w => w.UserId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

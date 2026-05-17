@@ -15,6 +15,7 @@ using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
+using Night.Ms.SshServer.Providers.Finance;
 using Night.Ms.SshServer.Reader;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
@@ -168,6 +169,11 @@ builder.Services.AddSmartReaderArticleReader();
 builder.Services.AddHttpImageFetcher();
 builder.Services.AddOsmTileFetcher();
 builder.Services.AddOpenFreeMapVectorTileFetcher();
+builder.Services.AddYahooFinance();
+builder.Services.AddCoinGecko();
+builder.Services.AddFrankfurter();
+builder.Services.AddCompositeFinanceProvider();
+builder.Services.AddYahooFinanceNews();
 
 // DatabaseInitializer must run before SysopBootstrap (the bootstrap needs the schema), and
 // SysopBootstrap must run before SshHost so a re-promotion lands before the first login.

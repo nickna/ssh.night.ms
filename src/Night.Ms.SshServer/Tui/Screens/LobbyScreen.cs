@@ -13,7 +13,7 @@ using Terminal.Gui.Views;
 
 namespace Night.Ms.SshServer.Tui.Screens;
 
-public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Map, Weather, Alerts, Sysop, Logout }
+public enum LobbyNavigation { Chat, Boards, Profile, News, Browser, Gallery, Map, Weather, Alerts, Finance, Sysop, Logout }
 
 public sealed class LobbyScreen : BbsWindow
 {
@@ -81,6 +81,7 @@ public sealed class LobbyScreen : BbsWindow
             new LobbyEntry("Gallery",  "gallery", Key.G, LobbyNavigation.Gallery),
             new LobbyEntry("Map",      "map",     Key.M, LobbyNavigation.Map),
             new LobbyEntry("Weather",  "weather", Key.F, LobbyNavigation.Weather),
+            new LobbyEntry("Finance",  "finance", Key.K, LobbyNavigation.Finance),
             new LobbyEntry("Sysop",    "sysop",   Key.S, LobbyNavigation.Sysop, Visible: user.IsSysop),
             new LobbyEntry("Logout",   "logout",  Key.L, LobbyNavigation.Logout),
         };

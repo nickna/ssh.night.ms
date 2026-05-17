@@ -66,6 +66,10 @@ internal sealed class StaticHttpClientFactory(HttpMessageHandler handler) : IHtt
         [Night.Ms.SshServer.Providers.OpenMeteoGeocodingProvider.HttpClientName]  = new Uri("https://geocoding-api.open-meteo.com/"),
         [Night.Ms.SshServer.Providers.IpApiCoGeolocationProvider.HttpClientName]  = new Uri("https://ipapi.co/"),
         [Night.Ms.SshServer.Providers.NwsWeatherAlertProvider.HttpClientName]     = new Uri("https://api.weather.gov/"),
+        [Night.Ms.SshServer.Providers.Finance.YahooFinanceProvider.HttpClientName]    = new Uri("https://query1.finance.yahoo.com/"),
+        [Night.Ms.SshServer.Providers.Finance.CoinGeckoProvider.HttpClientName]       = new Uri("https://api.coingecko.com/"),
+        [Night.Ms.SshServer.Providers.Finance.FrankfurterProvider.HttpClientName]     = new Uri("https://api.frankfurter.dev/"),
+        [Night.Ms.SshServer.Providers.Finance.YahooFinanceRssProvider.HttpClientName] = new Uri("https://finance.yahoo.com/"),
     };
 
     public HttpClient CreateClient(string name)

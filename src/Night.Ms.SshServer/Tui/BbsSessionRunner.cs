@@ -134,7 +134,7 @@ internal static class BbsSessionRunner
         {
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
         var nav = (LobbyNavigation?)app.Run(lobbyScreen);
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Sysop)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -175,6 +175,11 @@ internal static class BbsSessionRunner
             {
                 using var scope = services.CreateScope();
                 app.Run(new WeatherScreen(app, scope.ServiceProvider, user));
+            }
+            else if (nav == LobbyNavigation.Finance)
+            {
+                using var scope = services.CreateScope();
+                app.Run(new FinanceScreen(app, scope.ServiceProvider, user));
             }
             else if (nav == LobbyNavigation.Alerts)
             {

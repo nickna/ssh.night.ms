@@ -42,4 +42,5 @@ public sealed class User
 
     public List<IdentityCredential> Credentials { get; set; } = [];
     public List<UserSavedLocation> SavedLocations { get; set; } = [];
+    public List<UserWatchlistItem> Watchlist { get; set; } = [];
 }
