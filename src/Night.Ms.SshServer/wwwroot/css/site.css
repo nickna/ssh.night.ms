@@ -129,3 +129,32 @@ th { color: var(--dim); font-weight: normal; font-size: 13px; }
     font: inherit;
 }
 
+.tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+.tabs .tab {
+    padding: 10px 16px;
+    color: var(--dim);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.tabs .tab:hover { color: var(--fg); text-decoration: none; }
+.tabs .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+/* No-JS fallback: clicking a tab anchor navigates to its hash, which matches :target.
+   Combined with .active on initial render, this means a user with JS disabled who hits
+   /profile?tab=settings sees the Settings pane (server sets .active server-side).
+   Hash navigation alone (without a server round-trip) also works on subsequent clicks. */
+.tab-pane:target { display: block; }
+input[type=checkbox] {
+    accent-color: var(--accent);
+    margin-right: 6px;
+}
+

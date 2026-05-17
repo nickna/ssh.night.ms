@@ -82,18 +82,29 @@ public sealed class KeyAdoptionPrompt : BbsWindow
         };
         labelField.SetScheme(BbsTheme.Input);
 
-        var status = new Label { X = 2, Y = 11, Width = Dim.Fill(2), Height = 1 };
+        var suppressFuture = new CheckBox
+        {
+            X = 2,
+            Y = 11,
+            Text = "Stop asking me about new SSH keys (any key, future logins)",
+            Value = CheckState.UnChecked,
+        };
+
+        var status = new Label { X = 2, Y = 13, Width = Dim.Fill(2), Height = 1 };
         status.SetScheme(BbsTheme.Warning);
 
-        var adopt = new Button { X = 2, Y = 13, Text = "_Add to my account", IsDefault = true };
-        var notNow = new Button { X = Pos.Right(adopt) + 2, Y = 13, Text = "_Not now" };
-        var never = new Button { X = Pos.Right(notNow) + 2, Y = 13, Text = "Ne_ver for this key" };
+        var adopt = new Button { X = 2, Y = 15, Text = "_Add to my account", IsDefault = true };
+        var notNow = new Button { X = Pos.Right(adopt) + 2, Y = 15, Text = "_Not now" };
+        var never = new Button { X = Pos.Right(notNow) + 2, Y = 15, Text = "Ne_ver for this key" };
 
         adopt.Accepting += async (_, e) =>
         {
             e.Handled = true;
             try
             {
+                // Persist the global preference first — if AdoptKeyAsync throws, the user's
+                // expressed intent ("don't ask me again") is honored regardless.
+                await PersistSuppressionIfRequestedAsync(suppressFuture);
                 await AdoptKeyAsync((labelField.Text ?? string.Empty).Trim());
                 _app.RequestStop();
             }
@@ -107,22 +118,52 @@ public sealed class KeyAdoptionPrompt : BbsWindow
             }
         };
 
-        notNow.Accepting += (_, e) =>
+        notNow.Accepting += async (_, e) =>
         {
             e.Handled = true;
+            try
+            {
+                await PersistSuppressionIfRequestedAsync(suppressFuture);
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"[!] Failed to save preference: {ex.Message}";
+                return;
+            }
             _app.RequestStop();
         };
 
         never.Accepting += async (_, e) =>
         {
             e.Handled = true;
-            await _dismissals.DismissAsync(_user.Id, _fingerprint, default);
+            try
+            {
+                await PersistSuppressionIfRequestedAsync(suppressFuture);
+                await _dismissals.DismissAsync(_user.Id, _fingerprint, default);
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"[!] Failed to record dismissal: {ex.Message}";
+                return;
+            }
             _app.RequestStop();
         };
 
-        Add(explainer, keyInfo, labelPrompt, labelField, status, adopt, notNow, never);
+        Add(explainer, keyInfo, labelPrompt, labelField, suppressFuture, status, adopt, notNow, never);
         adopt.SetFocus();
         InstallEscapeHandler();
+    }
+
+    private async Task PersistSuppressionIfRequestedAsync(CheckBox checkbox)
+    {
+        if (checkbox.Value != CheckState.Checked) return;
+        if (_user.SuppressKeyAdoptionPrompts) return;
+        // ExecuteUpdateAsync avoids any question about whether _user is being tracked by
+        // _db — bulk-update writes the column directly, then mirror into the in-memory
+        // copy so any later code in the session sees the new value.
+        await _db.Users.Where(u => u.Id == _user.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.SuppressKeyAdoptionPrompts, true));
+        _user.SuppressKeyAdoptionPrompts = true;
     }
 
     private async Task AdoptKeyAsync(string label)

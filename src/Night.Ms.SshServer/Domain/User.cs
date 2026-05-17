@@ -49,6 +49,11 @@ public sealed class User
     public ClockFormat ClockFormat { get; set; }
     public DateFormat DateFormat { get; set; }
 
+    // When true, BbsSessionRunner skips the key-adoption modal regardless of whether the
+    // offered fingerprint has been per-key dismissed. Independent of the Redis-backed
+    // per-key dismissal store — this is the "stop asking me, for any key" toggle.
+    public bool SuppressKeyAdoptionPrompts { get; set; }
+
     public List<IdentityCredential> Credentials { get; set; } = [];
     public List<UserSavedLocation> SavedLocations { get; set; } = [];
     public List<UserWatchlistItem> Watchlist { get; set; } = [];

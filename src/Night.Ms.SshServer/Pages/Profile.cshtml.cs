@@ -26,8 +26,12 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
     public bool CanLinkGoogle { get; private set; }
     public bool CanLinkMicrosoft { get; private set; }
     public string? Flash { get; set; }
+    public bool SuppressKeyAdoptionPrompts { get; private set; }
+    // Allow-listed: "profile" or "settings". Drives initial tab highlight + which pane is
+    // visible without JS via the :target CSS fallback.
+    public string ActiveTab { get; private set; } = "profile";
 
-    public async Task<IActionResult> OnGetAsync([FromQuery] string? flash)
+    public async Task<IActionResult> OnGetAsync([FromQuery] string? flash, [FromQuery] string? tab)
     {
         var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!long.TryParse(idStr, out var userId)) return Redirect("/login");
@@ -46,6 +50,8 @@ public sealed class ProfileModel(AppDbContext db, NightMsOptions options) : Page
         PasswordMinLength = options.PasswordHashing.MinPasswordLength;
         AvatarVersion = user.ProfilePictureUpdatedAt?.UtcTicks ?? 0;
         Flash = flash;
+        SuppressKeyAdoptionPrompts = user.SuppressKeyAdoptionPrompts;
+        if (string.Equals(tab, "settings", StringComparison.OrdinalIgnoreCase)) ActiveTab = "settings";
         Credentials = user.Credentials
             .OrderBy(c => c.Provider).ThenBy(c => c.CreatedAt)
             .Select(c => new CredentialRow(

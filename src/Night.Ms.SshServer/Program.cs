@@ -383,6 +383,39 @@ app.MapPost("/profile/password", async (HttpContext ctx, AppDbContext db, IPassw
     return Results.Redirect("/profile?flash=" + Uri.EscapeDataString("Password updated."));
 });
 
+// POST /profile/settings — toggle user preferences that aren't tied to a separate domain
+// surface. Currently only the global "stop asking me to adopt SSH keys" flag; future toggles
+// land here next to it.
+app.MapPost("/profile/settings", async (HttpContext ctx, AppDbContext db, IAntiforgery antiforgery, [FromForm] string? suppress) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true) return Results.Redirect("/login");
+    if (!await ValidateAntiforgeryAsync(ctx, antiforgery)) return Results.Redirect("/profile?tab=settings");
+    var idStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!long.TryParse(idStr, out var userId)) return Results.Redirect("/login");
+
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+    if (user is null) return Results.Redirect("/login");
+
+    // Unchecked checkboxes don't submit a value at all — absence == false. Treat any
+    // non-"true" value as false so the form's hidden-checkbox semantics work either way.
+    var requested = string.Equals(suppress, "true", StringComparison.OrdinalIgnoreCase);
+    if (user.SuppressKeyAdoptionPrompts != requested)
+    {
+        user.SuppressKeyAdoptionPrompts = requested;
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = userId,
+            Action = "settings.key_adoption_prompts_changed",
+            TargetType = "user",
+            TargetId = userId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { suppress = requested }),
+        });
+        await db.SaveChangesAsync(ctx.RequestAborted);
+    }
+    return Results.Redirect("/profile?tab=settings&flash=" + Uri.EscapeDataString("Settings updated."));
+});
+
 // POST /profile/ssh-key — paste an OpenSSH-format public key, parse it, refuse if already
 // attached to another user, and write a new IdentityCredential row owned by the caller.
 app.MapPost("/profile/ssh-key", async (HttpContext ctx, AppDbContext db, IAntiforgery antiforgery, [FromForm] string? publicKey, [FromForm] string? label) =>

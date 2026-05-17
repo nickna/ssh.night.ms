@@ -2,149 +2,201 @@
 @model ProfileModel
 @{
     ViewData["Title"] = $"{Model.Handle} — profile";
+    var profileActive = Model.ActiveTab == "profile";
+    var settingsActive = Model.ActiveTab == "settings";
 }
 
-<div class="avatar-row">
-    <img class="avatar" src="/u/@Model.Handle/avatar?v=@Model.AvatarVersion" alt="@Model.Handle's avatar" width="96" height="96" />
-    <div class="avatar-meta">
-        <h1>@Model.Handle</h1>
-        @if (!string.IsNullOrEmpty(Model.Email))
-        {
-            <p class="muted">@Model.Email</p>
-        }
-        @if (Model.IsSysop)
-        {
-            <p><strong>sysop</strong></p>
-        }
-        <form method="post" enctype="multipart/form-data" action="/profile/avatar" class="avatar-form">
-            @Html.AntiForgeryToken()
-            <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required />
-            <button class="btn" type="submit">@(Model.HasProfilePicture ? "Replace picture" : "Upload picture")</button>
-            @if (Model.HasProfilePicture)
-            {
-                <button class="btn danger" type="submit" formaction="/profile/avatar/delete" formenctype="application/x-www-form-urlencoded">Remove</button>
-            }
-        </form>
-        <p class="muted">PNG / JPEG / WebP. Square images look best; non-square uploads are center-cropped to 256×256.</p>
-    </div>
-</div>
-
-<div class="actions">
-    <a href="/terminal" class="btn">Open web terminal</a>
-    <a href="/u/@Model.Handle" class="btn">View public profile</a>
-</div>
+<nav class="tabs">
+    <a href="#profile" id="tab-link-profile" class="tab @(profileActive ? "active" : "")">Profile</a>
+    <a href="#settings" id="tab-link-settings" class="tab @(settingsActive ? "active" : "")">Settings</a>
+</nav>
 
 @if (Model.Flash is not null)
 {
-    <div class="box"><p>@Model.Flash</p></div>
+    <div class="box flash"><p>@Model.Flash</p></div>
 }
 
-<h2>@(Model.HasPassword ? "Change password" : "Set a password")</h2>
-<p class="muted">
-    @if (Model.HasPassword)
-    {
-        <text>Last changed @(Model.PasswordUpdatedAt?.ToString("yyyy-MM-dd") ?? "—"). Used to log in over SSH (and the web) when your key isn't on hand.</text>
-    }
-    else
-    {
-        <text>Without a password, you can only log in via a registered SSH key or your linked SSO provider. Set one to use SSH password fallback.</text>
-    }
-</p>
-<form method="post" action="/profile/password" class="box">
-    @Html.AntiForgeryToken()
-    @if (Model.HasPassword)
-    {
-        <p>Current password: <input type="password" name="current" required /></p>
-    }
-    <p>New password (min @Model.PasswordMinLength chars): <input type="password" name="next" required minlength="@Model.PasswordMinLength" /></p>
-    <p>Confirm new password: <input type="password" name="confirm" required /></p>
-    <button class="btn" type="submit">@(Model.HasPassword ? "Change password" : "Set password")</button>
-</form>
+<section id="profile" class="tab-pane @(profileActive ? "active" : "")">
+    <div class="avatar-row">
+        <img class="avatar" src="/u/@Model.Handle/avatar?v=@Model.AvatarVersion" alt="@Model.Handle's avatar" width="96" height="96" />
+        <div class="avatar-meta">
+            <h1>@Model.Handle</h1>
+            @if (!string.IsNullOrEmpty(Model.Email))
+            {
+                <p class="muted">@Model.Email</p>
+            }
+            @if (Model.IsSysop)
+            {
+                <p><strong>sysop</strong></p>
+            }
+            <form method="post" enctype="multipart/form-data" action="/profile/avatar" class="avatar-form">
+                @Html.AntiForgeryToken()
+                <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required />
+                <button class="btn" type="submit">@(Model.HasProfilePicture ? "Replace picture" : "Upload picture")</button>
+                @if (Model.HasProfilePicture)
+                {
+                    <button class="btn danger" type="submit" formaction="/profile/avatar/delete" formenctype="application/x-www-form-urlencoded">Remove</button>
+                }
+            </form>
+            <p class="muted">PNG / JPEG / WebP. Square images look best; non-square uploads are center-cropped to 256×256.</p>
+        </div>
+    </div>
 
-<h2>SSH keys</h2>
-<table>
-    <thead>
-        <tr>
-            <th>label</th>
-            <th>fingerprint</th>
-            <th>added</th>
-            <th>last used</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        @foreach (var c in Model.Credentials.Where(c => c.Provider == "Ssh"))
+    <div class="actions">
+        <a href="/terminal" class="btn">Open web terminal</a>
+        <a href="/u/@Model.Handle" class="btn">View public profile</a>
+    </div>
+
+    <h2>@(Model.HasPassword ? "Change password" : "Set a password")</h2>
+    <p class="muted">
+        @if (Model.HasPassword)
         {
+            <text>Last changed @(Model.PasswordUpdatedAt?.ToString("yyyy-MM-dd") ?? "—"). Used to log in over SSH (and the web) when your key isn't on hand.</text>
+        }
+        else
+        {
+            <text>Without a password, you can only log in via a registered SSH key or your linked SSO provider. Set one to use SSH password fallback.</text>
+        }
+    </p>
+    <form method="post" action="/profile/password" class="box">
+        @Html.AntiForgeryToken()
+        @if (Model.HasPassword)
+        {
+            <p>Current password: <input type="password" name="current" required /></p>
+        }
+        <p>New password (min @Model.PasswordMinLength chars): <input type="password" name="next" required minlength="@Model.PasswordMinLength" /></p>
+        <p>Confirm new password: <input type="password" name="confirm" required /></p>
+        <button class="btn" type="submit">@(Model.HasPassword ? "Change password" : "Set password")</button>
+    </form>
+
+    <h2>SSH keys</h2>
+    <table>
+        <thead>
             <tr>
-                <td>@(string.IsNullOrEmpty(c.Label) ? "—" : c.Label)</td>
-                <td><code>@c.SubjectShort</code></td>
-                <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
-                <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
-                <td>
-                    <form method="post" action="/profile/unlink/@c.Id" class="inline">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn danger">remove</button>
-                    </form>
-                </td>
+                <th>label</th>
+                <th>fingerprint</th>
+                <th>added</th>
+                <th>last used</th>
+                <th></th>
             </tr>
-        }
-        @if (!Model.Credentials.Any(c => c.Provider == "Ssh"))
-        {
-            <tr><td colspan="5" class="muted">No SSH keys yet — paste one below to enable key-based SSH login.</td></tr>
-        }
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @foreach (var c in Model.Credentials.Where(c => c.Provider == "Ssh"))
+            {
+                <tr>
+                    <td>@(string.IsNullOrEmpty(c.Label) ? "—" : c.Label)</td>
+                    <td><code>@c.SubjectShort</code></td>
+                    <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
+                    <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    <td>
+                        <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn danger">remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (!Model.Credentials.Any(c => c.Provider == "Ssh"))
+            {
+                <tr><td colspan="5" class="muted">No SSH keys yet — paste one below to enable key-based SSH login.</td></tr>
+            }
+        </tbody>
+    </table>
 
-<form method="post" action="/profile/ssh-key" class="box">
-    @Html.AntiForgeryToken()
-    <p>Paste a single OpenSSH public key (the contents of <code>~/.ssh/id_ed25519.pub</code> on your machine).</p>
-    <p><textarea name="publicKey" rows="3" cols="80" required placeholder="ssh-ed25519 AAAA..."></textarea></p>
-    <p>Optional label: <input type="text" name="label" maxlength="80" placeholder="e.g. laptop" /></p>
-    <button class="btn" type="submit">Add SSH key</button>
-</form>
+    <form method="post" action="/profile/ssh-key" class="box">
+        @Html.AntiForgeryToken()
+        <p>Paste a single OpenSSH public key (the contents of <code>~/.ssh/id_ed25519.pub</code> on your machine).</p>
+        <p><textarea name="publicKey" rows="3" cols="80" required placeholder="ssh-ed25519 AAAA..."></textarea></p>
+        <p>Optional label: <input type="text" name="label" maxlength="80" placeholder="e.g. laptop" /></p>
+        <button class="btn" type="submit">Add SSH key</button>
+    </form>
 
-<h2>Linked SSO identities</h2>
-<table>
-    <thead>
-        <tr>
-            <th>provider</th>
-            <th>subject</th>
-            <th>linked</th>
-            <th>last used</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        @foreach (var c in Model.Credentials.Where(c => c.Provider != "Ssh"))
-        {
+    <h2>Linked SSO identities</h2>
+    <table>
+        <thead>
             <tr>
-                <td>@c.Provider</td>
-                <td><code>@c.SubjectShort</code></td>
-                <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
-                <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
-                <td>
-                    <form method="post" action="/profile/unlink/@c.Id" class="inline">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn danger">unlink</button>
-                    </form>
-                </td>
+                <th>provider</th>
+                <th>subject</th>
+                <th>linked</th>
+                <th>last used</th>
+                <th></th>
             </tr>
-        }
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @foreach (var c in Model.Credentials.Where(c => c.Provider != "Ssh"))
+            {
+                <tr>
+                    <td>@c.Provider</td>
+                    <td><code>@c.SubjectShort</code></td>
+                    <td class="muted">@c.CreatedAt.ToString("yyyy-MM-dd")</td>
+                    <td class="muted">@(c.LastUsedAt?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    <td>
+                        <form method="post" action="/profile/unlink/@c.Id" class="inline">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn danger">unlink</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
 
-<h2>Add another SSO provider</h2>
-<div class="actions">
-    @if (Model.CanLinkGoogle)
-    {
-        <form method="post" action="/profile/link/google" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Google</button></form>
-    }
-    @if (Model.CanLinkMicrosoft)
-    {
-        <form method="post" action="/profile/link/microsoft" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Microsoft</button></form>
-    }
-    @if (!Model.CanLinkGoogle && !Model.CanLinkMicrosoft)
-    {
-        <p class="muted">No more SSO providers available to link.</p>
-    }
-</div>
+    <h2>Add another SSO provider</h2>
+    <div class="actions">
+        @if (Model.CanLinkGoogle)
+        {
+            <form method="post" action="/profile/link/google" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Google</button></form>
+        }
+        @if (Model.CanLinkMicrosoft)
+        {
+            <form method="post" action="/profile/link/microsoft" class="inline">@Html.AntiForgeryToken()<button class="btn">Link Microsoft</button></form>
+        }
+        @if (!Model.CanLinkGoogle && !Model.CanLinkMicrosoft)
+        {
+            <p class="muted">No more SSO providers available to link.</p>
+        }
+    </div>
+</section>
+
+<section id="settings" class="tab-pane @(settingsActive ? "active" : "")">
+    <h2>Account settings</h2>
+    <p class="muted">Toggles that affect login behaviour and notifications. Per-key dismissals
+    (the &ldquo;Never for this key&rdquo; choice in the SSH login prompt) are independent and
+    are not cleared by anything here.</p>
+    <form method="post" action="/profile/settings" class="box">
+        @Html.AntiForgeryToken()
+        <p>
+            <label>
+                <input type="checkbox" name="suppress" value="true" @(Model.SuppressKeyAdoptionPrompts ? "checked" : "") />
+                Stop asking me to adopt new SSH keys on login
+            </label>
+        </p>
+        <p class="muted">
+            When on, the SSH lobby won&rsquo;t prompt you to add an unknown key to your account
+            after a successful password login. Use the &ldquo;Add SSH key&rdquo; box on the
+            Profile tab to register keys explicitly.
+        </p>
+        <button class="btn" type="submit">Save settings</button>
+    </form>
+</section>
+
+<script>
+    (function () {
+        var links = document.querySelectorAll('.tabs .tab');
+        function activate(id) {
+            links.forEach(function (l) {
+                l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+            });
+            document.querySelectorAll('.tab-pane').forEach(function (p) {
+                p.classList.toggle('active', p.id === id);
+            });
+            try { history.replaceState(null, '', '?tab=' + id); } catch (e) {}
+        }
+        links.forEach(function (l) {
+            l.addEventListener('click', function (e) {
+                e.preventDefault();
+                activate(l.getAttribute('href').slice(1));
+            });
+        });
+    })();
+</script>

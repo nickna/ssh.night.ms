@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui.Theme;
@@ -32,6 +34,15 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly OptionSelector<ClockFormat> _clockFormat;
     private readonly OptionSelector<DateFormat> _dateFormat;
     private readonly BbsStatusLine _status;
+    private readonly CheckBox _suppressKeyAdoption;
+    // Two tab-content groups. Adding a widget via AddProfile/AddSettings registers it for
+    // visibility toggling on tab switch. Status line + tab strip live at window level so
+    // both tabs share them.
+    private readonly List<View> _profileWidgets = new();
+    private readonly List<View> _settingsWidgets = new();
+    private readonly Button _tabProfile;
+    private readonly Button _tabSettings;
+    private string _activeTab = "profile";
 
     public ProfileEditScreen(IApplication app, IServiceProvider services, User user, IPAddress? clientIp)
         : base(app, services, user)
@@ -42,6 +53,13 @@ public sealed class ProfileEditScreen : BbsWindow
         _clientIp = clientIp;
         Title = $"profile — {user.Handle} — [Ctrl+S] save  [Esc] back to lobby";
 
+        // ----- Tab strip (shared across tabs, always visible) -----
+        _tabProfile = new Button { X = 2, Y = 0, Text = "[ _Profile ]" };
+        _tabSettings = new Button { X = Pos.Right(_tabProfile) + 1, Y = 0, Text = "[ _Settings ]" };
+        _tabProfile.Accepting += (_, e) => { e.Handled = true; ShowTab("profile"); };
+        _tabSettings.Accepting += (_, e) => { e.Handled = true; ShowTab("settings"); };
+        Add(_tabProfile, _tabSettings);
+
         var blurb = new Label
         {
             X = 2,
@@ -49,7 +67,7 @@ public sealed class ProfileEditScreen : BbsWindow
             Text = $"Public profile for {user.Handle}. Other users see this via /finger.",
         };
         blurb.SetScheme(BbsTheme.Header_);
-        Add(blurb);
+        AddProfile(blurb);
 
         // ----- Profile picture preview (top strip) -----
         // The avatar view sits above the two main columns. It's populated asynchronously from
@@ -77,7 +95,10 @@ public sealed class ProfileEditScreen : BbsWindow
             Text = ResolvePublicUrl(services),
         };
         pfpHintLine3.SetScheme(BbsTheme.Hint);
-        Add(avatarView, pfpHintLine1, pfpHintLine2, pfpHintLine3);
+        AddProfile(avatarView);
+        AddProfile(pfpHintLine1);
+        AddProfile(pfpHintLine2);
+        AddProfile(pfpHintLine3);
 
         // Kick off the half-block render in the background; the AnsiArtView.Grid setter
         // triggers a redraw on the UI thread via Application.Invoke.
@@ -91,19 +112,19 @@ public sealed class ProfileEditScreen : BbsWindow
 
         var realNameLabel = new Label { X = 2, Y = fieldsTop, Text = $"Real name (optional, ≤ {ProfileService.MaxRealNameLength}):" };
         realNameLabel.SetScheme(BbsTheme.Hint);
-        Add(realNameLabel);
+        AddProfile(realNameLabel);
         _realName = new TextField { X = 2, Y = fieldsTop + 1, Width = 36, Text = user.RealName ?? string.Empty };
         _realName.SetScheme(BbsTheme.Input);
 
         var locationLabel = new Label { X = 2, Y = fieldsTop + 3, Text = $"Location (optional, ≤ {ProfileService.MaxLocationLength}):" };
         locationLabel.SetScheme(BbsTheme.Hint);
-        Add(locationLabel);
+        AddProfile(locationLabel);
         _location = new TextField { X = 2, Y = fieldsTop + 4, Width = 36, Text = user.Location ?? string.Empty };
         _location.SetScheme(BbsTheme.Input);
 
         var bioLabel = new Label { X = 2, Y = fieldsTop + 6, Text = $"Bio (optional, ≤ {ProfileService.MaxBioLength}):" };
         bioLabel.SetScheme(BbsTheme.Hint);
-        Add(bioLabel);
+        AddProfile(bioLabel);
         _bio = new TextView
         {
             X = 2,
@@ -119,11 +140,11 @@ public sealed class ProfileEditScreen : BbsWindow
 
         var prefsHeader = new Label { X = RightColumnX, Y = fieldsTop, Text = "── display preferences ──" };
         prefsHeader.SetScheme(BbsTheme.Header_);
-        Add(prefsHeader);
+        AddProfile(prefsHeader);
 
         var tzLabel = new Label { X = RightColumnX, Y = fieldsTop + 1, Text = "Time zone (type to jump):" };
         tzLabel.SetScheme(BbsTheme.Hint);
-        Add(tzLabel);
+        AddProfile(tzLabel);
 
         // Sort by base UTC offset, then by id. The label embeds the offset so it's visible
         // alongside the IANA id; ids stay in the same order so ListView's type-to-search hits
@@ -154,7 +175,7 @@ public sealed class ProfileEditScreen : BbsWindow
 
         var temperatureLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 1, Text = "Temperature:" };
         temperatureLabel.SetScheme(BbsTheme.Hint);
-        Add(temperatureLabel);
+        AddProfile(temperatureLabel);
         _temperature = new OptionSelector<TemperatureUnit>
         {
             X = RightColumnX,
@@ -168,7 +189,7 @@ public sealed class ProfileEditScreen : BbsWindow
 
         var clockLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 4, Text = "Clock:" };
         clockLabel.SetScheme(BbsTheme.Hint);
-        Add(clockLabel);
+        AddProfile(clockLabel);
         _clockFormat = new OptionSelector<ClockFormat>
         {
             X = RightColumnX,
@@ -182,7 +203,7 @@ public sealed class ProfileEditScreen : BbsWindow
 
         var dateLabel = new Label { X = RightColumnX, Y = tzListTop + TimeZoneListHeight + 7, Text = "Date format:" };
         dateLabel.SetScheme(BbsTheme.Hint);
-        Add(dateLabel);
+        AddProfile(dateLabel);
         _dateFormat = new OptionSelector<DateFormat>
         {
             X = RightColumnX,
@@ -240,7 +261,63 @@ public sealed class ProfileEditScreen : BbsWindow
             _app.Run(new KeysManagementScreen(_app, _services, _user, db));
         };
 
-        Add(_realName, _location, _bio, _timeZoneList, _temperature, _clockFormat, _dateFormat, _status, save, cancel, pwButton, keysButton);
+        Add(_status);
+        AddProfile(_realName);
+        AddProfile(_location);
+        AddProfile(_bio);
+        AddProfile(_timeZoneList);
+        AddProfile(_temperature);
+        AddProfile(_clockFormat);
+        AddProfile(_dateFormat);
+        AddProfile(save);
+        AddProfile(cancel);
+        AddProfile(pwButton);
+        AddProfile(keysButton);
+
+        // ----- Settings tab content -----
+
+        var settingsHeader = new Label
+        {
+            X = 2,
+            Y = 2,
+            Text = "Account settings — toggles that affect login behaviour and notifications.",
+        };
+        settingsHeader.SetScheme(BbsTheme.Header_);
+        AddSettings(settingsHeader);
+
+        _suppressKeyAdoption = new CheckBox
+        {
+            X = 2,
+            Y = 4,
+            Text = "Stop asking me to adopt new SSH keys on login",
+            Value = user.SuppressKeyAdoptionPrompts ? CheckState.Checked : CheckState.UnChecked,
+        };
+        AddSettings(_suppressKeyAdoption);
+
+        var suppressHint = new Label
+        {
+            X = 4,
+            Y = 5,
+            Width = Dim.Fill(4),
+            Text = "When on, you won't be prompted to add unknown SSH keys to your account after a\n"
+                 + "password login. Per-key 'Never for this key' dismissals are unaffected.",
+        };
+        suppressHint.SetScheme(BbsTheme.Faint_);
+        AddSettings(suppressHint);
+
+        var saveSettings = new Button { X = 2, Y = Pos.AnchorEnd(4), Text = "_Save settings", IsDefault = true };
+        saveSettings.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            SaveSettingsAsync().FireAndLog(_services, nameof(SaveSettingsAsync));
+        };
+        AddSettings(saveSettings);
+
+        var cancelSettings = new Button { X = Pos.Right(saveSettings) + 2, Y = Pos.AnchorEnd(4), Text = "_Cancel" };
+        cancelSettings.Accepting += (_, e) => { e.Handled = true; _app.RequestStop(); };
+        AddSettings(cancelSettings);
+
+        ShowTab("profile");
         _realName.SetFocus();
 
         InstallEscapeHandler();
@@ -249,9 +326,69 @@ public sealed class ProfileEditScreen : BbsWindow
             if (key == Key.S.WithCtrl)
             {
                 key.Handled = true;
-                SaveAsync().FireAndLog(_services, nameof(SaveAsync));
+                if (_activeTab == "settings")
+                {
+                    SaveSettingsAsync().FireAndLog(_services, nameof(SaveSettingsAsync));
+                }
+                else
+                {
+                    SaveAsync().FireAndLog(_services, nameof(SaveAsync));
+                }
             }
         };
+    }
+
+    private T AddProfile<T>(T view) where T : View
+    {
+        Add(view);
+        _profileWidgets.Add(view);
+        return view;
+    }
+
+    private T AddSettings<T>(T view) where T : View
+    {
+        Add(view);
+        view.Visible = false;
+        _settingsWidgets.Add(view);
+        return view;
+    }
+
+    private void ShowTab(string tab)
+    {
+        _activeTab = tab;
+        var showProfile = tab == "profile";
+        foreach (var v in _profileWidgets) v.Visible = showProfile;
+        foreach (var v in _settingsWidgets) v.Visible = !showProfile;
+        // Highlight whichever tab button is active. BbsTheme.Header_ is bright-yellow bold;
+        // unselected falls back to the window default (gray).
+        _tabProfile.SetScheme(showProfile ? BbsTheme.Header_ : BbsTheme.Window);
+        _tabSettings.SetScheme(showProfile ? BbsTheme.Window : BbsTheme.Header_);
+        if (showProfile) _realName?.SetFocus();
+        else _suppressKeyAdoption?.SetFocus();
+        SetNeedsDraw();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        try
+        {
+            var suppress = _suppressKeyAdoption.Value == CheckState.Checked;
+            if (_user.SuppressKeyAdoptionPrompts == suppress)
+            {
+                _app.Invoke(() => _status.SetSuccess("No changes."));
+                return;
+            }
+            using var scope = _services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Users.Where(u => u.Id == _user.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(u => u.SuppressKeyAdoptionPrompts, suppress));
+            _user.SuppressKeyAdoptionPrompts = suppress;
+            _app.Invoke(() => _status.SetSuccess("Settings saved."));
+        }
+        catch (Exception ex)
+        {
+            _app.Invoke(() => _status.SetWarning($"[!] save failed: {ex.Message}"));
+        }
     }
 
     private async Task SaveAsync()

@@ -149,6 +149,10 @@ internal static class BbsSessionRunner
 
         try
         {
+            // Global preference short-circuits before the Redis roundtrip. User-set toggle
+            // from the profile Settings tab; flips back to default when the user re-enables.
+            if (user.SuppressKeyAdoptionPrompts) return;
+
             var alreadyOnAccount = db.IdentityCredentials.Any(c =>
                 c.UserId == user.Id && c.Provider == CredentialProvider.Ssh && c.Subject == fingerprint);
             if (alreadyOnAccount) return;

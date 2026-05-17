@@ -40,6 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.Property(u => u.TemperatureUnit).HasDefaultValue(TemperatureUnit.Celsius);
             b.Property(u => u.ClockFormat).HasDefaultValue(ClockFormat.Hours24);
             b.Property(u => u.DateFormat).HasDefaultValue(DateFormat.Iso);
+            b.Property(u => u.SuppressKeyAdoptionPrompts).HasDefaultValue(false);
             b.HasIndex(u => u.Handle).IsUnique();
             b.HasIndex(u => u.Email).IsUnique();
         });
