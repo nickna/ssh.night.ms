@@ -2,6 +2,7 @@ using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
+using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -22,7 +23,7 @@ public sealed class BbsStatusBar : View
     private readonly IWeatherProvider? _weather;
     private readonly User? _user;
     private readonly Label _clock;
-    private readonly Label _weatherLabel;
+    private readonly ClickableLabel _weatherLabel;
     private readonly Label _slot;
     private readonly Label _brand;
     private readonly CancellationTokenSource _shutdown = new();
@@ -47,12 +48,13 @@ public sealed class BbsStatusBar : View
 
         var sep1 = new Label { X = Pos.Right(_clock) + 1, Y = 0, Width = 1, Text = "│" };
 
-        _weatherLabel = new Label
+        _weatherLabel = new ClickableLabel
         {
             X = Pos.Right(sep1) + 1,
             Y = 0,
             Width = 40,
             Text = "weather: …",
+            CanFocus = false,
         };
 
         var sep2 = new Label { X = Pos.Right(_weatherLabel) + 1, Y = 0, Width = 1, Text = "│" };
@@ -100,6 +102,15 @@ public sealed class BbsStatusBar : View
     // periodic tick.
     public void Refresh() =>
         RefreshWeatherAsync().FireAndLog(_services, nameof(RefreshWeatherAsync));
+
+    // Marks the weather segment as clickable: switches it to the bright-cyan Hint scheme
+    // (matching the right-side brand label) as a visible affordance, then wires the click
+    // handler. Called by BbsWindow on every screen except WeatherScreen itself.
+    public void EnableClick(Action onClick)
+    {
+        _weatherLabel.SetScheme(BbsTheme.Hint);
+        _weatherLabel.LeftClicked += onClick;
+    }
 
     private bool Tick()
     {
@@ -163,5 +174,24 @@ public sealed class BbsStatusBar : View
             _shutdown.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    // Label subclass whose only job is to surface left-button clicks as a plain Action event.
+    // Mirrors the OnMouseEvent override pattern in Tui/Views/RichArticleView.cs — the only
+    // other interactive mouse handler in the project. Plain Label is non-focusable in TG v2,
+    // so click delivery via base View events is not guaranteed; subclassing keeps it explicit.
+    private sealed class ClickableLabel : Label
+    {
+        public event Action? LeftClicked;
+
+        protected override bool OnMouseEvent(Terminal.Gui.Input.Mouse mouse)
+        {
+            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+            {
+                LeftClicked?.Invoke();
+                return true;
+            }
+            return base.OnMouseEvent(mouse);
+        }
     }
 }

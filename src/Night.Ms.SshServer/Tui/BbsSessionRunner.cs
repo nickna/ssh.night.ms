@@ -133,66 +133,105 @@ internal static class BbsSessionRunner
         try
         {
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
-        var nav = (LobbyNavigation?)app.Run(lobbyScreen);
+        lobbyScreen.EnableFooterWeatherShortcut();
+        var lobbyResult = app.Run(lobbyScreen);
+        // Footer-click shortcut wins over the screen's own return value — see BbsWindow.FooterShortcutResult.
+        var nav = lobbyScreen.FooterShortcutResult ?? (LobbyNavigation?)lobbyResult;
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
-                app.Run(new ChatScreen(services, app, user, lobbyChannel));
+                var screen = new ChatScreen(services, app, user, lobbyChannel);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Boards)
             {
-                RunForumLoop(services, app, user);
+                if (RunForumLoop(services, app, user) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Profile)
             {
-                app.Run(new ProfileEditScreen(app, services, user, session.RemoteIPAddress));
+                var screen = new ProfileEditScreen(app, services, user, session.RemoteIPAddress);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.News)
             {
-                app.Run(new NewsScreen(services, app, user));
+                var screen = new NewsScreen(services, app, user);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Browser)
             {
-                if (app.Run(new BrowserPromptScreen(app, services, user)) is Uri uri)
+                var prompt = new BrowserPromptScreen(app, services, user);
+                prompt.EnableFooterWeatherShortcut();
+                var promptResult = app.Run(prompt);
+                if (prompt.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (promptResult is Uri uri)
                 {
-                    app.Run(new ReaderScreen(app, services, user, uri));
+                    var reader = new ReaderScreen(app, services, user, uri);
+                    reader.EnableFooterWeatherShortcut();
+                    app.Run(reader);
+                    if (reader.FooterShortcutResult is { } readerShortcut) { nav = readerShortcut; continue; }
                 }
             }
             else if (nav == LobbyNavigation.Gallery)
             {
                 var gallery = services.GetRequiredService<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider>();
-                app.Run(new GalleryScreen(app, services, user, gallery));
+                var screen = new GalleryScreen(app, services, user, gallery);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Map)
             {
                 var rasterTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IOsmTileFetcher>();
                 var vectorTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IVectorTileFetcher>();
                 var logger = services.GetRequiredService<ILogger<MapScreen>>();
-                app.Run(new MapScreen(app, services, user, rasterTiles, vectorTiles, logger));
+                var screen = new MapScreen(app, services, user, rasterTiles, vectorTiles, logger);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Weather)
             {
                 using var scope = services.CreateScope();
+                // WeatherScreen does not get EnableFooterWeatherShortcut — the user is already here.
                 app.Run(new WeatherScreen(app, scope.ServiceProvider, user));
             }
             else if (nav == LobbyNavigation.Finance)
             {
                 using var scope = services.CreateScope();
-                app.Run(new FinanceScreen(app, scope.ServiceProvider, user));
+                var screen = new FinanceScreen(app, scope.ServiceProvider, user);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Alerts)
             {
                 var alerts = lobbyScreen.LoadedAlerts;
                 if (alerts is { Count: > 0 })
-                    app.Run(new AlertsScreen(app, services, user, alerts));
+                {
+                    var screen = new AlertsScreen(app, services, user, alerts);
+                    screen.EnableFooterWeatherShortcut();
+                    app.Run(screen);
+                    if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                }
             }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {
-                app.Run(new AdminScreen(services, app, user));
+                var screen = new AdminScreen(services, app, user);
+                screen.EnableFooterWeatherShortcut();
+                app.Run(screen);
+                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
             }
             lobbyScreen = new LobbyScreen(app, services, user, justRegistered: false, art);
-            nav = (LobbyNavigation?)app.Run(lobbyScreen);
+            lobbyScreen.EnableFooterWeatherShortcut();
+            var nextLobbyResult = app.Run(lobbyScreen);
+            nav = lobbyScreen.FooterShortcutResult ?? (LobbyNavigation?)nextLobbyResult;
         }
         }
         finally
@@ -201,17 +240,36 @@ internal static class BbsSessionRunner
         }
     }
 
-    private static void RunForumLoop(IServiceProvider services, IApplication app, User user)
+    // Returns null when the user backs out of the forum loop normally; returns a
+    // LobbyNavigation when a footer-click shortcut on one of the inner screens needs to
+    // bubble up to RunLobbyLoop for cross-screen dispatch.
+    private static LobbyNavigation? RunForumLoop(IServiceProvider services, IApplication app, User user)
     {
         while (true)
         {
-            var forum = WithDbScope(services, db => app.Run(new ForumListScreen(app, services, db, user)) as Forum);
-            if (forum is null) return;
+            ForumListScreen forumListScreen;
+            using (var scope = services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                forumListScreen = new ForumListScreen(app, services, db, user);
+            }
+            forumListScreen.EnableFooterWeatherShortcut();
+            var forumResult = app.Run(forumListScreen);
+            if (forumListScreen.FooterShortcutResult is { } s1) return s1;
+            var forum = forumResult as Forum;
+            if (forum is null) return null;
 
             while (true)
             {
-                var topicListScreen = WithDbScope(services, db => new TopicListScreen(app, services, db, user, forum));
+                TopicListScreen topicListScreen;
+                using (var scope = services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    topicListScreen = new TopicListScreen(app, services, db, user, forum);
+                }
+                topicListScreen.EnableFooterWeatherShortcut();
                 var listResult = (TopicListResult?)app.Run(topicListScreen);
+                if (topicListScreen.FooterShortcutResult is { } s2) return s2;
                 if (listResult == TopicListResult.Back) break;
 
                 Topic? topic = null;
@@ -221,11 +279,18 @@ internal static class BbsSessionRunner
                 }
                 else if (listResult == TopicListResult.NewTopic)
                 {
-                    topic = app.Run(new NewTopicScreen(app, services, user, forum)) as Topic;
+                    var newTopicScreen = new NewTopicScreen(app, services, user, forum);
+                    newTopicScreen.EnableFooterWeatherShortcut();
+                    var newTopicResult = app.Run(newTopicScreen);
+                    if (newTopicScreen.FooterShortcutResult is { } s3) return s3;
+                    topic = newTopicResult as Topic;
                 }
                 if (topic is null) continue; // back to topic list
 
-                app.Run(new ThreadScreen(services, app, user, topic));
+                var threadScreen = new ThreadScreen(services, app, user, topic);
+                threadScreen.EnableFooterWeatherShortcut();
+                app.Run(threadScreen);
+                if (threadScreen.FooterShortcutResult is { } s4) return s4;
             }
         }
     }
@@ -257,16 +322,5 @@ internal static class BbsSessionRunner
         var cols = (int)(session.Pty?.Cols ?? 80);
         var rows = (int)(session.Pty?.Rows ?? 24);
         return new Size(Math.Max(cols, 20), Math.Max(rows, 5));
-    }
-
-    // Resolves AppDbContext inside a fresh scope, hands it to the action, then disposes
-    // the scope. Safe only when the action does not retain the db beyond its return — list
-    // screens here pull rows into in-memory lists in their constructors, so the screen
-    // outlives the scope without issue.
-    private static T WithDbScope<T>(IServiceProvider services, Func<AppDbContext, T> action)
-    {
-        using var scope = services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return action(db);
     }
 }

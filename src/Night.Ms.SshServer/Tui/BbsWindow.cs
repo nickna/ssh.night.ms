@@ -1,4 +1,5 @@
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Tui.Screens;
 using Night.Ms.SshServer.Tui.StatusBar;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.App;
@@ -25,6 +26,14 @@ public abstract class BbsWindow : Window
 
     protected BbsStatusBar StatusBar { get; }
 
+    // Cross-screen footer shortcut: when the user clicks the weather segment of the
+    // persistent footer, the click handler (wired by EnableFooterWeatherShortcut) sets this
+    // and requests the screen exit. BbsSessionRunner checks the property after every
+    // app.Run(...) — if set, dispatches the requested screen directly instead of returning
+    // to the lobby. Distinct from the screen's own app.Run result so type-specific results
+    // (Forum, Uri, User, etc.) are not clobbered.
+    public LobbyNavigation? FooterShortcutResult { get; private set; }
+
     protected BbsWindow(IApplication app, IServiceProvider services, User? user)
     {
         _app = app;
@@ -38,6 +47,18 @@ public abstract class BbsWindow : Window
             Height = 1,
         };
         Add(StatusBar);
+    }
+
+    // Wires the persistent footer's weather segment to navigate to WeatherScreen on click,
+    // and gives it a visible "clickable" cue (bright-cyan Hint scheme). Called by
+    // BbsSessionRunner on every screen except WeatherScreen itself.
+    public void EnableFooterWeatherShortcut()
+    {
+        StatusBar.EnableClick(() =>
+        {
+            FooterShortcutResult = LobbyNavigation.Weather;
+            _app.RequestStop();
+        });
     }
 
     // Wires Esc → optional cleanup → App.RequestStop. Use for screens whose only Esc
