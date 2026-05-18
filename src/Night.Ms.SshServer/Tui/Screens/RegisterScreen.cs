@@ -6,6 +6,7 @@ using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
 using Night.Ms.SshServer.Tui.Views;
 using Night.Ms.SshTransport;
+using Npgsql;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -203,16 +204,35 @@ public sealed class RegisterScreen : BbsWindow
                 return;
             }
 
+            var adopt = adoptKey?.Value == CheckState.Checked && hasOfferedKey;
+
+            // Pre-check the offered key: friendlier than letting the unique (Provider, Subject)
+            // index fire as a DbUpdateException. The unique index is still the source of truth
+            // on a race — see the catch below.
+            if (adopt && await IsKeyAlreadyAdoptedElsewhereAsync())
+            {
+                status.Text = "[!] That SSH key is already registered to another account. Uncheck 'Adopt the SSH key' to sign up password-only.";
+                return;
+            }
+
             try
             {
-                var adopt = adoptKey?.Value == CheckState.Checked && hasOfferedKey;
                 var user = await CreateUserAsync(handle, password, adopt);
                 Result = user;
                 _app.RequestStop();
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException dbEx) when (dbEx.InnerException is PostgresException pg && pg.SqlState == "23505")
             {
-                status.Text = $"[!] Handle '{handle}' is already taken. Try another.";
+                // 23505 = unique_violation. Use the constraint name to tell the user which
+                // collision they actually hit — the old "Handle is already taken" catch-all
+                // misreported credential-fingerprint collisions when the user adopted a key
+                // already attached to another account.
+                status.Text = pg.ConstraintName switch
+                {
+                    "ix_users_handle" => $"[!] Handle '{handle}' is already taken. Try another.",
+                    "ix_identity_credentials_provider_subject" => "[!] That SSH key is already registered to another account. Uncheck 'Adopt the SSH key' to sign up password-only.",
+                    _ => $"[!] Registration failed (constraint '{pg.ConstraintName}'). Try again.",
+                };
             }
             catch (Exception ex)
             {
@@ -238,6 +258,13 @@ public sealed class RegisterScreen : BbsWindow
     private static bool IsValidHandle(string handle) =>
         handle.Length is >= 3 and <= 32
         && handle.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+
+    private async Task<bool> IsKeyAlreadyAdoptedElsewhereAsync()
+    {
+        if (string.IsNullOrEmpty(_offeredFingerprint)) return false;
+        return await _db.IdentityCredentials.AsNoTracking()
+            .AnyAsync(c => c.Provider == CredentialProvider.Ssh && c.Subject == _offeredFingerprint);
+    }
 
     private async Task<User> CreateUserAsync(string handle, string password, bool adoptKey)
     {
