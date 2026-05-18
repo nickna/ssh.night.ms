@@ -105,7 +105,8 @@ param(
     [switch]$SeedOnly,
     [switch]$CleanOnly,
     [switch]$DeleteKeys,
-    [switch]$Reset
+    [switch]$Reset,
+    [switch]$NoMonitor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -123,6 +124,136 @@ if (-not $ReportsDir) { $ReportsDir = Join-Path $RepoRoot 'loadtest-reports' }
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor DarkGray }
+
+# --- Server-process monitor ---------------------------------------------------
+# Samples the SshServer process's CPU + memory + thread/handle counts every second
+# while the loadtest is running, so each run produces both client-side latency data
+# and server-side resource data side by side. Finding the process by listening-port
+# owner (rather than by name) sidesteps `dotnet run` hosting the server inside a
+# generic dotnet.exe.
+
+function Find-ServerProcess {
+    param([int]$Port)
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            Select-Object -First 1
+        if ($null -eq $conn) { return $null }
+        return Get-Process -Id $conn.OwningProcess -ErrorAction Stop
+    } catch {
+        return $null
+    }
+}
+
+function Start-ServerMonitor {
+    param(
+        [Parameter(Mandatory)] [int]$ProcessId,
+        [Parameter(Mandatory)] [string]$OutputCsv,
+        [int]$IntervalMs = 1000
+    )
+    # Header up front so an interrupted run still leaves a parseable file.
+    'timestamp,cpu_pct,working_set_mb,private_mb,threads,handles' |
+        Out-File -FilePath $OutputCsv -Encoding UTF8
+
+    return Start-ThreadJob -ScriptBlock {
+        param($targetPid, $intervalMs, $outputCsv)
+        $cores = [Environment]::ProcessorCount
+        $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+        if (-not $proc) { return }
+        $prevCpu = $proc.TotalProcessorTime
+        $prevTime = [DateTime]::UtcNow
+        while ($true) {
+            Start-Sleep -Milliseconds $intervalMs
+            try {
+                $proc.Refresh()
+                $now = [DateTime]::UtcNow
+                $cpuDelta = ($proc.TotalProcessorTime - $prevCpu).TotalSeconds
+                $wallDelta = ($now - $prevTime).TotalSeconds
+                $cpuPct = if ($wallDelta -gt 0) {
+                    [math]::Round($cpuDelta / $wallDelta / $cores * 100, 1)
+                } else { 0 }
+                $wsMb   = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+                $privMb = [math]::Round($proc.PrivateMemorySize64 / 1MB, 1)
+                "$($now.ToString('o')),$cpuPct,$wsMb,$privMb,$($proc.Threads.Count),$($proc.HandleCount)" |
+                    Out-File -FilePath $outputCsv -Append -Encoding UTF8
+                $prevCpu = $proc.TotalProcessorTime
+                $prevTime = $now
+            } catch {
+                # Process likely exited; stop the loop cleanly.
+                break
+            }
+        }
+    } -ArgumentList $ProcessId, $IntervalMs, $OutputCsv
+}
+
+function Stop-ServerMonitor {
+    param([System.Management.Automation.Job]$Job)
+    if ($null -eq $Job) { return }
+    try { $Job | Stop-Job -ErrorAction SilentlyContinue } catch {}
+    try { $Job | Remove-Job -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+function Get-Percentile {
+    param([double[]]$Values, [int]$Pct)
+    if (-not $Values -or $Values.Count -eq 0) { return 0 }
+    $sorted = $Values | Sort-Object
+    $idx = [math]::Ceiling($Pct / 100.0 * $sorted.Count) - 1
+    if ($idx -lt 0) { $idx = 0 }
+    if ($idx -ge $sorted.Count) { $idx = $sorted.Count - 1 }
+    return $sorted[$idx]
+}
+
+function Format-ServerMonitorSummary {
+    param([string]$Csv)
+    if (-not (Test-Path $Csv)) {
+        Write-Note "no server-metrics file at $Csv"
+        return
+    }
+    $rows = Import-Csv $Csv
+    if (-not $rows -or $rows.Count -eq 0) {
+        Write-Note "server-metrics file is empty ($Csv)"
+        return
+    }
+
+    $cpu     = @($rows | ForEach-Object { [double]$_.cpu_pct })
+    $ws      = @($rows | ForEach-Object { [double]$_.working_set_mb })
+    $priv    = @($rows | ForEach-Object { [double]$_.private_mb })
+    $threads = @($rows | ForEach-Object { [double]$_.threads })
+    $handles = @($rows | ForEach-Object { [double]$_.handles })
+
+    function Stats([double[]]$v) {
+        return [pscustomobject]@{
+            Min  = ($v | Measure-Object -Minimum).Minimum
+            Mean = [math]::Round(($v | Measure-Object -Average).Average, 1)
+            P95  = Get-Percentile -Values $v -Pct 95
+            Max  = ($v | Measure-Object -Maximum).Maximum
+        }
+    }
+
+    Write-Host ''
+    $startTs = $rows[0].timestamp.Substring(11, 8)
+    $endTs   = $rows[-1].timestamp.Substring(11, 8)
+    Write-Host "server process — $($rows.Count) samples ($startTs → $endTs UTC, $([Environment]::ProcessorCount) cores)" -ForegroundColor Cyan
+    Write-Host ('─' * 96)
+    Write-Host ('{0,-22} {1,12} {2,12} {3,12} {4,12}' -f 'metric','min','mean','p95','max')
+
+    $s = Stats $cpu
+    Write-Host ('{0,-22} {1,10:N1}% {2,10:N1}% {3,10:N1}% {4,10:N1}%' -f 'cpu (all cores)',$s.Min,$s.Mean,$s.P95,$s.Max)
+
+    $s = Stats $ws
+    Write-Host ('{0,-22} {1,9:N0}MB {2,9:N0}MB {3,9:N0}MB {4,9:N0}MB' -f 'working set',$s.Min,$s.Mean,$s.P95,$s.Max)
+
+    $s = Stats $priv
+    Write-Host ('{0,-22} {1,9:N0}MB {2,9:N0}MB {3,9:N0}MB {4,9:N0}MB' -f 'private memory',$s.Min,$s.Mean,$s.P95,$s.Max)
+
+    $s = Stats $threads
+    Write-Host ('{0,-22} {1,12:N0} {2,12:N0} {3,12:N0} {4,12:N0}' -f 'threads',$s.Min,$s.Mean,$s.P95,$s.Max)
+
+    $s = Stats $handles
+    Write-Host ('{0,-22} {1,12:N0} {2,12:N0} {3,12:N0} {4,12:N0}' -f 'handles',$s.Min,$s.Mean,$s.P95,$s.Max)
+
+    Write-Host ''
+    Write-Note "samples: $Csv"
+}
 
 # Cheap TCP probe — avoids racing through build + seed + 10 SSH handshakes only to
 # discover the server's not actually listening.
@@ -254,7 +385,32 @@ if ($Gate) {
     $runArgs += @('--gate', $Gate)
 }
 
-$code = Invoke-LoadTest $runArgs
+# Start server-process monitor (skip with -NoMonitor or when no process owns the
+# listening port). Aggregates print after the loadtest's own report.
+$monitorJob = $null
+$monitorCsv = $null
+if (-not $NoMonitor) {
+    $srv = Find-ServerProcess -Port $SshPort
+    if ($null -eq $srv) {
+        Write-Note "couldn't identify the server process on :$SshPort; skipping monitor"
+    } else {
+        $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+        $monitorCsv = Join-Path $ReportsDir "server-metrics-$stamp.csv"
+        if (-not (Test-Path $ReportsDir)) { New-Item -ItemType Directory -Path $ReportsDir | Out-Null }
+        Write-Note "server monitor: pid $($srv.Id) → $monitorCsv"
+        $monitorJob = Start-ServerMonitor -ProcessId $srv.Id -OutputCsv $monitorCsv -IntervalMs 1000
+    }
+}
+
+try {
+    $code = Invoke-LoadTest $runArgs
+} finally {
+    if ($monitorJob) {
+        Stop-ServerMonitor -Job $monitorJob
+        Format-ServerMonitorSummary -Csv $monitorCsv
+    }
+}
+
 if ($code -ne 0) {
     Write-Host ''
     Write-Host "loadtest exited with $code." -ForegroundColor Yellow
