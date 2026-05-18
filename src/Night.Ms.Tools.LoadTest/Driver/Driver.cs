@@ -97,9 +97,19 @@ public sealed class Driver
         catch (Exception ex)
         {
             _metrics.IncrementError("bot.connect");
-            if (Interlocked.Increment(ref _connectFailuresLogged) <= MaxLoggedFailuresPerCategory)
+            var logRank = Interlocked.Increment(ref _connectFailuresLogged);
+            if (logRank <= MaxLoggedFailuresPerCategory)
             {
-                Console.Error.WriteLine($"loadtest: bot {handle} connect failed: {ex.GetType().Name}: {ex.Message}");
+                var inner = ex.InnerException is { } i ? $" -> {i.GetType().Name}: {i.Message}" : "";
+                Console.Error.WriteLine($"loadtest: bot {handle} connect failed: {ex.GetType().Name}: {ex.Message}{inner}");
+            }
+            // First failure only: dump the full stack so we can see *where* inside
+            // Renci.SshNet the read-of-zero happened (KEX, banner exchange, auth, etc.).
+            if (logRank == 1)
+            {
+                Console.Error.WriteLine($"loadtest: first-failure stack:\n{ex}");
+                Console.Error.WriteLine(
+                    $"loadtest: to bisect manually, try: ssh -p {_config.Port} -i \"{keyPath}\" -o StrictHostKeyChecking=accept-new {handle}@{_config.Host}");
             }
             return;
         }
