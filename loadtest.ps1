@@ -32,8 +32,11 @@
 .PARAMETER Mix
     Scenario proportions, "chat/forum/idle". Defaults to "60/30/10".
 
-.PARAMETER Host
-    SSH host the bots connect to. Defaults to "localhost".
+.PARAMETER BbsHost
+    SSH host the bots connect to. Defaults to "127.0.0.1" (IPv4 literal — on
+    Windows, 'localhost' prefers ::1 and the SSH server only binds IPv4, so
+    the preflight TCP probe fails when given a hostname even though the
+    server is up).
 
 .PARAMETER KeysDir
     Per-bot private keys directory. Defaults to ./loadtest-keys at the repo root so
@@ -91,7 +94,11 @@ param(
     [int]$RampSeconds = 5,
     [int]$DurationSeconds = 30,
     [string]$Mix = '60/30/10',
-    [string]$BbsHost = 'localhost',
+    # IPv4 literal, not 'localhost'. Windows resolves localhost to ::1 first,
+    # and the SshServer binds to 0.0.0.0 (IPv4-only) — TCP probes via
+    # `localhost` end up trying ::1:2222 and fail with "not reachable" even
+    # while the server is up. Matches the Postgres probe convention below.
+    [string]$BbsHost = '127.0.0.1',
     [string]$KeysDir,
     [string]$ReportsDir,
     [string]$Gate,
@@ -103,6 +110,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
+
+# PowerShell decodes a native command's stdout using [Console]::OutputEncoding, which
+# on Windows defaults to the OEM code page (CP850/CP437 typically). The dotnet process
+# writes UTF-8, so without this we get mojibake on the em-dashes + box-drawing chars
+# in the loadtest report.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Project = Join-Path $RepoRoot 'src\Night.Ms.Tools.LoadTest'
 
 if (-not $KeysDir)    { $KeysDir    = Join-Path $RepoRoot 'loadtest-keys' }

@@ -24,6 +24,12 @@ public sealed class ChatScenario : IScenario
     // Gate so we only dump one bot's stuck-on-lobby screen even at N=500.
     private static int s_chatEnterDumpsEmitted;
 
+    // Sanity ceiling: any marker that's more than this many ms old when we observe it
+    // is stale chat history from a previous run (ChatScreen loads recent history on
+    // entry). Don't record those as deliveries — they'd poison p95/p99 with values
+    // measured in minutes when the run only lasts seconds.
+    private const long MaxRealisticDeliveryAgeMs = 60_000;
+
     private readonly int _botIndex;
 
     public ChatScenario(int botIndex)
@@ -140,8 +146,9 @@ public sealed class ChatScenario : IScenario
                 var key = $"{sender}-{seq}";
                 if (!seen.Add(key)) continue; // already counted
                 if (!long.TryParse(m.Groups[3].Value, out var utcMs)) continue;
-                var elapsed = TimeSpan.FromMilliseconds(Math.Max(0, now - utcMs));
-                metrics.Record("chat.publish_to_receive_ms", elapsed);
+                var deltaMs = now - utcMs;
+                if (deltaMs < 0 || deltaMs > MaxRealisticDeliveryAgeMs) continue;
+                metrics.Record("chat.publish_to_receive_ms", TimeSpan.FromMilliseconds(deltaMs));
             }
         }
     }
