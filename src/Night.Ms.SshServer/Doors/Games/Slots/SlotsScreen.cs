@@ -15,6 +15,23 @@ internal sealed class SlotsScreen : BbsWindow
 {
     private const int BetStep = 5;
 
+    // 60ms × 33 frames ≈ 1.98s total spin. Reels lock sequentially at the schedule below so
+    // the player gets the classic "click… click… click" cadence (left, middle, right).
+    private static readonly TimeSpan SpinFrameInterval = TimeSpan.FromMilliseconds(60);
+    private const int Reel1LockFrame = 18;
+    private const int Reel2LockFrame = 24;
+    private const int Reel3LockFrame = 33;
+
+    // 80ms × ~19 frames ≈ 1.5s of border-flash + coin shower on a paying spin. Continues
+    // until the last coin has floated off the cabinet.
+    private static readonly TimeSpan FlashFrameInterval = TimeSpan.FromMilliseconds(80);
+    private const int FlashTotalFrames = 19;
+
+    // Multiplier threshold that distinguishes "jackpot" win flash (faster red↔gold cycle)
+    // from a normal win flash (slower gold↔white cycle). 200× covers Bar and Seven 3-of-a-
+    // kind — the two top-tier symbols in SlotPaytable.
+    private const int JackpotMultiplierThreshold = 200;
+
     private readonly IApplication _app;
     private readonly IServiceProvider _services;
     private readonly User _user;
@@ -23,9 +40,17 @@ internal sealed class SlotsScreen : BbsWindow
 
     private int _bet;
     private bool _spinning;
+    private int _spinFrame;
+    private int _flashFrame;
+    private SlotsResult? _pendingResult;
+    private WalletSnapshot? _pendingWallet;
+    private int _pendingPayout;
+    private object? _spinTimerToken;
+    private object? _flashTimerToken;
+    private bool _disposed;
 
     private readonly Label _walletLabel;
-    private readonly Label _reelLabel;
+    private readonly SlotsCabinetView _cabinet;
     private readonly Label _resultLabel;
     private readonly Label _betLabel;
 
@@ -44,23 +69,20 @@ internal sealed class SlotsScreen : BbsWindow
         var header = new Label { X = 2, Y = 0, Width = Dim.Fill(2), Text = "Slot Machine" };
         header.SetScheme(BbsTheme.Header_);
 
-        _walletLabel = new Label { X = 2, Y = 2, Width = Dim.Fill(2), Text = "Loading wallet…" };
+        _walletLabel = new Label { X = 2, Y = 1, Width = Dim.Fill(2), Text = "Loading wallet…" };
         _walletLabel.SetScheme(BbsTheme.Hint);
 
-        // Reel window: three glyphs in boxes, centered horizontally inside the screen.
-        // Starts as dashes (the "no spin yet" placeholder) so the screen has something to
-        // render before the user hits Enter.
-        _reelLabel = new Label
+        // Cabinet sits at the top of the interior; 38 cols wide, 13 rows tall, centered.
+        _cabinet = new SlotsCabinetView
         {
             X = Pos.Center(),
-            Y = 5,
-            Text = BuildReelArt('-', '-', '-'),
+            Y = 3,
         };
 
         _resultLabel = new Label
         {
             X = 2,
-            Y = 10,
+            Y = 17,
             Width = Dim.Fill(2),
             Text = "Press [Enter] to spin.",
         };
@@ -68,7 +90,7 @@ internal sealed class SlotsScreen : BbsWindow
         _betLabel = new Label
         {
             X = 2,
-            Y = 12,
+            Y = 18,
             Width = Dim.Fill(2),
             Text = BuildBetText(),
         };
@@ -82,7 +104,7 @@ internal sealed class SlotsScreen : BbsWindow
         };
         hint.SetScheme(BbsTheme.Hint);
 
-        Add(header, _walletLabel, _reelLabel, _resultLabel, _betLabel, hint);
+        Add(header, _walletLabel, _cabinet, _resultLabel, _betLabel, hint);
 
         KeyDown += OnKey;
         InstallEscapeHandler();
@@ -155,12 +177,14 @@ internal sealed class SlotsScreen : BbsWindow
 
     private async Task SpinAsync()
     {
+        // `_spinning` is set synchronously (before the first await) so a second key press
+        // arriving while the await is in flight gets swallowed by OnKey.
         _spinning = true;
         try
         {
             // Determine outcome first, then persist via the ledger. If the ledger throws
             // (insufficient funds, transient DB error) the reels never visibly move — the
-            // player only sees the result when the bet has actually committed.
+            // animation only starts once the bet has actually committed.
             var result = _engine.Spin();
             var payout = result.Payout(_bet);
 
@@ -183,21 +207,116 @@ internal sealed class SlotsScreen : BbsWindow
                     _app, "Not enough coins",
                     $"Bet is {ex.Requested}, but you only have {ex.Available}.\nAdjust your bet or wait for the daily reset.",
                     "_OK"));
+                _spinning = false;
                 return;
             }
 
-            _app.Invoke(() =>
-            {
-                _reelLabel.Text = BuildReelArt(result.Reel1.Glyph(), result.Reel2.Glyph(), result.Reel3.Glyph());
-                _resultLabel.Text = payout > 0
-                    ? $"{result.MatchLabel}  —  +{payout} coins (net {payout - _bet:+#;-#;0})"
-                    : $"{result.MatchLabel}  —  lost {_bet} coins";
-                ApplyWalletSnapshot(outcome.Wallet);
-            });
+            _pendingResult = result;
+            _pendingWallet = outcome.Wallet;
+            _pendingPayout = payout;
+
+            _app.Invoke(StartSpinAnimation);
         }
-        finally
+        catch
         {
             _spinning = false;
+            throw;
+        }
+    }
+
+    private void StartSpinAnimation()
+    {
+        // A new spin always cancels any in-flight win flash from the previous round so the
+        // border and coin tray reset before the reels start scrolling.
+        CancelFlashTimer();
+        _cabinet.ClearWinFlash();
+
+        _resultLabel.Text = "Spinning…";
+        _spinFrame = 0;
+        _cabinet.StartSpinning(0);
+        _cabinet.StartSpinning(1);
+        _cabinet.StartSpinning(2);
+
+        _spinTimerToken = _app.AddTimeout(SpinFrameInterval, AdvanceSpinFrame);
+    }
+
+    private bool AdvanceSpinFrame()
+    {
+        if (_disposed) return false;
+        _spinFrame++;
+
+        if (_spinFrame == Reel1LockFrame)
+        {
+            _cabinet.LockReel(0, _pendingResult!.Reel1);
+        }
+        else if (_spinFrame == Reel2LockFrame)
+        {
+            _cabinet.LockReel(1, _pendingResult!.Reel2);
+        }
+        else if (_spinFrame >= Reel3LockFrame)
+        {
+            _cabinet.LockReel(2, _pendingResult!.Reel3);
+            FinishSpin();
+            _spinTimerToken = null;
+            return false;
+        }
+        else
+        {
+            _cabinet.AdvanceSpin();
+        }
+
+        return true;
+    }
+
+    private void FinishSpin()
+    {
+        var result = _pendingResult!;
+        var payout = _pendingPayout;
+
+        _resultLabel.Text = payout > 0
+            ? $"{result.MatchLabel}  —  +{payout} coins (net {payout - _bet:+#;-#;0})"
+            : $"{result.MatchLabel}  —  lost {_bet} coins";
+        if (_pendingWallet is { } wallet) ApplyWalletSnapshot(wallet);
+
+        // Release the input lock before the win flash plays so the player can immediately
+        // re-spin. The flash is purely decorative; a new spin will cancel it.
+        _spinning = false;
+
+        if (payout > 0)
+        {
+            var tier = result.Multiplier >= JackpotMultiplierThreshold ? WinTier.Jackpot : WinTier.Normal;
+            var coins = Math.Clamp(payout / Math.Max(_bet, 1), 5, 20);
+            _flashFrame = 0;
+            _cabinet.SetWinFlash(tier, 0);
+            _cabinet.AddCoinBurst(coins);
+            _flashTimerToken = _app.AddTimeout(FlashFrameInterval, AdvanceFlashFrame);
+        }
+    }
+
+    private bool AdvanceFlashFrame()
+    {
+        if (_disposed) return false;
+        _flashFrame++;
+        var tier = (_pendingResult?.Multiplier ?? 0) >= JackpotMultiplierThreshold
+            ? WinTier.Jackpot
+            : WinTier.Normal;
+        _cabinet.SetWinFlash(tier, _flashFrame);
+        _cabinet.AdvanceCoinBurst();
+        if (_flashFrame >= FlashTotalFrames && !_cabinet.HasCoins)
+        {
+            _cabinet.ClearWinFlash();
+            _flashTimerToken = null;
+            return false;
+        }
+        return true;
+    }
+
+    private void CancelFlashTimer()
+    {
+        if (_flashTimerToken is not null)
+        {
+            try { _app.RemoveTimeout(_flashTimerToken); } catch { /* ignore */ }
+            _flashTimerToken = null;
         }
     }
 
@@ -217,17 +336,6 @@ internal sealed class SlotsScreen : BbsWindow
     private string BuildBetText() =>
         $"Bet: {_bet} coins   (min {_game.MinBet}, max {_game.MaxBet})";
 
-    private static string BuildReelArt(char a, char b, char c)
-    {
-        // Three side-by-side boxes drawn with ASCII so column widths stay predictable on
-        // any SSH client. Each box is 5 cols wide × 3 rows tall.
-        var sb = new StringBuilder();
-        sb.Append("+---+ +---+ +---+\n");
-        sb.Append($"| {a} | | {b} | | {c} |\n");
-        sb.Append("+---+ +---+ +---+");
-        return sb.ToString();
-    }
-
     private void ShowPaytable()
     {
         var sb = new StringBuilder();
@@ -241,5 +349,24 @@ internal sealed class SlotsScreen : BbsWindow
         sb.AppendLine($"One cherry on reel 1 only:          {SlotPaytable.OneCherryReelOneMultiplier}× (break-even)");
 
         MessageBox.Query(_app, "Paytable", sb.ToString(), "_OK");
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !_disposed)
+        {
+            _disposed = true;
+            if (_spinTimerToken is not null)
+            {
+                try { _app.RemoveTimeout(_spinTimerToken); } catch { /* ignore */ }
+                _spinTimerToken = null;
+            }
+            if (_flashTimerToken is not null)
+            {
+                try { _app.RemoveTimeout(_flashTimerToken); } catch { /* ignore */ }
+                _flashTimerToken = null;
+            }
+        }
+        base.Dispose(disposing);
     }
 }
