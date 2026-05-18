@@ -26,13 +26,24 @@ public abstract class BbsWindow : Window
 
     protected BbsStatusBar StatusBar { get; }
 
+    // Per-screen lifetime token. Cancelled (and disposed) by BbsWindow.Dispose, so async
+    // work that captures Shutdown bails out cleanly when the screen tears down. Screens
+    // that need to compose this with another scope (e.g. ChatScreen's per-channel CTS)
+    // can still create a linked CTS from Shutdown.
+    protected CancellationTokenSource ShutdownCts { get; } = new();
+    protected CancellationToken Shutdown => ShutdownCts.Token;
+
     // Cross-screen footer shortcut: when the user clicks the weather segment of the
-    // persistent footer, the click handler (wired by EnableFooterWeatherShortcut) sets this
-    // and requests the screen exit. BbsSessionRunner checks the property after every
-    // app.Run(...) — if set, dispatches the requested screen directly instead of returning
-    // to the lobby. Distinct from the screen's own app.Run result so type-specific results
-    // (Forum, Uri, User, etc.) are not clobbered.
+    // persistent footer, the click handler sets this and requests the screen exit.
+    // BbsSessionRunner checks the property after every app.Run(...) — if set, dispatches
+    // the requested screen directly instead of returning to the lobby. Distinct from the
+    // screen's own app.Run result so type-specific results (Forum, Uri, User, etc.) are
+    // not clobbered.
     public LobbyNavigation? FooterShortcutResult { get; private set; }
+
+    // WeatherScreen overrides this to false — the user is already on Weather, so the
+    // footer click would just no-op visibly. Every other screen leaves it true.
+    protected virtual bool EnableFooterWeatherShortcut => true;
 
     protected BbsWindow(IApplication app, IServiceProvider services, User? user)
     {
@@ -47,18 +58,15 @@ public abstract class BbsWindow : Window
             Height = 1,
         };
         Add(StatusBar);
-    }
 
-    // Wires the persistent footer's weather segment to navigate to WeatherScreen on click,
-    // and gives it a visible "clickable" cue (bright-cyan Hint scheme). Called by
-    // BbsSessionRunner on every screen except WeatherScreen itself.
-    public void EnableFooterWeatherShortcut()
-    {
-        StatusBar.EnableClick(() =>
+        if (EnableFooterWeatherShortcut)
         {
-            FooterShortcutResult = LobbyNavigation.Weather;
-            _app.RequestStop();
-        });
+            StatusBar.EnableClick(() =>
+            {
+                FooterShortcutResult = LobbyNavigation.Weather;
+                _app.RequestStop();
+            });
+        }
     }
 
     // Wires Esc → optional cleanup → App.RequestStop. Use for screens whose only Esc
@@ -76,5 +84,15 @@ public abstract class BbsWindow : Window
                 key.Handled = true;
             }
         };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            try { ShutdownCts.Cancel(); } catch { /* ignore */ }
+            ShutdownCts.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

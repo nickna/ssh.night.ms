@@ -83,13 +83,13 @@ internal sealed class LobbyCarouselView : View
 
     private void OnKey(object? sender, Key key)
     {
-        if (key == Key.CursorLeft || key == Key.H || key == Key.H.WithShift)
+        if (key == Key.CursorLeft || key.Matches(Key.H))
         {
             MoveLeft();
             key.Handled = true;
             return;
         }
-        if (key == Key.CursorRight || key == Key.L || key == Key.L.WithShift)
+        if (key == Key.CursorRight || key.Matches(Key.L))
         {
             MoveRight();
             key.Handled = true;

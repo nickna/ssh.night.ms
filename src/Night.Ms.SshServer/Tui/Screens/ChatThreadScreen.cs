@@ -32,7 +32,6 @@ public sealed class ChatThreadScreen : BbsWindow
     private readonly ChatLogView _log;
     private readonly TextField _input;
     private readonly BbsStatusLine _status;
-    private readonly CancellationTokenSource _shutdown = new();
 
     private readonly ChatMessageLog _msgLog = new();
     private readonly ChatEnvelopeDispatcher _dispatcher;
@@ -110,7 +109,7 @@ public sealed class ChatThreadScreen : BbsWindow
         Add(_log, _status, _input);
         _input.SetFocus();
 
-        InstallEscapeHandler(() => _shutdown.Cancel());
+        InstallEscapeHandler(() => ShutdownCts.Cancel());
 
         LoadAndSubscribeAsync().FireAndLog(_services, nameof(LoadAndSubscribeAsync));
     }
@@ -120,7 +119,7 @@ public sealed class ChatThreadScreen : BbsWindow
         try
         {
             var muts = _services.GetRequiredService<ChatMutationService>();
-            var thread = await muts.ListThreadAsync(_rootMessageId, _shutdown.Token);
+            var thread = await muts.ListThreadAsync(_rootMessageId, Shutdown);
             if (thread.Root is null)
             {
                 AppendSystem("[!] thread no longer exists.", isError: true);
@@ -129,7 +128,7 @@ public sealed class ChatThreadScreen : BbsWindow
 
             var ids = new List<long> { thread.Root.Id };
             ids.AddRange(thread.Replies.Select(r => r.Id));
-            var reactionMap = await muts.SnapshotReactionsAsync(ids, _shutdown.Token);
+            var reactionMap = await muts.SnapshotReactionsAsync(ids, Shutdown);
 
             // Header: timeless separator + root message rendered as a normal message.
             var rootHandle = thread.Root.User?.Handle ?? "?";
@@ -171,7 +170,7 @@ public sealed class ChatThreadScreen : BbsWindow
             }
 
             SetStatus($"replying to @{rootHandle}  |  /help for commands  |  [Esc] back");
-            _subscriber = Task.Run(() => RunSubscribeAsync(_shutdown.Token));
+            _subscriber = Task.Run(() => RunSubscribeAsync(Shutdown));
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
@@ -300,7 +299,7 @@ public sealed class ChatThreadScreen : BbsWindow
 
             case "/quit":
             case "/exit":
-                _shutdown.Cancel();
+                ShutdownCts.Cancel();
                 _app.RequestStop();
                 return;
 
@@ -352,8 +351,8 @@ public sealed class ChatThreadScreen : BbsWindow
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
         var result = add
-            ? await muts.ReactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, _shutdown.Token)
-            : await muts.UnreactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, _shutdown.Token);
+            ? await muts.ReactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, Shutdown)
+            : await muts.UnreactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, Shutdown);
         ReportMutation(result);
     }
 
@@ -370,7 +369,7 @@ public sealed class ChatThreadScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, _shutdown.Token);
+        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, Shutdown);
         ReportMutation(result);
     }
 
@@ -387,7 +386,7 @@ public sealed class ChatThreadScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, _shutdown.Token);
+        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, Shutdown);
         ReportMutation(result);
     }
 
@@ -451,12 +450,12 @@ public sealed class ChatThreadScreen : BbsWindow
                 ParentMessageId = _rootMessageId,
             };
             db.ChatMessages.Add(msg);
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
 
             var bus = scope.ServiceProvider.GetRequiredService<IRealtimeBus>();
             var dto = new ChatMessageDto(msg.Id, _channelId, _user.Id, _user.Handle, body, now, _rootMessageId);
             var envelope = new ChatEnvelope(ChatEventKind.Message, JsonSerializer.SerializeToElement(dto));
-            await bus.PublishAsync(ChatTopics.Channel(_channelId), JsonSerializer.SerializeToUtf8Bytes(envelope), _shutdown.Token);
+            await bus.PublishAsync(ChatTopics.Channel(_channelId), JsonSerializer.SerializeToUtf8Bytes(envelope), Shutdown);
         }
         catch (OperationCanceledException) { /* expected on close */ }
         catch (Exception ex)
@@ -493,14 +492,5 @@ public sealed class ChatThreadScreen : BbsWindow
 
     private void SetStatus(string text) => _app.Invoke(() => _status.Set(text));
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
-            _shutdown.Dispose();
-        }
-        base.Dispose(disposing);
-    }
 
 }

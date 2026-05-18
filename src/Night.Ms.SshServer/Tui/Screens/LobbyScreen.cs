@@ -125,7 +125,7 @@ public sealed class LobbyScreen : BbsWindow
         KeyDown += (_, key) =>
         {
             if (key == Key.Esc) { key.Handled = true; Choose(LobbyNavigation.Logout); return; }
-            if (key == Key.A || key == Key.A.WithShift)
+            if (key.Matches(Key.A))
             {
                 key.Handled = true;
                 if (LoadedAlerts is { Count: > 0 })

@@ -181,18 +181,12 @@ internal static class BbsSessionRunner
         try
         {
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
-        lobbyScreen.EnableFooterWeatherShortcut();
-        var lobbyResult = app.Run(lobbyScreen);
-        // Footer-click shortcut wins over the screen's own return value — see BbsWindow.FooterShortcutResult.
-        var nav = lobbyScreen.FooterShortcutResult ?? (LobbyNavigation?)lobbyResult;
+        var nav = RunChild(app, lobbyScreen, out var lobbyResult) ?? (LobbyNavigation?)lobbyResult;
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
-                var screen = new ChatScreen(services, app, user, lobbyChannel);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new ChatScreen(services, app, user, lobbyChannel), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Boards)
             {
@@ -200,92 +194,71 @@ internal static class BbsSessionRunner
             }
             else if (nav == LobbyNavigation.Profile)
             {
-                var screen = new ProfileEditScreen(app, services, user, session.RemoteIPAddress);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new ProfileEditScreen(app, services, user, session.RemoteIPAddress), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.News)
             {
-                var screen = new NewsScreen(services, app, user);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new NewsScreen(services, app, user), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Browser)
             {
-                var prompt = new BrowserPromptScreen(app, services, user);
-                prompt.EnableFooterWeatherShortcut();
-                var promptResult = app.Run(prompt);
-                if (prompt.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new BrowserPromptScreen(app, services, user), out var promptResult) is { } shortcut) { nav = shortcut; continue; }
                 if (promptResult is Uri uri)
                 {
-                    var reader = new ReaderScreen(app, services, user, uri);
-                    reader.EnableFooterWeatherShortcut();
-                    app.Run(reader);
-                    if (reader.FooterShortcutResult is { } readerShortcut) { nav = readerShortcut; continue; }
+                    if (RunChild(app, new ReaderScreen(app, services, user, uri), out _) is { } readerShortcut) { nav = readerShortcut; continue; }
                 }
             }
             else if (nav == LobbyNavigation.Gallery)
             {
                 var gallery = services.GetRequiredService<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider>();
-                var screen = new GalleryScreen(app, services, user, gallery);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new GalleryScreen(app, services, user, gallery), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Map)
             {
                 var rasterTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IOsmTileFetcher>();
                 var vectorTiles = services.GetRequiredService<Night.Ms.SshServer.Tui.Map.IVectorTileFetcher>();
                 var logger = services.GetRequiredService<ILogger<MapScreen>>();
-                var screen = new MapScreen(app, services, user, rasterTiles, vectorTiles, logger);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new MapScreen(app, services, user, rasterTiles, vectorTiles, logger), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Weather)
             {
                 using var scope = services.CreateScope();
-                // WeatherScreen does not get EnableFooterWeatherShortcut — the user is already here.
                 app.Run(new WeatherScreen(app, scope.ServiceProvider, user));
             }
             else if (nav == LobbyNavigation.Finance)
             {
                 using var scope = services.CreateScope();
-                var screen = new FinanceScreen(app, scope.ServiceProvider, user);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new FinanceScreen(app, scope.ServiceProvider, user), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Alerts)
             {
                 var alerts = lobbyScreen.LoadedAlerts;
                 if (alerts is { Count: > 0 })
                 {
-                    var screen = new AlertsScreen(app, services, user, alerts);
-                    screen.EnableFooterWeatherShortcut();
-                    app.Run(screen);
-                    if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                    if (RunChild(app, new AlertsScreen(app, services, user, alerts), out _) is { } shortcut) { nav = shortcut; continue; }
                 }
             }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {
-                var screen = new AdminScreen(services, app, user);
-                screen.EnableFooterWeatherShortcut();
-                app.Run(screen);
-                if (screen.FooterShortcutResult is { } shortcut) { nav = shortcut; continue; }
+                if (RunChild(app, new AdminScreen(services, app, user), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             lobbyScreen = new LobbyScreen(app, services, user, justRegistered: false, art);
-            lobbyScreen.EnableFooterWeatherShortcut();
-            var nextLobbyResult = app.Run(lobbyScreen);
-            nav = lobbyScreen.FooterShortcutResult ?? (LobbyNavigation?)nextLobbyResult;
+            nav = RunChild(app, lobbyScreen, out var nextLobbyResult) ?? (LobbyNavigation?)nextLobbyResult;
         }
         }
         finally
         {
             wallCts.Cancel();
         }
+    }
+
+    // Runs a child screen and returns the footer-weather shortcut if the user clicked the
+    // footer; otherwise null. The screen's own typed return value (from app.Run) is
+    // surfaced through `typedResult` for callers that need it; most callers discard it.
+    private static LobbyNavigation? RunChild(IApplication app, BbsWindow screen, out object? typedResult)
+    {
+        typedResult = app.Run(screen);
+        return screen.FooterShortcutResult;
     }
 
     // Returns null when the user backs out of the forum loop normally; returns a
@@ -301,9 +274,7 @@ internal static class BbsSessionRunner
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 forumListScreen = new ForumListScreen(app, services, db, user);
             }
-            forumListScreen.EnableFooterWeatherShortcut();
-            var forumResult = app.Run(forumListScreen);
-            if (forumListScreen.FooterShortcutResult is { } s1) return s1;
+            if (RunChild(app, forumListScreen, out var forumResult) is { } s1) return s1;
             var forum = forumResult as Forum;
             if (forum is null) return null;
 
@@ -315,9 +286,8 @@ internal static class BbsSessionRunner
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     topicListScreen = new TopicListScreen(app, services, db, user, forum);
                 }
-                topicListScreen.EnableFooterWeatherShortcut();
-                var listResult = (TopicListResult?)app.Run(topicListScreen);
-                if (topicListScreen.FooterShortcutResult is { } s2) return s2;
+                if (RunChild(app, topicListScreen, out var listObj) is { } s2) return s2;
+                var listResult = (TopicListResult?)listObj;
                 if (listResult == TopicListResult.Back) break;
 
                 Topic? topic = null;
@@ -327,18 +297,12 @@ internal static class BbsSessionRunner
                 }
                 else if (listResult == TopicListResult.NewTopic)
                 {
-                    var newTopicScreen = new NewTopicScreen(app, services, user, forum);
-                    newTopicScreen.EnableFooterWeatherShortcut();
-                    var newTopicResult = app.Run(newTopicScreen);
-                    if (newTopicScreen.FooterShortcutResult is { } s3) return s3;
+                    if (RunChild(app, new NewTopicScreen(app, services, user, forum), out var newTopicResult) is { } s3) return s3;
                     topic = newTopicResult as Topic;
                 }
                 if (topic is null) continue; // back to topic list
 
-                var threadScreen = new ThreadScreen(services, app, user, topic);
-                threadScreen.EnableFooterWeatherShortcut();
-                app.Run(threadScreen);
-                if (threadScreen.FooterShortcutResult is { } s4) return s4;
+                if (RunChild(app, new ThreadScreen(services, app, user, topic), out _) is { } s4) return s4;
             }
         }
     }

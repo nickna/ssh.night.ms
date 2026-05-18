@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -22,7 +23,7 @@ public sealed class KeysManagementScreen : BbsWindow
     private readonly AppDbContext _db;
     private readonly ListView _list;
     private List<IdentityCredential> _keys = new();
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
 
     public KeysManagementScreen(IApplication app, IServiceProvider services, User user, AppDbContext db)
         : base(app, services, user)
@@ -54,8 +55,14 @@ public sealed class KeysManagementScreen : BbsWindow
         _list.SetScheme(BbsTheme.Input);
         Add(_list);
 
-        _status = new Label { X = 2, Y = Pos.AnchorEnd(4), Width = Dim.Fill(2), Height = 1 };
-        _status.SetScheme(BbsTheme.Warning);
+        _status = new BbsStatusLine
+        {
+            X = 2,
+            Y = Pos.AnchorEnd(4),
+            Width = Dim.Fill(2),
+            Height = 1,
+            DefaultKind = BbsStatusLine.StatusKind.Status,
+        };
         Add(_status);
 
         var remove = new Button { X = 2, Y = Pos.AnchorEnd(2), Text = "_Remove selected" };
@@ -103,13 +110,13 @@ public sealed class KeysManagementScreen : BbsWindow
             .FirstAsync();
         if (userRow.RequireSshKey && otherKeys < 1)
         {
-            _app.Invoke(() => _status.Text = "[!] Passwordless mode is on — disable it first or you'll lock yourself out.");
+            _app.Invoke(() => _status.Set("[!] Passwordless mode is on — disable it first or you'll lock yourself out."));
             return;
         }
         var hasPassword = userRow.PasswordHash != null;
         if (otherKeys + (hasPassword ? 1 : 0) < 1)
         {
-            _app.Invoke(() => _status.Text = "[!] Set a password first — you'd lock yourself out.");
+            _app.Invoke(() => _status.Set("[!] Set a password first — you'd lock yourself out."));
             return;
         }
 
@@ -129,7 +136,7 @@ public sealed class KeysManagementScreen : BbsWindow
             }),
         });
         await _db.SaveChangesAsync();
-        _app.Invoke(() => _status.Text = "Removed.");
+        _app.Invoke(() => _status.SetSuccess("Removed."));
         await ReloadAsync();
     }
 

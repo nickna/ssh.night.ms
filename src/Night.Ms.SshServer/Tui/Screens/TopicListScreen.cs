@@ -74,7 +74,7 @@ public sealed class TopicListScreen : BbsWindow
         InstallEscapeHandler(() => Result = TopicListResult.Back);
         KeyDown += (_, key) =>
         {
-            if (key == Key.N || key == Key.N.WithShift)
+            if (key.Matches(Key.N))
             {
                 Result = TopicListResult.NewTopic;
                 _app.RequestStop();

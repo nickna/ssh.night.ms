@@ -32,12 +32,9 @@ public sealed class FavoritesManagementScreen : BbsWindow
     private readonly User _user;
     private readonly ListView _list;
     private readonly BbsStatusLine _status;
-    private readonly CancellationTokenSource _shutdown = new();
 
     private List<UserSavedLocation> _favorites = new();
-    // First D-press arms this with the row id; second D commits the delete. Cleared by any
-    // other key so an accidental D doesn't leave the screen in a stuck "armed" state.
-    private long? _pendingDeleteId;
+    private readonly TwoStepDelete<UserSavedLocation> _delete;
 
     public FavoritesManagementScreen(IApplication app, IServiceProvider services, User user)
         : base(app, services, user)
@@ -72,6 +69,12 @@ public sealed class FavoritesManagementScreen : BbsWindow
             Width = Dim.Fill(),
         };
 
+        _delete = new TwoStepDelete<UserSavedLocation>(
+            _status,
+            id: f => f.Id,
+            label: f => f.Label,
+            commit: f => DeleteAsync(f).FireAndLog(_services, nameof(DeleteAsync)));
+
         Add(header, _list, _status);
         _list.SetFocus();
 
@@ -82,14 +85,12 @@ public sealed class FavoritesManagementScreen : BbsWindow
 
     private void OnListKeyDown(object? sender, Key key)
     {
-        var armingDelete = key == Key.D || key == Key.D.WithShift;
-
-        // Clear the delete-arming flag on anything that isn't a second D press so a stray
-        // navigation key doesn't leave us in confirm-pending state.
-        if (_pendingDeleteId is not null && !armingDelete)
+        if (_delete.TryHandle(key, SelectedFavorite()))
         {
-            _pendingDeleteId = null;
+            key.Handled = true;
+            return;
         }
+        _delete.Reset();
 
         if (key == Key.Enter)
         {
@@ -99,22 +100,17 @@ public sealed class FavoritesManagementScreen : BbsWindow
             Result = new FavoritesManagementResult(fav);
             _app.RequestStop();
         }
-        else if (armingDelete)
-        {
-            key.Handled = true;
-            HandleDeleteKey();
-        }
-        else if (key == Key.R || key == Key.R.WithShift)
+        else if (key.Matches(Key.R))
         {
             key.Handled = true;
             HandleRenameKey();
         }
-        else if (key == Key.K || key == Key.K.WithShift)
+        else if (key.Matches(Key.K))
         {
             key.Handled = true;
             MoveAsync(-1).FireAndLog(_services, nameof(MoveAsync));
         }
-        else if (key == Key.J || key == Key.J.WithShift)
+        else if (key.Matches(Key.J))
         {
             key.Handled = true;
             MoveAsync(+1).FireAndLog(_services, nameof(MoveAsync));
@@ -126,24 +122,6 @@ public sealed class FavoritesManagementScreen : BbsWindow
         var idx = _list.SelectedItem ?? -1;
         if (idx < 0 || idx >= _favorites.Count) return null;
         return _favorites[idx];
-    }
-
-    private void HandleDeleteKey()
-    {
-        var fav = SelectedFavorite();
-        if (fav is null) return;
-
-        if (_pendingDeleteId == fav.Id)
-        {
-            // Confirmed — commit the delete.
-            _pendingDeleteId = null;
-            DeleteAsync(fav).FireAndLog(_services, nameof(DeleteAsync));
-        }
-        else
-        {
-            _pendingDeleteId = fav.Id;
-            _status.SetWarning($"[!] press D again to delete '{fav.Label}'. Any other key cancels.");
-        }
     }
 
     private void HandleRenameKey()
@@ -172,7 +150,7 @@ public sealed class FavoritesManagementScreen : BbsWindow
                 .OrderBy(s => s.SortOrder)
                 .ThenBy(s => s.Id)
                 .Take(MaxFavoritesToShow)
-                .ToListAsync(_shutdown.Token);
+                .ToListAsync(Shutdown);
 
             _app.Invoke(() =>
             {
@@ -203,10 +181,10 @@ public sealed class FavoritesManagementScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var row = await db.UserSavedLocations.FindAsync(new object?[] { fav.Id }, _shutdown.Token);
+            var row = await db.UserSavedLocations.FindAsync(new object?[] { fav.Id }, Shutdown);
             if (row is null) return;
             db.UserSavedLocations.Remove(row);
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
 
             var nextIdx = Math.Max(0, (_list.SelectedItem ?? 0));
             _app.Invoke(() => _status.SetSuccess($"Deleted '{fav.Label}'."));
@@ -225,10 +203,10 @@ public sealed class FavoritesManagementScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var row = await db.UserSavedLocations.FindAsync(new object?[] { fav.Id }, _shutdown.Token);
+            var row = await db.UserSavedLocations.FindAsync(new object?[] { fav.Id }, Shutdown);
             if (row is null) return;
             row.Label = newLabel;
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
 
             _app.Invoke(() => _status.SetSuccess($"Renamed to '{newLabel}'."));
             await LoadAsync();
@@ -258,11 +236,11 @@ public sealed class FavoritesManagementScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var rowA = await db.UserSavedLocations.FindAsync(new object?[] { current.Id }, _shutdown.Token);
-            var rowB = await db.UserSavedLocations.FindAsync(new object?[] { neighbor.Id }, _shutdown.Token);
+            var rowA = await db.UserSavedLocations.FindAsync(new object?[] { current.Id }, Shutdown);
+            var rowB = await db.UserSavedLocations.FindAsync(new object?[] { neighbor.Id }, Shutdown);
             if (rowA is null || rowB is null) return;
             (rowA.SortOrder, rowB.SortOrder) = (rowB.SortOrder, rowA.SortOrder);
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
             await LoadAsync(newIdx);
         }
         catch (OperationCanceledException) { /* shutting down */ }
@@ -277,13 +255,4 @@ public sealed class FavoritesManagementScreen : BbsWindow
         // doesn't have to count rows. Coords are rounded to 2 decimals for compactness.
         $"  {f.Label,-24}  {f.Canonical ?? string.Empty,-40}  ({f.Latitude:F2}, {f.Longitude:F2})";
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
-            _shutdown.Dispose();
-        }
-        base.Dispose(disposing);
-    }
 }

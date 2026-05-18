@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -18,7 +19,7 @@ public sealed class ThreadScreen : BbsWindow
     private readonly Topic _topic;
     private readonly TextView _log;
     private readonly TextField _input;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
 
     public ThreadScreen(IServiceProvider services, IApplication app, User user, Topic topic)
         : base(app, services, user)
@@ -39,14 +40,14 @@ public sealed class ThreadScreen : BbsWindow
             WordWrap = true,
         };
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 0,
             Y = Pos.Bottom(_log),
             Width = Dim.Fill(),
-            Text = "Type a reply and press Enter to post.",
+            DefaultKind = BbsStatusLine.StatusKind.Status,
         };
-        _status.SetScheme(BbsTheme.Status);
+        _status.Set("Type a reply and press Enter to post.");
 
         _input = new TextField
         {
@@ -108,11 +109,7 @@ public sealed class ThreadScreen : BbsWindow
         }
         catch (Exception ex)
         {
-            _app.Invoke(() =>
-            {
-                _status.Text = $"[!] load failed: {ex.Message}";
-                _status.SetScheme(BbsTheme.Warning);
-            });
+            _app.Invoke(() => _status.Set($"[!] load failed: {ex.Message}"));
         }
     }
 
@@ -149,11 +146,7 @@ public sealed class ThreadScreen : BbsWindow
         }
         catch (Exception ex)
         {
-            _app.Invoke(() =>
-            {
-                _status.Text = $"[!] post failed: {ex.Message}";
-                _status.SetScheme(BbsTheme.Warning);
-            });
+            _app.Invoke(() => _status.Set($"[!] post failed: {ex.Message}"));
         }
     }
 

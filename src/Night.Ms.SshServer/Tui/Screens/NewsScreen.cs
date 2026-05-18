@@ -3,6 +3,7 @@ using System.Text;
 using Night.Ms.SshServer.Domain;
 using Night.Ms.SshServer.Providers;
 using Night.Ms.SshServer.Tui.Theme;
+using Night.Ms.SshServer.Tui.Views;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -17,7 +18,7 @@ public sealed class NewsScreen : BbsWindow
     private readonly User _user;
     private readonly Label _weather;
     private readonly ListView _headlines;
-    private readonly Label _status;
+    private readonly BbsStatusLine _status;
     private List<NewsHeadline> _items = [];
 
     public NewsScreen(IServiceProvider services, IApplication app, User user)
@@ -54,14 +55,14 @@ public sealed class NewsScreen : BbsWindow
             Height = Dim.Fill(3),
         };
 
-        _status = new Label
+        _status = new BbsStatusLine
         {
             X = 0,
             Y = Pos.AnchorEnd(2),
             Width = Dim.Fill(),
-            Text = "loading...",
+            DefaultKind = BbsStatusLine.StatusKind.Status,
         };
-        _status.SetScheme(BbsTheme.Status);
+        _status.Set("loading...");
 
         _headlines.KeyDown += (_, key) =>
         {
@@ -82,7 +83,7 @@ public sealed class NewsScreen : BbsWindow
         InstallEscapeHandler();
         KeyDown += (_, key) =>
         {
-            if (key == Key.R || key == Key.R.WithShift)
+            if (key.Matches(Key.R))
             {
                 key.Handled = true;
                 ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));
@@ -103,19 +104,19 @@ public sealed class NewsScreen : BbsWindow
         }
         else
         {
-            _app.Invoke(() => _status.Text = "(no url for this story — Ask HN / Show HN are text-only)");
+            _app.Invoke(() => _status.Set("(no url for this story — Ask HN / Show HN are text-only)"));
         }
     }
 
     private async Task ReloadAsync()
     {
-        _app.Invoke(() => _status.Text = "loading...");
+        _app.Invoke(() => _status.Set("loading..."));
 
         var weatherTask = LoadWeatherAsync();
         var newsTask = LoadNewsAsync();
         await Task.WhenAll(weatherTask, newsTask).ConfigureAwait(false);
 
-        _app.Invoke(() => _status.Text = $"updated {_user.FormatClockWithSeconds(DateTimeOffset.Now)} — Enter on a headline shows the URL down here");
+        _app.Invoke(() => _status.Set($"updated {_user.FormatClockWithSeconds(DateTimeOffset.Now)} — Enter on a headline shows the URL down here"));
     }
 
     private async Task LoadWeatherAsync()
@@ -178,16 +179,9 @@ public sealed class NewsScreen : BbsWindow
 
     private static string FormatHeadline(NewsHeadline h)
     {
-        var age = HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
+        var age = FormatHelpers.HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
         var score = h.Score is { } s ? $"[{s,4}]" : "[    ]";
         var byline = string.IsNullOrEmpty(h.Author) ? string.Empty : $" — {h.Author}";
         return $"{score} {h.Title}  ({age}{byline})";
-    }
-
-    private static string HumanizeAge(TimeSpan age)
-    {
-        if (age.TotalMinutes < 60) return $"{(int)Math.Max(1, age.TotalMinutes)}m ago";
-        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
-        return $"{(int)age.TotalDays}d ago";
     }
 }

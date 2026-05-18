@@ -54,7 +54,6 @@ public sealed class ChatScreen : BbsWindow
     private readonly TextField _input;
     private readonly ChatInputPreview _preview;
     private readonly BbsChatStatusLine _status;
-    private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<long, string> _drafts = new();
 
     // Tracks the messages we've displayed, newest-first, so /react /edit /del <n> can map a
@@ -222,7 +221,7 @@ public sealed class ChatScreen : BbsWindow
         Add(_channelsPane, _log, _sidebar, _status, _preview, _input);
         _input.SetFocus();
 
-        InstallEscapeHandler(() => _shutdown.Cancel());
+        InstallEscapeHandler(() => ShutdownCts.Cancel());
         KeyDown += (_, key) =>
         {
             // Alt+1..Alt+9 jumps to the Nth channel in the sidebar; Alt+0 is the 10th slot.
@@ -265,7 +264,7 @@ public sealed class ChatScreen : BbsWindow
 
             case "/quit":
             case "/exit":
-                _shutdown.Cancel();
+                ShutdownCts.Cancel();
                 _app.RequestStop();
                 return;
 
@@ -358,7 +357,7 @@ public sealed class ChatScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var target = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == entry.ChannelId, _shutdown.Token);
+            var target = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == entry.ChannelId, Shutdown);
             if (target is null) { SetStatus("[!] channel no longer exists."); return; }
             await SwitchChannelAsync(target, "joined");
         }
@@ -371,14 +370,14 @@ public sealed class ChatScreen : BbsWindow
     private async Task SwitchToPublicAsync(string channelName)
     {
         var chat = _services.GetRequiredService<ChatService>();
-        var result = await chat.JoinPublicChannelAsync(channelName, _user.Id, _shutdown.Token);
+        var result = await chat.JoinPublicChannelAsync(channelName, _user.Id, Shutdown);
         await ApplyJoinResultAsync(result);
     }
 
     private async Task SwitchToDmAsync(string handle)
     {
         var chat = _services.GetRequiredService<ChatService>();
-        var result = await chat.JoinDmAsync(_user, handle, _shutdown.Token);
+        var result = await chat.JoinDmAsync(_user, handle, Shutdown);
         await ApplyJoinResultAsync(result);
     }
 
@@ -387,7 +386,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var profile = _services.GetRequiredService<ProfileService>();
-            var snap = await profile.GetByHandleAsync(handle.Trim(), _shutdown.Token);
+            var snap = await profile.GetByHandleAsync(handle.Trim(), Shutdown);
             if (snap is null)
             {
                 AppendSystem($"── finger {handle} ──\n   no such user.");
@@ -414,7 +413,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var presence = _services.GetRequiredService<PresenceService>();
-            var members = await presence.ListAsync(_currentChannel.Id, _shutdown.Token);
+            var members = await presence.ListAsync(_currentChannel.Id, Shutdown);
             if (members.Count == 0)
             {
                 AppendSystem("─ online: (nobody else)");
@@ -451,8 +450,8 @@ public sealed class ChatScreen : BbsWindow
 
         var muts = _services.GetRequiredService<ChatMutationService>();
         var result = add
-            ? await muts.ReactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, _shutdown.Token)
-            : await muts.UnreactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, _shutdown.Token);
+            ? await muts.ReactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, Shutdown)
+            : await muts.UnreactAsync(msgRef.MessageId, _user.Id, _user.Handle, emoji, Shutdown);
         ReportMutation(result);
     }
 
@@ -469,7 +468,7 @@ public sealed class ChatScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, _shutdown.Token);
+        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, Shutdown);
         ReportMutation(result);
     }
 
@@ -486,7 +485,7 @@ public sealed class ChatScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, _shutdown.Token);
+        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, Shutdown);
         ReportMutation(result);
     }
 
@@ -504,8 +503,8 @@ public sealed class ChatScreen : BbsWindow
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
         var result = pin
-            ? await muts.PinAsync(msgRef.MessageId, _user.Id, _shutdown.Token)
-            : await muts.UnpinAsync(msgRef.MessageId, _user.Id, _shutdown.Token);
+            ? await muts.PinAsync(msgRef.MessageId, _user.Id, Shutdown)
+            : await muts.UnpinAsync(msgRef.MessageId, _user.Id, Shutdown);
         ReportMutation(result);
     }
 
@@ -514,7 +513,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var muts = _services.GetRequiredService<ChatMutationService>();
-            var pins = await muts.ListPinsAsync(_currentChannel.Id, _shutdown.Token);
+            var pins = await muts.ListPinsAsync(_currentChannel.Id, Shutdown);
             if (pins.Count == 0)
             {
                 AppendSystem("─ no pinned messages in this channel.");
@@ -542,7 +541,7 @@ public sealed class ChatScreen : BbsWindow
     private async Task SetTopicAsync(string? arg)
     {
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.SetTopicAsync(_currentChannel.Id, _user.Id, _user.Handle, arg, _shutdown.Token);
+        var result = await muts.SetTopicAsync(_currentChannel.Id, _user.Id, _user.Handle, arg, Shutdown);
         ReportMutation(result);
     }
 
@@ -600,7 +599,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var muts = _services.GetRequiredService<ChatMutationService>();
-            var hits = await muts.SearchAsync(_currentChannel.Id, arg, limit: 50, _shutdown.Token);
+            var hits = await muts.SearchAsync(_currentChannel.Id, arg, limit: 50, Shutdown);
             if (hits.Count == 0)
             {
                 AppendSystem($"─ no matches for \"{arg}\".");
@@ -752,7 +751,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var presence = _services.GetRequiredService<PresenceService>();
-            await presence.LeaveAsync(channelId, _user.Id, _user.Handle, _shutdown.Token);
+            await presence.LeaveAsync(channelId, _user.Id, _user.Handle, Shutdown);
         }
         catch { /* presence is best-effort */ }
     }
@@ -816,7 +815,7 @@ public sealed class ChatScreen : BbsWindow
                 MarkReadSafelyAsync(_currentChannel.Id, highestSeenId).FireAndLog(_services, nameof(MarkReadSafelyAsync));
             }
 
-            _channelLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, _channelCts.Token);
+            _channelLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(Shutdown, _channelCts.Token);
             var channelToken = _channelLinkedCts.Token;
             _subscriber = Task.Run(() => RunSubscribeAsync(_currentChannel.Id, channelToken));
             _presenceSubscriber = Task.Run(() => RunPresenceSubscribeAsync(_currentChannel.Id, channelToken));
@@ -827,7 +826,7 @@ public sealed class ChatScreen : BbsWindow
             // Announce ourselves into the channel's presence set, then refresh both
             // sidebars from authoritative state.
             var presence = _services.GetRequiredService<PresenceService>();
-            await presence.JoinAsync(_currentChannel.Id, _user.Id, _user.Handle, _shutdown.Token);
+            await presence.JoinAsync(_currentChannel.Id, _user.Id, _user.Handle, Shutdown);
             await RefreshSidebarAsync(channelToken);
             await RefreshChannelsAsync(channelToken);
         }
@@ -1067,7 +1066,7 @@ public sealed class ChatScreen : BbsWindow
             if (now - _lastTypingPublishedAt < TypingDebounce) return;
             _lastTypingPublishedAt = now;
             var presence = _services.GetRequiredService<PresenceService>();
-            await presence.PublishTypingAsync(_currentChannel.Id, _user.Id, _user.Handle, _shutdown.Token);
+            await presence.PublishTypingAsync(_currentChannel.Id, _user.Id, _user.Handle, Shutdown);
         }
         catch { /* typing is best-effort */ }
     }
@@ -1162,7 +1161,7 @@ public sealed class ChatScreen : BbsWindow
                 AttachImageOnUiThread(messageId, cached);
                 continue;
             }
-            Task.Run(() => FetchAndAttachAsync(messageId, url, _shutdown.Token))
+            Task.Run(() => FetchAndAttachAsync(messageId, url, Shutdown))
                 .FireAndLog(_services, nameof(FetchAndAttachAsync));
         }
     }
@@ -1212,7 +1211,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var reads = _services.GetRequiredService<ReadStateService>();
-            await reads.MarkReadAsync(_user.Id, channelId, messageId, _shutdown.Token);
+            await reads.MarkReadAsync(_user.Id, channelId, messageId, Shutdown);
         }
         catch { /* read-state is best-effort */ }
     }
@@ -1242,7 +1241,7 @@ public sealed class ChatScreen : BbsWindow
         try
         {
             var muts = _services.GetRequiredService<ChatMutationService>();
-            var result = await muts.PostAsync(_currentChannel.Id, _user.Id, _user.Handle, body, parentMessageId, _shutdown.Token);
+            var result = await muts.PostAsync(_currentChannel.Id, _user.Id, _user.Handle, body, parentMessageId, Shutdown);
             switch (result)
             {
                 case ChatOpResult.Forbidden f: SetStatus($"[!] {f.Reason}"); break;
@@ -1358,7 +1357,7 @@ public sealed class ChatScreen : BbsWindow
             try
             {
                 var profile = _services.GetRequiredService<ProfileService>();
-                var snap = await profile.GetByHandleAsync(handle, _shutdown.Token);
+                var snap = await profile.GetByHandleAsync(handle, Shutdown);
                 _hasPfpByHandle[handle] = snap?.ProfilePictureUpdatedAt is not null;
             }
             catch (OperationCanceledException) { }
@@ -1374,12 +1373,10 @@ public sealed class ChatScreen : BbsWindow
     {
         if (disposing)
         {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
             try { _channelCts.Cancel(); } catch { /* ignore */ }
             // Best-effort leave on the way out so other sessions see us drop immediately
             // instead of waiting for the Redis TTL to evict.
             LeaveChannelPresenceAsync(_currentChannel.Id).FireAndLog(_services, nameof(LeaveChannelPresenceAsync));
-            _shutdown.Dispose();
             _channelCts.Dispose();
         }
         base.Dispose(disposing);

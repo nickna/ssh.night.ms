@@ -107,7 +107,7 @@ internal sealed class MapScreen : BbsWindow
 
     private void OnKey(object? _, Key key)
     {
-        if (key == Key.Esc || key == Key.Q || key == Key.Q.WithShift)
+        if (key == Key.Esc || key.Matches(Key.Q))
         {
             CancelInFlight();
             _app.RequestStop();
@@ -115,7 +115,7 @@ internal sealed class MapScreen : BbsWindow
             return;
         }
 
-        if (key == Key.V || key == Key.V.WithShift)
+        if (key.Matches(Key.V))
         {
             _mode = _mode == RenderMode.Vector ? RenderMode.Raster : RenderMode.Vector;
             _hint.Text = HintFor(_mode);
@@ -129,13 +129,13 @@ internal sealed class MapScreen : BbsWindow
         var zoom = 0;
         var reset = false;
 
-        if (key == Key.CursorLeft  || key == Key.H || key == Key.H.WithShift) panDx = -1;
-        else if (key == Key.CursorRight || key == Key.L || key == Key.L.WithShift) panDx = 1;
-        else if (key == Key.CursorUp    || key == Key.K || key == Key.K.WithShift) panDy = -1;
-        else if (key == Key.CursorDown  || key == Key.J || key == Key.J.WithShift) panDy = 1;
+        if (key == Key.CursorLeft  || key.Matches(Key.H)) panDx = -1;
+        else if (key == Key.CursorRight || key.Matches(Key.L)) panDx = 1;
+        else if (key == Key.CursorUp    || key.Matches(Key.K)) panDy = -1;
+        else if (key == Key.CursorDown  || key.Matches(Key.J)) panDy = 1;
         else if (IsZoomIn(key))  zoom = 1;
         else if (IsZoomOut(key)) zoom = -1;
-        else if (key == Key.R || key == Key.R.WithShift) reset = true;
+        else if (key.Matches(Key.R)) reset = true;
         else return;
 
         if (reset)

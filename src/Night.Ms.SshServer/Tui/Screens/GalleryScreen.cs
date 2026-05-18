@@ -65,7 +65,7 @@ internal sealed class GalleryScreen : BbsWindow
     private void OnKey(object? _, Key key)
     {
         // Always allow exit, even from the empty state.
-        if (key == Key.Esc || key == Key.Q || key == Key.Q.WithShift)
+        if (key == Key.Esc || key.Matches(Key.Q))
         {
             _app.RequestStop();
             key.Handled = true;
@@ -81,7 +81,7 @@ internal sealed class GalleryScreen : BbsWindow
 
         if (_entries.Count == 0) return; // remaining bindings need a non-empty gallery
 
-        if (key == Key.CursorLeft || key == Key.H || key == Key.H.WithShift)
+        if (key == Key.CursorLeft || key.Matches(Key.H))
         {
             _index = (_index - 1 + _entries.Count) % _entries.Count;
             ShowCurrent();
@@ -89,7 +89,7 @@ internal sealed class GalleryScreen : BbsWindow
             return;
         }
 
-        if (key == Key.CursorRight || key == Key.L || key == Key.L.WithShift)
+        if (key == Key.CursorRight || key.Matches(Key.L))
         {
             _index = (_index + 1) % _entries.Count;
             ShowCurrent();

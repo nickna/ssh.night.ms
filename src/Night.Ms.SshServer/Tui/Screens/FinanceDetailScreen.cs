@@ -29,7 +29,6 @@ public sealed class FinanceDetailScreen : BbsWindow
     private readonly WatchlistKind _kind;
     private readonly string _canonical;
     private readonly string _symbol;
-    private readonly CancellationTokenSource _shutdown = new();
 
     private readonly Label _hintBar;
     private readonly Label _header;
@@ -125,7 +124,7 @@ public sealed class FinanceDetailScreen : BbsWindow
         InstallEscapeHandler();
         KeyDown += (_, key) =>
         {
-            if (key == Key.R || key == Key.R.WithShift)
+            if (key.Matches(Key.R))
             {
                 key.Handled = true;
                 ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));
@@ -159,11 +158,11 @@ public sealed class FinanceDetailScreen : BbsWindow
         var finance = _services.GetRequiredService<IFinanceProvider>();
         var newsProvider = _services.GetRequiredService<IFinanceNewsProvider>();
 
-        var detailTask = finance.GetDetailAsync(_kind, _canonical, _shutdown.Token);
+        var detailTask = finance.GetDetailAsync(_kind, _canonical, Shutdown);
         // For stocks the canonical IS the ticker the RSS endpoint accepts. For crypto/FX we
         // pass an empty list and the provider falls back to broad market headlines.
         var tickers = _kind == WatchlistKind.Stock ? new[] { _canonical } : Array.Empty<string>();
-        var newsTask = newsProvider.GetForTickersAsync(tickers, MaxNewsItems, _shutdown.Token);
+        var newsTask = newsProvider.GetForTickersAsync(tickers, MaxNewsItems, Shutdown);
 
         await Task.WhenAll(detailTask, newsTask).ConfigureAwait(false);
         var detail = detailTask.Result;
@@ -232,38 +231,14 @@ public sealed class FinanceDetailScreen : BbsWindow
 
     private static string FormatPrice(decimal price, string currency)
     {
-        var prefix = currency switch
-        {
-            "USD" => "$",
-            "EUR" => "€",
-            "GBP" => "£",
-            "JPY" => "¥",
-            _ => string.Empty,
-        };
         var decimals = price >= 1m ? 2 : 4;
-        return $"{prefix}{price.ToString("N" + decimals, CultureInfo.InvariantCulture)} {currency}";
+        return $"{FormatHelpers.CurrencyGlyph(currency)}{price.ToString("N" + decimals, CultureInfo.InvariantCulture)} {currency}";
     }
 
     private static string FormatHeadline(NewsHeadline h)
     {
-        var age = HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
+        var age = FormatHelpers.HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
         return $"  {h.Title}  ({age})";
     }
 
-    private static string HumanizeAge(TimeSpan age)
-    {
-        if (age.TotalMinutes < 60) return $"{(int)Math.Max(1, age.TotalMinutes)}m ago";
-        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
-        return $"{(int)age.TotalDays}d ago";
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
-            _shutdown.Dispose();
-        }
-        base.Dispose(disposing);
-    }
 }

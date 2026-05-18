@@ -71,7 +71,7 @@ public sealed class AlertsScreen : BbsWindow
 
         KeyDown += (_, key) =>
         {
-            if (key == Key.Esc || key == Key.Q || key == Key.Q.WithShift)
+            if (key == Key.Esc || key.Matches(Key.Q))
             {
                 key.Handled = true;
                 _app.RequestStop();

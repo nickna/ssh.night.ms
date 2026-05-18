@@ -35,7 +35,6 @@ public sealed class FinanceScreen : BbsWindow
     private readonly IApplication _app;
     private readonly IServiceProvider _services;
     private readonly User _user;
-    private readonly CancellationTokenSource _shutdown = new();
 
     private readonly Label _hintBar;
     private readonly Label _columnHeader;
@@ -46,7 +45,7 @@ public sealed class FinanceScreen : BbsWindow
 
     private List<WatchlistRow> _rowsModel = [];
     private List<NewsHeadline> _newsModel = [];
-    private long? _pendingDeleteId;
+    private readonly TwoStepDelete<WatchlistRow> _delete;
 
     public FinanceScreen(IApplication app, IServiceProvider services, User user)
         : base(app, services, user)
@@ -110,6 +109,12 @@ public sealed class FinanceScreen : BbsWindow
             Width = Dim.Fill(),
         };
 
+        _delete = new TwoStepDelete<WatchlistRow>(
+            _status,
+            id: r => r.Item.Id,
+            label: r => r.Item.Symbol,
+            commit: r => DeleteAsync(r.Item).FireAndLog(_services, nameof(DeleteAsync)));
+
         Add(_hintBar, _columnHeader, _rows, _newsHeader, _news, _status);
         _rows.SetFocus();
 
@@ -124,13 +129,13 @@ public sealed class FinanceScreen : BbsWindow
     {
         // Refresh and switch-to-news work from anywhere; rows/news local handlers cover
         // the rest. Esc is handled by InstallEscapeHandler.
-        if (key == Key.R || key == Key.R.WithShift)
+        if (key.Matches(Key.R))
         {
             key.Handled = true;
-            _pendingDeleteId = null;
+            _delete.Reset();
             ReloadAsync().FireAndLog(_services, nameof(ReloadAsync));
         }
-        else if (key == Key.N || key == Key.N.WithShift)
+        else if (key.Matches(Key.N))
         {
             key.Handled = true;
             _news.SetFocus();
@@ -139,34 +144,30 @@ public sealed class FinanceScreen : BbsWindow
 
     private void OnRowsKeyDown(object? sender, Key key)
     {
-        var armingDelete = key == Key.D || key == Key.D.WithShift;
-        if (_pendingDeleteId is not null && !armingDelete)
+        if (_delete.TryHandle(key, SelectedRow()))
         {
-            _pendingDeleteId = null;
+            key.Handled = true;
+            return;
         }
+        _delete.Reset();
 
-        if (key == Key.A || key == Key.A.WithShift)
+        if (key.Matches(Key.A))
         {
             key.Handled = true;
             OpenAddPrompt(prefill: null);
         }
-        else if (key == Key.E || key == Key.E.WithShift)
+        else if (key.Matches(Key.E))
         {
             key.Handled = true;
             var sel = SelectedRow();
             if (sel is not null) OpenEditPrompt(sel);
         }
-        else if (armingDelete)
-        {
-            key.Handled = true;
-            HandleDeleteKey();
-        }
-        else if (key == Key.K || key == Key.K.WithShift)
+        else if (key.Matches(Key.K))
         {
             key.Handled = true;
             MoveAsync(-1).FireAndLog(_services, nameof(MoveAsync));
         }
-        else if (key == Key.J || key == Key.J.WithShift)
+        else if (key.Matches(Key.J))
         {
             key.Handled = true;
             MoveAsync(+1).FireAndLog(_services, nameof(MoveAsync));
@@ -227,22 +228,6 @@ public sealed class FinanceScreen : BbsWindow
         UpdateItemAsync(row.Item.Id, result).FireAndLog(_services, nameof(UpdateItemAsync));
     }
 
-    private void HandleDeleteKey()
-    {
-        var sel = SelectedRow();
-        if (sel is null) return;
-        if (_pendingDeleteId == sel.Item.Id)
-        {
-            _pendingDeleteId = null;
-            DeleteAsync(sel.Item).FireAndLog(_services, nameof(DeleteAsync));
-        }
-        else
-        {
-            _pendingDeleteId = sel.Item.Id;
-            _status.SetWarning($"[!] press D again to delete '{sel.Item.Symbol}'. Any other key cancels.");
-        }
-    }
-
     private async Task SaveNewItemAsync(AddWatchlistItemResult res)
     {
         try
@@ -251,7 +236,7 @@ public sealed class FinanceScreen : BbsWindow
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var existing = await db.UserWatchlistItems
                 .Where(w => w.UserId == _user.Id)
-                .CountAsync(_shutdown.Token);
+                .CountAsync(Shutdown);
             if (existing >= MaxWatchlistRows)
             {
                 _app.Invoke(() => _status.SetWarning($"[!] watchlist is full ({MaxWatchlistRows}). Delete a symbol first."));
@@ -260,7 +245,7 @@ public sealed class FinanceScreen : BbsWindow
             var nextSort = await db.UserWatchlistItems
                 .Where(w => w.UserId == _user.Id)
                 .Select(w => (int?)w.SortOrder)
-                .MaxAsync(_shutdown.Token) ?? -1;
+                .MaxAsync(Shutdown) ?? -1;
             db.UserWatchlistItems.Add(new UserWatchlistItem
             {
                 UserId = _user.Id,
@@ -270,7 +255,7 @@ public sealed class FinanceScreen : BbsWindow
                 SortOrder = nextSort + 1,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
             _app.Invoke(() => _status.SetSuccess($"Added {res.Symbol}."));
             await ReloadAsync();
         }
@@ -291,12 +276,12 @@ public sealed class FinanceScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var row = await db.UserWatchlistItems.FindAsync([id], _shutdown.Token);
+            var row = await db.UserWatchlistItems.FindAsync([id], Shutdown);
             if (row is null) return;
             row.Symbol = res.Symbol;
             row.Canonical = res.Canonical;
             row.Kind = res.Kind;
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
             _app.Invoke(() => _status.SetSuccess($"Updated {res.Symbol}."));
             await ReloadAsync();
         }
@@ -317,10 +302,10 @@ public sealed class FinanceScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var row = await db.UserWatchlistItems.FindAsync([item.Id], _shutdown.Token);
+            var row = await db.UserWatchlistItems.FindAsync([item.Id], Shutdown);
             if (row is null) return;
             db.UserWatchlistItems.Remove(row);
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
             _app.Invoke(() => _status.SetSuccess($"Deleted {item.Symbol}."));
             await ReloadAsync();
         }
@@ -342,11 +327,11 @@ public sealed class FinanceScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var rowA = await db.UserWatchlistItems.FindAsync([a.Id], _shutdown.Token);
-            var rowB = await db.UserWatchlistItems.FindAsync([b.Id], _shutdown.Token);
+            var rowA = await db.UserWatchlistItems.FindAsync([a.Id], Shutdown);
+            var rowB = await db.UserWatchlistItems.FindAsync([b.Id], Shutdown);
             if (rowA is null || rowB is null) return;
             (rowA.SortOrder, rowB.SortOrder) = (rowB.SortOrder, rowA.SortOrder);
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
             await ReloadAsync(selectIndex: newIdx);
         }
         catch (OperationCanceledException) { /* shutting down */ }
@@ -375,10 +360,10 @@ public sealed class FinanceScreen : BbsWindow
         var newsProvider = _services.GetRequiredService<IFinanceNewsProvider>();
 
         // Per-row quote + sparkline in parallel; news in parallel with both.
-        var quoteTasks = items.Select(i => finance.GetQuoteAsync(i.Kind, i.Canonical, _shutdown.Token)).ToArray();
-        var sparkTasks = items.Select(i => finance.GetSparklineAsync(i.Kind, i.Canonical, _shutdown.Token)).ToArray();
+        var quoteTasks = items.Select(i => finance.GetQuoteAsync(i.Kind, i.Canonical, Shutdown)).ToArray();
+        var sparkTasks = items.Select(i => finance.GetSparklineAsync(i.Kind, i.Canonical, Shutdown)).ToArray();
         var stockTickers = items.Where(i => i.Kind == WatchlistKind.Stock).Select(i => i.Canonical).ToList();
-        var newsTask = newsProvider.GetForTickersAsync(stockTickers, MaxNewsItems, _shutdown.Token);
+        var newsTask = newsProvider.GetForTickersAsync(stockTickers, MaxNewsItems, Shutdown);
 
         await Task.WhenAll([..quoteTasks, ..sparkTasks, newsTask]).ConfigureAwait(false);
 
@@ -419,7 +404,7 @@ public sealed class FinanceScreen : BbsWindow
             .Where(w => w.UserId == _user.Id)
             .OrderBy(w => w.SortOrder)
             .ThenBy(w => w.Id)
-            .ToListAsync(_shutdown.Token);
+            .ToListAsync(Shutdown);
         if (rows.Count > 0) return rows;
 
         var defaults = new (string Symbol, WatchlistKind Kind, string Canonical)[]
@@ -446,7 +431,7 @@ public sealed class FinanceScreen : BbsWindow
         }
         try
         {
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
         }
         catch (DbUpdateException)
         {
@@ -456,7 +441,7 @@ public sealed class FinanceScreen : BbsWindow
             .Where(w => w.UserId == _user.Id)
             .OrderBy(w => w.SortOrder)
             .ThenBy(w => w.Id)
-            .ToListAsync(_shutdown.Token);
+            .ToListAsync(Shutdown);
     }
 
     private static string FormatHeader() =>
@@ -464,7 +449,7 @@ public sealed class FinanceScreen : BbsWindow
 
     private static string FormatRow(WatchlistRow row)
     {
-        var sym = Truncate(row.Item.Symbol, 10);
+        var sym = FormatHelpers.Truncate(row.Item.Symbol, 10);
         var type = row.Item.Kind switch
         {
             WatchlistKind.Stock => "stock",
@@ -487,20 +472,10 @@ public sealed class FinanceScreen : BbsWindow
 
     private static string FormatPrice(decimal price, string currency)
     {
-        // Symbol prefixes only for the common cases; everything else falls through to the
-        // bare number with the currency code visible in the detail screen.
-        var prefix = currency switch
-        {
-            "USD" => "$",
-            "EUR" => "€",
-            "GBP" => "£",
-            "JPY" => "¥",
-            _ => string.Empty,
-        };
         // Crypto and stock prices fit in 2dp; sub-dollar crypto (DOGE etc) needs more
         // precision — switch to 4dp when the price is small.
         var decimals = price >= 1m ? 2 : 4;
-        return $"{prefix}{price.ToString("N" + decimals, CultureInfo.InvariantCulture)}";
+        return $"{FormatHelpers.CurrencyGlyph(currency)}{price.ToString("N" + decimals, CultureInfo.InvariantCulture)}";
     }
 
     private static string FormatChange(decimal change)
@@ -518,28 +493,10 @@ public sealed class FinanceScreen : BbsWindow
 
     private static string FormatHeadline(NewsHeadline h)
     {
-        var age = HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
+        var age = FormatHelpers.HumanizeAge(DateTimeOffset.UtcNow - h.PublishedAt);
         return $"  {h.Title}  ({age})";
     }
 
-    private static string HumanizeAge(TimeSpan age)
-    {
-        if (age.TotalMinutes < 60) return $"{(int)Math.Max(1, age.TotalMinutes)}m ago";
-        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
-        return $"{(int)age.TotalDays}d ago";
-    }
-
-    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
-            _shutdown.Dispose();
-        }
-        base.Dispose(disposing);
-    }
 
     // In-screen model: the persisted row plus its most recent fetched quote + sparkline.
     // Quote is null when the upstream call failed; the row still renders with "—" placeholders.

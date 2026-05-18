@@ -35,7 +35,6 @@ public sealed class ReaderScreen : BbsWindow
     private readonly ListView _linksView;
     private readonly Label _hint;
 
-    private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Uri, CellGrid> _imageCells = new();
     private ReaderArticle? _article;
     private bool _showingLinks;
@@ -118,16 +117,6 @@ public sealed class ReaderScreen : BbsWindow
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _cts.Cancel(); } catch { /* ignore */ }
-            _cts.Dispose();
-        }
-        base.Dispose(disposing);
-    }
-
     private void OnKey(object? _, Key key)
     {
         if (key == Key.Enter && _showingLinks)
@@ -159,28 +148,28 @@ public sealed class ReaderScreen : BbsWindow
             return;
         }
 
-        if (key == Key.Q || key == Key.Q.WithShift)
+        if (key.Matches(Key.Q))
         {
             _app.RequestStop();
             key.Handled = true;
             return;
         }
 
-        if (key == Key.L || key == Key.L.WithShift)
+        if (key.Matches(Key.L))
         {
             ToggleLinks();
             key.Handled = true;
             return;
         }
 
-        if (key == Key.O || key == Key.O.WithShift)
+        if (key.Matches(Key.O))
         {
             _hint.Text = $"url: {_url}    [Esc] back";
             key.Handled = true;
             return;
         }
 
-        if (key == Key.R || key == Key.R.WithShift)
+        if (key.Matches(Key.R))
         {
             _mode = _mode == ReadMode.Reader ? ReadMode.Raw : ReadMode.Reader;
             _title.Text = _mode == ReadMode.Raw ? "fetching (raw mode)..." : "fetching...";
@@ -294,7 +283,7 @@ public sealed class ReaderScreen : BbsWindow
         {
             using var scope = _services.CreateScope();
             var reader = scope.ServiceProvider.GetRequiredService<IArticleReader>();
-            article = await reader.ReadAsync(_url, _mode, _cts.Token).ConfigureAwait(false);
+            article = await reader.ReadAsync(_url, _mode, Shutdown).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -306,7 +295,7 @@ public sealed class ReaderScreen : BbsWindow
             // belt-and-braces for an unexpected DI / scope failure.
         }
 
-        if (_cts.IsCancellationRequested) return;
+        if (Shutdown.IsCancellationRequested) return;
 
         _app.Invoke(() =>
         {
@@ -371,12 +360,12 @@ public sealed class ReaderScreen : BbsWindow
 
         var tasks = distinct.Select(async url =>
         {
-            await sem.WaitAsync(_cts.Token).ConfigureAwait(false);
+            await sem.WaitAsync(Shutdown).ConfigureAwait(false);
             try
             {
-                if (_cts.IsCancellationRequested) return;
-                var image = await fetcher.FetchAsync(url, _cts.Token).ConfigureAwait(false);
-                if (image is null || _cts.IsCancellationRequested) return;
+                if (Shutdown.IsCancellationRequested) return;
+                var image = await fetcher.FetchAsync(url, Shutdown).ConfigureAwait(false);
+                if (image is null || Shutdown.IsCancellationRequested) return;
 
                 // String roundtrip via SgrParser: the renderer emits ANSI (SGR + half-block
                 // ▀) and the parser turns that into a CellGrid of (rune, fg, bg) cells. Less

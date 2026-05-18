@@ -24,6 +24,8 @@ namespace Night.Ms.SshServer.Tui.Screens;
 // F1..F9 quick-switch to the user's saved locations sorted by SortOrder.
 public sealed class WeatherScreen : BbsWindow
 {
+    protected override bool EnableFooterWeatherShortcut => false;
+
     private const int BannerWidth = 40;
     private const int BannerHeight = 6;
     private const int BannerY = 2;
@@ -40,7 +42,6 @@ public sealed class WeatherScreen : BbsWindow
     private readonly IApplication _app;
     private readonly IServiceProvider _services;
     private readonly User _user;
-    private readonly CancellationTokenSource _shutdown = new();
 
     private readonly Label _hintBar;
     private readonly Label _header;
@@ -175,19 +176,19 @@ public sealed class WeatherScreen : BbsWindow
 
     private void OnKeyDown(object? sender, Key key)
     {
-        if (key == Key.T || key == Key.T.WithShift)
+        if (key.Matches(Key.T))
         {
             key.Handled = true;
             OpenTravel();
             return;
         }
-        if (key == Key.S || key == Key.S.WithShift)
+        if (key.Matches(Key.S))
         {
             key.Handled = true;
             OpenSaveFavorite();
             return;
         }
-        if (key == Key.R || key == Key.R.WithShift)
+        if (key.Matches(Key.R))
         {
             key.Handled = true;
             if (!_activeLocation.IsEmpty)
@@ -196,13 +197,13 @@ public sealed class WeatherScreen : BbsWindow
             }
             return;
         }
-        if (key == Key.M || key == Key.M.WithShift)
+        if (key.Matches(Key.M))
         {
             key.Handled = true;
             OpenFavoritesManager();
             return;
         }
-        if (key == Key.A || key == Key.A.WithShift)
+        if (key.Matches(Key.A))
         {
             key.Handled = true;
             OpenAlertsForCurrentLocation();
@@ -276,7 +277,7 @@ public sealed class WeatherScreen : BbsWindow
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == _user.Id, _shutdown.Token);
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == _user.Id, Shutdown);
             if (user is null)
             {
                 _app.Invoke(() => _status.SetWarning("[!] couldn't load user to save."));
@@ -287,7 +288,7 @@ public sealed class WeatherScreen : BbsWindow
             user.LocationLatitude = latitude;
             user.LocationLongitude = longitude;
             user.LocationSource = LocationSource.Manual;
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
 
             _app.Invoke(() =>
             {
@@ -369,7 +370,7 @@ public sealed class WeatherScreen : BbsWindow
     {
         var alertProvider = _services.GetRequiredService<IWeatherAlertProvider>();
         var alerts = await alertProvider.GetActiveAlertsAsync(
-            _activeLocation.Latitude, _activeLocation.Longitude, _shutdown.Token).ConfigureAwait(false);
+            _activeLocation.Latitude, _activeLocation.Longitude, Shutdown).ConfigureAwait(false);
 
         _app.Invoke(() =>
         {
@@ -394,7 +395,7 @@ public sealed class WeatherScreen : BbsWindow
                 .OrderBy(s => s.SortOrder)
                 .ThenBy(s => s.Id)
                 .Take(MaxFavorites)
-                .ToListAsync(_shutdown.Token);
+                .ToListAsync(Shutdown);
             _app.Invoke(() =>
             {
                 _favorites = favorites;
@@ -415,7 +416,7 @@ public sealed class WeatherScreen : BbsWindow
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var existing = await db.UserSavedLocations
-                .FirstOrDefaultAsync(s => s.UserId == _user.Id && s.Label == label, _shutdown.Token);
+                .FirstOrDefaultAsync(s => s.UserId == _user.Id && s.Label == label, Shutdown);
             if (existing is not null)
             {
                 existing.Latitude = location.Latitude;
@@ -424,7 +425,7 @@ public sealed class WeatherScreen : BbsWindow
             }
             else
             {
-                var count = await db.UserSavedLocations.CountAsync(s => s.UserId == _user.Id, _shutdown.Token);
+                var count = await db.UserSavedLocations.CountAsync(s => s.UserId == _user.Id, Shutdown);
                 if (count >= MaxFavorites)
                 {
                     _app.Invoke(() => _status.SetWarning($"[!] favorites full (max {MaxFavorites}) — remove one from the profile screen."));
@@ -441,7 +442,7 @@ public sealed class WeatherScreen : BbsWindow
                     CreatedAt = DateTimeOffset.UtcNow,
                 });
             }
-            await db.SaveChangesAsync(_shutdown.Token);
+            await db.SaveChangesAsync(Shutdown);
 
             _app.Invoke(() => _status.SetSuccess($"Saved '{label}'."));
             await LoadFavoritesAsync();
@@ -471,7 +472,7 @@ public sealed class WeatherScreen : BbsWindow
                 latitude: _activeLocation.Latitude,
                 longitude: _activeLocation.Longitude,
                 label: _activeLocation.Label,
-                cancellationToken: _shutdown.Token).ConfigureAwait(false);
+                cancellationToken: Shutdown).ConfigureAwait(false);
 
             _app.Invoke(() =>
             {
@@ -639,11 +640,9 @@ public sealed class WeatherScreen : BbsWindow
         }
         var names = string.Join(" ", _favorites
             .Take(MaxFavorites)
-            .Select((f, i) => $"F{i + 1}:{Truncate(f.Label, 12)}"));
+            .Select((f, i) => $"F{i + 1}:{FormatHelpers.Truncate(f.Label, 12)}"));
         _hintBar.Text = $"[T] travel  [S] save  [M] manage  [A] alerts  [R] refresh  [Esc] back   {names}";
     }
-
-    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
     private bool AdvanceFrame()
     {
@@ -673,13 +672,11 @@ public sealed class WeatherScreen : BbsWindow
         if (disposing && !_disposed)
         {
             _disposed = true;
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
             if (_frameTimerToken is not null)
             {
                 try { _app.RemoveTimeout(_frameTimerToken); } catch { /* ignore */ }
                 _frameTimerToken = null;
             }
-            _shutdown.Dispose();
         }
         base.Dispose(disposing);
     }

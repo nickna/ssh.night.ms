@@ -52,7 +52,7 @@ public sealed class AddWatchlistItemPromptScreen : BbsWindow
             X = 2,
             Y = 3,
             Width = Dim.Fill(2),
-            Text = Truncate(defaultSymbol ?? string.Empty, MaxSymbolLength),
+            Text = FormatHelpers.Truncate(defaultSymbol ?? string.Empty, MaxSymbolLength),
         };
         _input.SetScheme(BbsTheme.Input);
         _input.TextChanged += (_, _) => UpdatePreview();
@@ -124,7 +124,7 @@ public sealed class AddWatchlistItemPromptScreen : BbsWindow
 
     private void Submit()
     {
-        var raw = Truncate((_input.Text ?? string.Empty).Trim(), MaxSymbolLength);
+        var raw = FormatHelpers.Truncate((_input.Text ?? string.Empty).Trim(), MaxSymbolLength);
         var resolved = SymbolResolver.Resolve(raw);
         if (resolved is null)
         {
@@ -136,6 +136,4 @@ public sealed class AddWatchlistItemPromptScreen : BbsWindow
         Result = new AddWatchlistItemResult(resolved.Kind, raw, resolved.Canonical);
         _app.RequestStop();
     }
-
-    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }

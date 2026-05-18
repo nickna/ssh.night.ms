@@ -36,7 +36,7 @@ public sealed class SaveFavoritePromptScreen : BbsWindow
             X = 2,
             Y = 3,
             Width = Dim.Fill(2),
-            Text = Truncate(defaultLabel ?? string.Empty, MaxLabelLength),
+            Text = FormatHelpers.Truncate(defaultLabel ?? string.Empty, MaxLabelLength),
         };
         _label.SetScheme(BbsTheme.Input);
         _label.Accepting += (_, e) =>
@@ -79,10 +79,8 @@ public sealed class SaveFavoritePromptScreen : BbsWindow
 
     private void Submit()
     {
-        var text = Truncate((_label.Text ?? string.Empty).Trim(), MaxLabelLength);
+        var text = FormatHelpers.Truncate((_label.Text ?? string.Empty).Trim(), MaxLabelLength);
         Result = string.IsNullOrEmpty(text) ? null : text;
         _app.RequestStop();
     }
-
-    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }

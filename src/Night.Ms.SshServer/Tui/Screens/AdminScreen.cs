@@ -25,7 +25,6 @@ public sealed class AdminScreen : BbsWindow
     private readonly BbsStatusLine _status;
     private readonly TextField _command;
     private readonly SystemMetricsCollector _metricsCollector;
-    private readonly CancellationTokenSource _shutdown = new();
 
     public AdminScreen(IServiceProvider services, IApplication app, User actor)
         : base(app, services, actor)
@@ -120,7 +119,7 @@ public sealed class AdminScreen : BbsWindow
 
         _metricsCollector = _services.GetRequiredService<SystemMetricsCollector>();
         UpdateMetricsLabel(_metricsCollector.Sample());
-        Task.Run(() => MetricsLoopAsync(_shutdown.Token))
+        Task.Run(() => MetricsLoopAsync(Shutdown))
             .FireAndLog(_services, nameof(MetricsLoopAsync));
 
         LoadAsync().FireAndLog(_services, nameof(LoadAsync));
@@ -144,16 +143,6 @@ public sealed class AdminScreen : BbsWindow
     {
         _metrics.Text = snap.FormatCompact();
         _metrics.SetNeedsDraw();
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            try { _shutdown.Cancel(); } catch { /* ignore */ }
-            _shutdown.Dispose();
-        }
-        base.Dispose(disposing);
     }
 
     private async Task ExecuteAsync(string line)
