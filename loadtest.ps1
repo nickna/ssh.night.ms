@@ -111,6 +111,21 @@ if (-not $ReportsDir) { $ReportsDir = Join-Path $RepoRoot 'loadtest-reports' }
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor DarkGray }
 
+# Cheap TCP probe — avoids racing through build + seed + 10 SSH handshakes only to
+# discover the server's not actually listening.
+function Test-TcpPort {
+    param([string]$ProbeHost, [int]$Port, [int]$TimeoutMs = 2000)
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $task = $client.ConnectAsync($ProbeHost, $Port)
+        return $task.Wait($TimeoutMs) -and $client.Connected
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
 # Match run.ps1's connection-string convention so seed/clean talk to the same Postgres
 # container the server is bound to.
 $env:ConnectionStrings__bbs = "Host=127.0.0.1;Port=$PostgresPort;Database=bbs;Username=postgres;Password=postgres"
@@ -121,6 +136,23 @@ Write-Step 'Preflight'
 $dotnetVersion = & dotnet --version 2>$null
 if (-not $dotnetVersion) { throw '.NET SDK not found on PATH. Install .NET 10.' }
 Write-Note ".NET SDK: $dotnetVersion"
+
+# Probe the services we need before doing anything expensive. seed/clean only need
+# Postgres; run additionally needs the SSH listener. CleanOnly skips both probes —
+# `clean` is a destructive op the operator may want to run even with the server
+# half-broken.
+if (-not $CleanOnly) {
+    if (-not (Test-TcpPort -ProbeHost '127.0.0.1' -Port $PostgresPort)) {
+        throw "Postgres not reachable on 127.0.0.1:$PostgresPort. Start the containers with .\run.ps1 (in a separate shell) and re-run."
+    }
+    Write-Note "Postgres: reachable (127.0.0.1:$PostgresPort)"
+    if (-not $SeedOnly) {
+        if (-not (Test-TcpPort -ProbeHost $BbsHost -Port $SshPort)) {
+            throw "SSH listener not reachable on ${BbsHost}:$SshPort. The server process (.\run.ps1) needs to be running in a separate shell."
+        }
+        Write-Note "SSH listener: reachable (${BbsHost}:$SshPort)"
+    }
+}
 
 # Build once. Subsequent dotnet run uses --no-build so seed + run aren't redundant.
 Write-Step 'Building Night.Ms.Tools.LoadTest'
