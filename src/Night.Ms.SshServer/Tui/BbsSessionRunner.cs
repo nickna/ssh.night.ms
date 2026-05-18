@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Reflection;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -174,12 +173,22 @@ internal static class BbsSessionRunner
 
     private static void RunLobbyLoop(IServiceProvider services, IApplication app, User user, bool justRegistered, Channel? lobbyChannel, ArtProvider art, ITuiSession session)
     {
-        using var wallCts = new CancellationTokenSource();
-        RunWallSubscriptionAsync(services, app, wallCts.Token)
-            .FireAndLog(services, nameof(RunWallSubscriptionAsync));
-
-        try
+        // Register with the singleton WallDispatcher instead of opening our own Redis
+        // subscription. The dispatcher subscribes once for the whole process and invokes
+        // our callback per broadcast; disposing the token on lobby exit unregisters.
+        var wallDispatcher = services.GetRequiredService<WallDispatcher>();
+        using var wallSubscription = wallDispatcher.Subscribe(dto =>
         {
+            app.Invoke(() =>
+            {
+                MessageBox.Query(
+                    app,
+                    title: "System Broadcast",
+                    message: $"From sysop {dto.SysopHandle}:\n\n{dto.Message}",
+                    "_OK");
+            });
+        });
+
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
         var nav = RunChild(app, lobbyScreen, out var lobbyResult) ?? (LobbyNavigation?)lobbyResult;
         while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Sysop)
@@ -245,11 +254,6 @@ internal static class BbsSessionRunner
             lobbyScreen = new LobbyScreen(app, services, user, justRegistered: false, art);
             nav = RunChild(app, lobbyScreen, out var nextLobbyResult) ?? (LobbyNavigation?)nextLobbyResult;
         }
-        }
-        finally
-        {
-            wallCts.Cancel();
-        }
     }
 
     // Runs a child screen and returns the footer-weather shortcut if the user clicked the
@@ -304,28 +308,6 @@ internal static class BbsSessionRunner
 
                 if (RunChild(app, new ThreadScreen(services, app, user, topic), out _) is { } s4) return s4;
             }
-        }
-    }
-
-    private static async Task RunWallSubscriptionAsync(
-        IServiceProvider services, IApplication app, CancellationToken ct)
-    {
-        var bus = services.GetRequiredService<IRealtimeBus>();
-        await foreach (var payload in bus.SubscribeAsync(SystemTopics.Wall, ct))
-        {
-            WallBroadcastDto? dto;
-            try { dto = JsonSerializer.Deserialize<WallBroadcastDto>(payload); }
-            catch { continue; }
-            if (dto is null) continue;
-
-            app.Invoke(() =>
-            {
-                MessageBox.Query(
-                    app,
-                    title: "System Broadcast",
-                    message: $"From sysop {dto.SysopHandle}:\n\n{dto.Message}",
-                    "_OK");
-            });
         }
     }
 

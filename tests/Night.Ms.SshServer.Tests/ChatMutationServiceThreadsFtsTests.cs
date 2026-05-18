@@ -73,7 +73,7 @@ public class ChatMutationServiceThreadsFtsTests : IClassFixture<PostgresFixture>
         var (u, c) = await SeedUserAndChannelAsync();
         var parent = await SeedMessageAsync(u, c, "topic");
         var reply = await SeedMessageAsync(u, c, "reply", parentMessageId: parent.Id);
-        await _sut!.DeleteAsync(reply.Id, u.Id, default);
+        await _sut!.DeleteAsync(reply.Id, u.Id, false, default);
 
         var counts = await _sut.SnapshotReplyCountsAsync(new[] { parent.Id }, default);
         Assert.False(counts.ContainsKey(parent.Id));
@@ -127,7 +127,7 @@ public class ChatMutationServiceThreadsFtsTests : IClassFixture<PostgresFixture>
     {
         var (u, c) = await SeedUserAndChannelAsync();
         var msg = await SeedMessageAsync(u, c, "secret information", at: DateTimeOffset.UtcNow);
-        await _sut!.DeleteAsync(msg.Id, u.Id, default);
+        await _sut!.DeleteAsync(msg.Id, u.Id, false, default);
 
         var hits = await _sut.SearchAsync(c.Id, "secret", limit: 10, default);
         Assert.Empty(hits);
@@ -166,7 +166,7 @@ public class ChatMutationServiceThreadsFtsTests : IClassFixture<PostgresFixture>
         var root = await SeedMessageAsync(u, c, "root", at: DateTimeOffset.UtcNow.AddMinutes(-5));
         var keep = await SeedMessageAsync(u, c, "keeps me", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-4));
         var del  = await SeedMessageAsync(u, c, "tombstone", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-3));
-        await _sut!.DeleteAsync(del.Id, u.Id, default);
+        await _sut!.DeleteAsync(del.Id, u.Id, false, default);
 
         var view = await _sut.ListThreadAsync(root.Id, default);
         Assert.Single(view.Replies);
@@ -207,7 +207,7 @@ public class ChatMutationServiceThreadsFtsTests : IClassFixture<PostgresFixture>
         var (u, c) = await SeedUserAndChannelAsync();
         var root = await SeedMessageAsync(u, c, "to be removed", at: DateTimeOffset.UtcNow.AddMinutes(-5));
         await SeedMessageAsync(u, c, "still here", parentMessageId: root.Id, at: DateTimeOffset.UtcNow.AddMinutes(-4));
-        await _sut!.DeleteAsync(root.Id, u.Id, default);
+        await _sut!.DeleteAsync(root.Id, u.Id, false, default);
 
         var view = await _sut.ListThreadAsync(root.Id, default);
         Assert.NotNull(view.Root);

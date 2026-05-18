@@ -480,7 +480,7 @@ public sealed class ChatScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, Shutdown);
+        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, _user.IsSysop, newBody, Shutdown);
         ReportMutation(result);
     }
 
@@ -497,7 +497,7 @@ public sealed class ChatScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, Shutdown);
+        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, _user.IsSysop, Shutdown);
         ReportMutation(result);
     }
 
@@ -553,7 +553,7 @@ public sealed class ChatScreen : BbsWindow
     private async Task SetTopicAsync(string? arg)
     {
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.SetTopicAsync(_currentChannel.Id, _user.Id, _user.Handle, arg, Shutdown);
+        var result = await muts.SetTopicAsync(_currentChannel.Id, _user.Id, _user.IsSysop, _user.Handle, arg, Shutdown);
         ReportMutation(result);
     }
 

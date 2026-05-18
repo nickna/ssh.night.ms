@@ -95,7 +95,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     public async Task Pin_of_deleted_message_is_forbidden()
     {
         var (u, _, m) = await SeedAsync("alice", "bye");
-        await _sut!.DeleteAsync(m.Id, u.Id, default);
+        await _sut!.DeleteAsync(m.Id, u.Id, false, default);
         var result = await _sut.PinAsync(m.Id, u.Id, default);
 
         Assert.IsType<ChatOpResult.Forbidden>(result);
@@ -129,7 +129,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     public async Task SetTopic_updates_channel_and_publishes()
     {
         var (u, c, _) = await SeedAsync("alice", "x");
-        var result = await _sut!.SetTopicAsync(c.Id, u.Id, u.Handle, "now featuring: stuff", default);
+        var result = await _sut!.SetTopicAsync(c.Id, u.Id, false, u.Handle, "now featuring: stuff", default);
 
         Assert.IsType<ChatOpResult.Ok>(result);
         await using var db = new AppDbContext(_dbOptions!);
@@ -150,7 +150,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
         await using var db2 = new AppDbContext(_dbOptions!);
         var bob = await db2.Users.FirstAsync(x => x.Handle == "bob");
 
-        var result = await _sut!.SetTopicAsync(c.Id, bob.Id, bob.Handle, "hijacked", default);
+        var result = await _sut!.SetTopicAsync(c.Id, bob.Id, false, bob.Handle, "hijacked", default);
         Assert.IsType<ChatOpResult.Forbidden>(result);
     }
 
@@ -158,8 +158,8 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     public async Task SetTopic_empty_clears_topic()
     {
         var (u, c, _) = await SeedAsync("alice", "x");
-        await _sut!.SetTopicAsync(c.Id, u.Id, u.Handle, "existing", default);
-        await _sut.SetTopicAsync(c.Id, u.Id, u.Handle, "   ", default);
+        await _sut!.SetTopicAsync(c.Id, u.Id, false, u.Handle, "existing", default);
+        await _sut.SetTopicAsync(c.Id, u.Id, false, u.Handle, "   ", default);
 
         await using var db = new AppDbContext(_dbOptions!);
         Assert.Null((await db.Channels.FirstAsync(x => x.Id == c.Id)).Topic);
@@ -169,7 +169,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     public async Task SetTopic_too_long_is_invalid()
     {
         var (u, c, _) = await SeedAsync("alice", "x");
-        var result = await _sut!.SetTopicAsync(c.Id, u.Id, u.Handle, new string('x', 250), default);
+        var result = await _sut!.SetTopicAsync(c.Id, u.Id, false, u.Handle, new string('x', 250), default);
         Assert.IsType<ChatOpResult.Invalid>(result);
     }
 
@@ -204,7 +204,7 @@ public class ChatMutationServicePinTopicTests : IClassFixture<PostgresFixture>, 
     public async Task Search_excludes_deleted_messages()
     {
         var (u, c, m) = await SeedAsync("alice", "needle in the haystack");
-        await _sut!.DeleteAsync(m.Id, u.Id, default);
+        await _sut!.DeleteAsync(m.Id, u.Id, false, default);
         var hits = await _sut.SearchAsync(c.Id, "needle", limit: 10, default);
         Assert.Empty(hits);
     }

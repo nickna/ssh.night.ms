@@ -166,6 +166,12 @@ builder.Services.AddSingleton<IBridgeTokenStore, RedisBridgeTokenStore>();
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<SystemMetricsCollector>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
+// Single Redis subscription for the system-wide wall broadcast, fanned out to per-session
+// callbacks. Singleton + hosted: the singleton registration lets sessions inject it for
+// Subscribe(); the hosted-service forwarder runs its subscription loop for the process
+// lifetime instead of one loop per session.
+builder.Services.AddSingleton<WallDispatcher>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WallDispatcher>());
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<ChatMutationService>();
 builder.Services.AddSingleton<PresenceService>();

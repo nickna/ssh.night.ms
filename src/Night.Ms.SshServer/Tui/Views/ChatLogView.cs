@@ -28,6 +28,11 @@ internal sealed class ChatLogView : View
 
     private readonly List<Entry> _entries = new();
     private readonly List<DisplayRow> _displayRows = new();
+    // O(1) message-id → entry lookup for in-place mutations (edits / reactions / images).
+    // The previous List.FindIndex scan was O(N) per chat event; at high event rates against
+    // a near-full log that scan added up to noticeable per-tick CPU. Only messages with a
+    // non-null id are tracked (system notices have null ids and don't need lookup).
+    private readonly Dictionary<long, Entry> _entryById = new();
     private int _layoutWidth = -1;
     private int _topRow;
     private bool _stickToBottom = true;
@@ -41,10 +46,17 @@ internal sealed class ChatLogView : View
 
     public void Append(ChatLine line, long? messageId = null)
     {
-        _entries.Add(new Entry { MessageId = messageId, Line = line });
+        var entry = new Entry { MessageId = messageId, Line = line };
+        _entries.Add(entry);
+        if (messageId is long mid) _entryById[mid] = entry;
         if (_entries.Count > MaxEntries)
         {
-            _entries.RemoveRange(0, _entries.Count - MaxEntries);
+            var trim = _entries.Count - MaxEntries;
+            for (var i = 0; i < trim; i++)
+            {
+                if (_entries[i].MessageId is long tid) _entryById.Remove(tid);
+            }
+            _entries.RemoveRange(0, trim);
         }
         InvalidateLayout();
     }
@@ -53,9 +65,9 @@ internal sealed class ChatLogView : View
     // through the standard MessageRenderer). Returns false if the message isn't on screen.
     public bool TryReplace(long messageId, ChatLine newLine)
     {
-        var idx = _entries.FindIndex(e => e.MessageId == messageId);
-        if (idx < 0) return false;
-        _entries[idx].Line = newLine;
+        if (!_entryById.TryGetValue(messageId, out var entry)) return false;
+        entry.Line = newLine;
+        entry.CachedRows = null;
         InvalidateLayout();
         return true;
     }
@@ -64,9 +76,9 @@ internal sealed class ChatLogView : View
     // footer row under the message. Empty list = no footer.
     public bool TrySetReactions(long messageId, IReadOnlyList<ReactionSummary> reactions)
     {
-        var idx = _entries.FindIndex(e => e.MessageId == messageId);
-        if (idx < 0) return false;
-        _entries[idx].Reactions = reactions;
+        if (!_entryById.TryGetValue(messageId, out var entry)) return false;
+        entry.Reactions = reactions;
+        entry.CachedRows = null;
         InvalidateLayout();
         return true;
     }
@@ -76,12 +88,11 @@ internal sealed class ChatLogView : View
     // image is painted as a block between the message body and any reactions footer.
     public bool TryAddImage(long messageId, CellGrid grid)
     {
-        var idx = _entries.FindIndex(e => e.MessageId == messageId);
-        if (idx < 0) return false;
-        var entry = _entries[idx];
+        if (!_entryById.TryGetValue(messageId, out var entry)) return false;
         var images = entry.Images.ToList();
         images.Add(grid);
         entry.Images = images;
+        entry.CachedRows = null;
         InvalidateLayout();
         return true;
     }
@@ -90,10 +101,10 @@ internal sealed class ChatLogView : View
     // so the image rows don't survive past the body that referenced them.
     public bool TryClearImages(long messageId)
     {
-        var idx = _entries.FindIndex(e => e.MessageId == messageId);
-        if (idx < 0) return false;
-        if (_entries[idx].Images.Count == 0) return false;
-        _entries[idx].Images = Array.Empty<CellGrid>();
+        if (!_entryById.TryGetValue(messageId, out var entry)) return false;
+        if (entry.Images.Count == 0) return false;
+        entry.Images = Array.Empty<CellGrid>();
+        entry.CachedRows = null;
         InvalidateLayout();
         return true;
     }
@@ -101,6 +112,7 @@ internal sealed class ChatLogView : View
     public void Clear()
     {
         _entries.Clear();
+        _entryById.Clear();
         _displayRows.Clear();
         _layoutWidth = -1;
         _topRow = 0;
@@ -203,37 +215,57 @@ internal sealed class ChatLogView : View
         }
     }
 
+    // Stitches per-entry cached display rows into the flat _displayRows list. Each entry
+    // owns its own pre-wrapped DisplayRow[] keyed by width; when one entry changes
+    // (TryReplace / TrySetReactions / TryAddImage / TryClearImages) only its cache is
+    // invalidated, so subsequent Relayout passes re-wrap exactly one entry instead of all N.
+    // The full-list rebuild only does heavy word-wrap work when an entry's cache is stale.
     private void Relayout(int width)
     {
         _displayRows.Clear();
         foreach (var entry in _entries)
         {
-            WrapAndAppend(entry.Line, width);
-            // Image rows render after the message body and before any reactions. One
-            // display row per source CellGrid row; widths > viewport clip rather than wrap.
-            foreach (var grid in entry.Images)
+            var rows = entry.CachedRows;
+            if (rows is null || entry.CachedWidth != width)
             {
-                for (var y = 0; y < grid.Height; y++)
-                {
-                    var rowWidth = Math.Min(grid.Width, width);
-                    var cells = new Cell[rowWidth];
-                    for (var x = 0; x < rowWidth; x++) cells[x] = grid[x, y];
-                    _displayRows.Add(new ImageDisplayRow(cells));
-                }
+                rows = BuildEntryRows(entry, width);
+                entry.CachedRows = rows;
+                entry.CachedWidth = width;
             }
-            if (entry.Reactions.Count > 0)
-            {
-                AppendReactionRow(entry.Reactions, width);
-            }
+            // Manual loop (no LINQ) keeps the per-frame stitch allocation-free.
+            for (var i = 0; i < rows.Count; i++) _displayRows.Add(rows[i]);
         }
         _layoutWidth = width;
         if (_topRow > MaxTop) _topRow = MaxTop;
     }
 
+    private List<DisplayRow> BuildEntryRows(Entry entry, int width)
+    {
+        var rows = new List<DisplayRow>();
+        WrapInto(rows, entry.Line, width);
+        // Image rows render after the message body and before any reactions. One display
+        // row per source CellGrid row; widths > viewport clip rather than wrap.
+        foreach (var grid in entry.Images)
+        {
+            for (var y = 0; y < grid.Height; y++)
+            {
+                var rowWidth = Math.Min(grid.Width, width);
+                var cells = new Cell[rowWidth];
+                for (var x = 0; x < rowWidth; x++) cells[x] = grid[x, y];
+                rows.Add(new ImageDisplayRow(cells));
+            }
+        }
+        if (entry.Reactions.Count > 0)
+        {
+            rows.Add(BuildReactionRow(entry.Reactions, width));
+        }
+        return rows;
+    }
+
     // Renders the reaction footer as one row: `  👍 3  ❤ 1`. Reactions the current user
     // contributed to (ByMe) paint bold so unreacting feels reversible. Two-space indent
     // mirrors the wrap-continuation indent used by message bodies.
-    private void AppendReactionRow(IReadOnlyList<ReactionSummary> reactions, int width)
+    private static DisplayRow BuildReactionRow(IReadOnlyList<ReactionSummary> reactions, int width)
     {
         var segments = new List<RunSegment>();
         var col = 0;
@@ -260,10 +292,10 @@ internal sealed class ChatLogView : View
             col += emojiWidth;
         }
 
-        _displayRows.Add(new TextDisplayRow(segments.ToArray()));
+        return new TextDisplayRow(segments.ToArray());
     }
 
-    private void WrapAndAppend(ChatLine line, int width)
+    private static void WrapInto(List<DisplayRow> output, ChatLine line, int width)
     {
         var current = new List<RunSegment>();
         var currentWidth = 0;
@@ -271,7 +303,7 @@ internal sealed class ChatLogView : View
 
         void Flush()
         {
-            _displayRows.Add(new TextDisplayRow(current.ToArray()));
+            output.Add(new TextDisplayRow(current.ToArray()));
             current = new List<RunSegment>();
             currentWidth = 0;
         }
@@ -394,6 +426,12 @@ internal sealed class ChatLogView : View
         // Inline images attached to this message. Each grid renders as a contiguous block
         // of ImageDisplayRows between the message body and the reactions footer.
         public IReadOnlyList<CellGrid> Images { get; set; } = Array.Empty<CellGrid>();
+        // Pre-wrapped display rows for this entry at CachedWidth. Set to null whenever the
+        // entry's content changes (line / reactions / images); Relayout rebuilds it on next
+        // pass. Keeping the cache on the entry means a single chat event only re-wraps the
+        // one affected entry instead of all N entries in the log.
+        public List<DisplayRow>? CachedRows;
+        public int CachedWidth;
     }
 
     private readonly record struct RunSegment(string Text, ArtColor Foreground, ArtStyle Style);

@@ -53,10 +53,14 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         return new ChatOpResult.Posted(msg.Id, now);
     }
 
-    // Edit the body of an existing message. Author-only — sysop override is intentionally
-    // not modeled here yet; the moderation surface is separate (audit_log + bans). A no-op
-    // edit (body unchanged) returns Ok without writing to keep the audit signal clean.
-    public async Task<ChatOpResult> EditAsync(long messageId, long actorUserId, string newBody, CancellationToken ct)
+    // Edit the body of an existing message. Author-only unless the caller flags themselves
+    // as sysop. A no-op edit (body unchanged) returns Ok without writing to keep the audit
+    // signal clean.
+    //
+    // The caller passes isSysop because they already have the User entity in hand (the TUI
+    // session caches it for the connection lifetime); reading it from the DB on every chat
+    // mutation just to re-confirm what we already know would add a round-trip per write.
+    public async Task<ChatOpResult> EditAsync(long messageId, long actorUserId, bool actorIsSysop, string newBody, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(newBody)) return new ChatOpResult.Invalid("New body is empty.");
         if (newBody.Length > 2000)              return new ChatOpResult.Invalid("Message too long.");
@@ -64,8 +68,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
         if (msg is null) return ChatOpResult.NotFoundInstance;
-        var isSysop = await IsSysopAsync(db, actorUserId, ct);
-        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, isSysop))
+        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, actorIsSysop))
             return new ChatOpResult.Forbidden("You can only edit your own messages.");
         if (msg.DeletedAt is not null) return new ChatOpResult.Forbidden("This message was deleted.");
         if (msg.Body == newBody) return ChatOpResult.OkInstance;
@@ -81,14 +84,13 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     }
 
     // Tombstone a message. The row remains so reactions and reply-chains don't dangle; the
-    // renderer paints "(deleted)" in faint gray.
-    public async Task<ChatOpResult> DeleteAsync(long messageId, long actorUserId, CancellationToken ct)
+    // renderer paints "(deleted)" in faint gray. Author-only unless actorIsSysop is true.
+    public async Task<ChatOpResult> DeleteAsync(long messageId, long actorUserId, bool actorIsSysop, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
         if (msg is null) return ChatOpResult.NotFoundInstance;
-        var isSysop = await IsSysopAsync(db, actorUserId, ct);
-        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, isSysop))
+        if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, actorIsSysop))
             return new ChatOpResult.Forbidden("You can only delete your own messages.");
         if (msg.DeletedAt is not null) return ChatOpResult.OkInstance;
 
@@ -201,7 +203,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     // Set the channel topic. Only the channel creator may change the topic; a public channel
     // with a NULL CreatedById (set on rare admin-seeded rows) falls back to any-member.
     // Passing a null/whitespace topic clears it.
-    public async Task<ChatOpResult> SetTopicAsync(long channelId, long actorUserId, string actorHandle, string? topic, CancellationToken ct)
+    public async Task<ChatOpResult> SetTopicAsync(long channelId, long actorUserId, bool actorIsSysop, string actorHandle, string? topic, CancellationToken ct)
     {
         if (topic is not null && topic.Length > 200) return new ChatOpResult.Invalid("Topic must be 200 chars or fewer.");
         var trimmed = string.IsNullOrWhiteSpace(topic) ? null : topic.Trim();
@@ -209,8 +211,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
         if (channel is null) return ChatOpResult.NotFoundInstance;
-        var isSysop = await IsSysopAsync(db, actorUserId, ct);
-        if (!ChatAuthorization.CanSetChannelTopic(channel, actorUserId, isSysop))
+        if (!ChatAuthorization.CanSetChannelTopic(channel, actorUserId, actorIsSysop))
         {
             return new ChatOpResult.Forbidden("Only the channel creator can set the topic.");
         }
@@ -332,17 +333,5 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         var envelope = new ChatEnvelope(kind, JsonSerializer.SerializeToElement(payload));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
         await bus.PublishAsync(ChatTopics.Channel(channelId), bytes, ct);
-    }
-
-    // PK lookup of the sysop bit. One extra query per mutation method that does an authz
-    // check; cheap, and keeps the public surface taking `long actorUserId` so callers don't
-    // have to thread a User object through every call site.
-    private static async Task<bool> IsSysopAsync(AppDbContext db, long actorUserId, CancellationToken ct)
-    {
-        var row = await db.Users.AsNoTracking()
-            .Where(u => u.Id == actorUserId)
-            .Select(u => new { u.IsSysop })
-            .FirstOrDefaultAsync(ct);
-        return row?.IsSysop ?? false;
     }
 }

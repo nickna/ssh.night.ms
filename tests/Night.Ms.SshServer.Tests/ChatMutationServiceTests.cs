@@ -52,7 +52,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     public async Task Edit_updates_body_and_sets_edited_timestamp()
     {
         var (user, _, msg) = await SeedMessageAsync("alice", "original");
-        var result = await _sut!.EditAsync(msg.Id, user.Id, "edited body", default);
+        var result = await _sut!.EditAsync(msg.Id, user.Id, false, "edited body", default);
 
         Assert.IsType<ChatOpResult.Ok>(result);
         await using var db = new AppDbContext(_dbOptions!);
@@ -65,7 +65,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     public async Task Edit_publishes_edit_envelope()
     {
         var (user, _, msg) = await SeedMessageAsync("alice", "original");
-        await _sut!.EditAsync(msg.Id, user.Id, "edited body", default);
+        await _sut!.EditAsync(msg.Id, user.Id, false, "edited body", default);
 
         Assert.Single(_bus!.Published);
         var envelope = JsonSerializer.Deserialize<ChatEnvelope>(_bus.Published[0].Payload);
@@ -86,7 +86,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
         await using var db2 = new AppDbContext(_dbOptions!);
         var bob = await db2.Users.FirstAsync(u => u.Handle == "bob");
 
-        var result = await _sut!.EditAsync(msg.Id, bob.Id, "hijacked", default);
+        var result = await _sut!.EditAsync(msg.Id, bob.Id, false, "hijacked", default);
         Assert.IsType<ChatOpResult.Forbidden>(result);
 
         var unchanged = await db2.ChatMessages.AsNoTracking().FirstAsync(m => m.Id == msg.Id);
@@ -96,7 +96,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     [Fact]
     public async Task Edit_of_unknown_message_returns_NotFound()
     {
-        var result = await _sut!.EditAsync(99999, 1, "x", default);
+        var result = await _sut!.EditAsync(99999, 1, false, "x", default);
         Assert.IsType<ChatOpResult.NotFound>(result);
     }
 
@@ -104,7 +104,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     public async Task Edit_with_empty_body_returns_Invalid()
     {
         var (user, _, msg) = await SeedMessageAsync("alice", "original");
-        var result = await _sut!.EditAsync(msg.Id, user.Id, "   ", default);
+        var result = await _sut!.EditAsync(msg.Id, user.Id, false, "   ", default);
         Assert.IsType<ChatOpResult.Invalid>(result);
     }
 
@@ -112,7 +112,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     public async Task Delete_tombstones_message_without_removing_row()
     {
         var (user, _, msg) = await SeedMessageAsync("alice", "bye");
-        var result = await _sut!.DeleteAsync(msg.Id, user.Id, default);
+        var result = await _sut!.DeleteAsync(msg.Id, user.Id, false, default);
 
         Assert.IsType<ChatOpResult.Ok>(result);
         await using var db = new AppDbContext(_dbOptions!);
@@ -133,7 +133,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
         await using var db2 = new AppDbContext(_dbOptions!);
         var mallory = await db2.Users.FirstAsync(u => u.Handle == "mallory");
 
-        var result = await _sut!.DeleteAsync(msg.Id, mallory.Id, default);
+        var result = await _sut!.DeleteAsync(msg.Id, mallory.Id, false, default);
         Assert.IsType<ChatOpResult.Forbidden>(result);
     }
 
@@ -186,7 +186,7 @@ public class ChatMutationServiceTests : IClassFixture<PostgresFixture>, IAsyncLi
     public async Task React_on_deleted_message_is_forbidden()
     {
         var (user, _, msg) = await SeedMessageAsync("alice", "bye");
-        await _sut!.DeleteAsync(msg.Id, user.Id, default);
+        await _sut!.DeleteAsync(msg.Id, user.Id, false, default);
         // Clear publish log so the assertion below targets only the React attempt.
         var result = await _sut.ReactAsync(msg.Id, user.Id, "alice", "\U0001F525", default);
         Assert.IsType<ChatOpResult.Forbidden>(result);

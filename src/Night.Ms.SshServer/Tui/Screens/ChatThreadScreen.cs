@@ -369,7 +369,7 @@ public sealed class ChatThreadScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, newBody, Shutdown);
+        var result = await muts.EditAsync(msgRef.MessageId, _user.Id, _user.IsSysop, newBody, Shutdown);
         ReportMutation(result);
     }
 
@@ -386,7 +386,7 @@ public sealed class ChatThreadScreen : BbsWindow
             return;
         }
         var muts = _services.GetRequiredService<ChatMutationService>();
-        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, Shutdown);
+        var result = await muts.DeleteAsync(msgRef.MessageId, _user.Id, _user.IsSysop, Shutdown);
         ReportMutation(result);
     }
 
