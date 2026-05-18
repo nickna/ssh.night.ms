@@ -1,4 +1,5 @@
 using System.Text;
+using Night.Ms.SshServer.Doors.Games.Common;
 using Night.Ms.SshServer.Tui.Art;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
@@ -6,13 +7,6 @@ using Attribute = Terminal.Gui.Drawing.Attribute;
 using Cell = Night.Ms.SshServer.Tui.Art.Cell;
 
 namespace Night.Ms.SshServer.Doors.Games.Slots;
-
-internal enum WinTier
-{
-    None,
-    Normal,
-    Jackpot,
-}
 
 // Custom Terminal.Gui View that draws the full slot-machine cabinet: marquee, three reel
 // housings, a side handle, and a coin tray. Owns the rendering state (per-reel spin offsets,
