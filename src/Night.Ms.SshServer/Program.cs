@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -21,6 +22,7 @@ using Night.Ms.SshServer.Realtime;
 using Night.Ms.SshServer.Tui;
 using Night.Ms.SshServer.Tui.Map;
 using Night.Ms.SshServer.Web;
+using Night.Ms.SshTransport;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -144,6 +146,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddSingleton<IPasswordHasher, Argon2idPasswordHasher>();
 builder.Services.AddSingleton<ILoginRateLimiter, RedisLoginRateLimiter>();
 builder.Services.AddSingleton<IDismissedKeyStore, RedisDismissedKeyStore>();
+builder.Services.AddSingleton<IBridgeTokenStore, RedisBridgeTokenStore>();
 builder.Services.AddSingleton<AuthLookupService>();
 builder.Services.AddSingleton<SystemMetricsCollector>();
 builder.Services.AddSingleton<IRealtimeBus, RedisRealtimeBus>();
@@ -230,6 +233,102 @@ app.MapPost("/login/{provider}", async (string provider, HttpContext ctx, IAntif
     if (scheme is null) return Results.Redirect("/login");
     var props = new AuthenticationProperties { RedirectUri = "/signin/complete" };
     return Results.Challenge(props, [scheme]);
+});
+
+// POST /login/password — handle + password sign-in. Delegates to AuthLookupService.
+// EvaluatePasswordAsync, which is the same path SSH password auth uses, so RequireSshKey,
+// rate-limit, timing-safety, and rehash-on-algo-drift behavior are shared. Every failure
+// (wrong password, unknown handle, RequireSshKey on, rate-limited) returns the same generic
+// flash so the banner doesn't leak account state.
+app.MapPost("/login/password", async (HttpContext ctx, AuthLookupService auth, AppDbContext db, [FromForm] string? handle, [FromForm] string? password) =>
+{
+    handle = (handle ?? string.Empty).Trim();
+    password ??= string.Empty;
+
+    const string GenericFlash = "Invalid handle or password.";
+    if (handle.Length == 0 || password.Length == 0)
+    {
+        return Results.Redirect("/login?flash=" + Uri.EscapeDataString(GenericFlash));
+    }
+
+    var decision = await auth.EvaluatePasswordAsync(handle, password, ctx.Connection.RemoteIpAddress, ctx.RequestAborted);
+    switch (decision)
+    {
+        case AuthDecision.Known k:
+            await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                BuildCookiePrincipal(k.UserId, k.Handle, k.IsSysop));
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorId = k.UserId,
+                Action = "web.password.login",
+                TargetType = "user",
+                TargetId = k.UserId,
+                Details = JsonDocument.Parse(JsonSerializer.Serialize(new { ip = ctx.Connection.RemoteIpAddress?.ToString() })),
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(ctx.RequestAborted);
+            return Results.Redirect("/profile");
+
+        default:
+            var reason = decision switch
+            {
+                AuthDecision.Refused r => r.Reason,
+                AuthDecision.RateLimited => "rate_limited",
+                AuthDecision.Banned => "banned",
+                AuthDecision.SignupRequired => "unknown_handle",
+                _ => "unknown",
+            };
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorId = null,
+                Action = "web.password.refused",
+                TargetType = "handle",
+                TargetId = null,
+                Details = JsonDocument.Parse(JsonSerializer.Serialize(new { handle, reason, ip = ctx.Connection.RemoteIpAddress?.ToString() })),
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(ctx.RequestAborted);
+            return Results.Redirect("/login?flash=" + Uri.EscapeDataString(GenericFlash));
+    }
+});
+
+// GET /auth/bridge/{token} — redeems a single-use bridge token minted from an SSH session
+// and signs the user into the durable Cookies scheme. GET (not POST) so the user can click
+// the URL directly; no CSRF risk because the token itself IS the credential.
+app.MapGet("/auth/bridge/{token}", async (string token, HttpContext ctx, IBridgeTokenStore store, AppDbContext db) =>
+{
+    var userId = await store.RedeemAsync(token, ctx.RequestAborted);
+    if (userId is null)
+    {
+        db.AuditLogs.Add(new AuditLog
+        {
+            ActorId = null,
+            Action = "web.bridge.refused",
+            TargetType = "bridge_token",
+            TargetId = null,
+            Details = JsonDocument.Parse(JsonSerializer.Serialize(new { reason = "missing_or_expired", ip = ctx.Connection.RemoteIpAddress?.ToString() })),
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync(ctx.RequestAborted);
+        return Results.Redirect("/login?flash=" + Uri.EscapeDataString("Bridge link expired or already used."));
+    }
+
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId.Value, ctx.RequestAborted);
+    if (user is null) return Results.Redirect("/login");
+
+    await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+        BuildCookiePrincipal(user.Id, user.Handle, user.IsSysop));
+    db.AuditLogs.Add(new AuditLog
+    {
+        ActorId = user.Id,
+        Action = "web.bridge.consumed",
+        TargetType = "user",
+        TargetId = user.Id,
+        Details = JsonDocument.Parse(JsonSerializer.Serialize(new { ip = ctx.Connection.RemoteIpAddress?.ToString() })),
+        CreatedAt = DateTimeOffset.UtcNow,
+    });
+    await db.SaveChangesAsync(ctx.RequestAborted);
+    return Results.Redirect("/profile");
 });
 
 // GET /signin/complete — the External cookie now holds the OIDC ticket. Look up the subject;

@@ -36,6 +36,12 @@ public sealed class ProfileEditScreen : BbsWindow
     private readonly BbsStatusLine _status;
     private readonly CheckBox _suppressKeyAdoption;
     private readonly CheckBox _requireSshKey;
+    // The URL hint button in the avatar area + the line above it. We mutate both on a
+    // successful bridge mint: the button shows the bridge URL (ctrl/cmd-clickable in
+    // modern terminals), and the line above changes from "Sign in to manage your profile"
+    // to a freshness indicator ("Single-use, 5 min — click to copy or open").
+    private Label _pfpHintLine2 = default!;
+    private Button _pfpHintLine3 = default!;
     // Two tab-content groups. Adding a widget via AddProfile/AddSettings registers it for
     // visibility toggling on tab switch. Status line + tab strip live at window level so
     // both tabs share them.
@@ -82,24 +88,33 @@ public sealed class ProfileEditScreen : BbsWindow
         };
         var pfpHintLine1 = new Label { X = 2 + previewCols + 2, Y = 3, Text = "Profile picture" };
         pfpHintLine1.SetScheme(BbsTheme.Header_);
-        var pfpHintLine2 = new Label
+        _pfpHintLine2 = new Label
         {
             X = 2 + previewCols + 2,
             Y = 4,
-            Text = "Change it from the web profile page",
+            Text = "Click below to open your profile in a browser:",
         };
-        pfpHintLine2.SetScheme(BbsTheme.Faint_);
-        var pfpHintLine3 = new Label
+        _pfpHintLine2.SetScheme(BbsTheme.Faint_);
+        // Until the user clicks, the button text shows the profile URL as a hint of where
+        // they'll land. On click, OpenInBrowserAsync mints a one-time bridge token and
+        // replaces the text with the bridge URL — modern terminals (Windows Terminal,
+        // iTerm2, GNOME, Kitty) auto-linkify it so ctrl/cmd+click opens it directly.
+        _pfpHintLine3 = new Button
         {
             X = 2 + previewCols + 2,
             Y = 5,
             Text = ResolvePublicUrl(services),
         };
-        pfpHintLine3.SetScheme(BbsTheme.Hint);
+        _pfpHintLine3.SetScheme(BbsTheme.Hint);
+        _pfpHintLine3.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            OpenInBrowserAsync().FireAndLog(_services, nameof(OpenInBrowserAsync));
+        };
         AddProfile(avatarView);
         AddProfile(pfpHintLine1);
-        AddProfile(pfpHintLine2);
-        AddProfile(pfpHintLine3);
+        AddProfile(_pfpHintLine2);
+        AddProfile(_pfpHintLine3);
 
         // Kick off the half-block render in the background; the AnsiArtView.Grid setter
         // triggers a redraw on the UI thread via Application.Invoke.
@@ -262,6 +277,18 @@ public sealed class ProfileEditScreen : BbsWindow
             _app.Run(new KeysManagementScreen(_app, _services, _user, db));
         };
 
+        // Mints a single-use, 5-minute bridge token and shows the URL to copy/paste into a
+        // browser. The endpoint /auth/bridge/{token} signs the user into the durable Cookies
+        // scheme and redirects to /profile. Rate-limited per-user at the store level
+        // (5/hour); we surface the refusal via a MessageBox here so the user isn't left
+        // confused about the no-op click.
+        var bridgeButton = new Button { X = Pos.Right(keysButton) + 2, Y = Pos.AnchorEnd(4), Text = "Open in _browser..." };
+        bridgeButton.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            OpenInBrowserAsync().FireAndLog(_services, nameof(OpenInBrowserAsync));
+        };
+
         Add(_status);
         AddProfile(_realName);
         AddProfile(_location);
@@ -274,6 +301,7 @@ public sealed class ProfileEditScreen : BbsWindow
         AddProfile(cancel);
         AddProfile(pwButton);
         AddProfile(keysButton);
+        AddProfile(bridgeButton);
 
         // ----- Settings tab content -----
 
@@ -629,9 +657,58 @@ public sealed class ProfileEditScreen : BbsWindow
     }
 
     private static string ResolvePublicUrl(IServiceProvider services)
+        => $"{ResolvePublicBaseUrl(services)}/profile";
+
+    private static string ResolvePublicBaseUrl(IServiceProvider services)
     {
         var options = services.GetRequiredService<NightMsOptions>();
-        var baseUrl = options.WebBaseUrl?.TrimEnd('/') ?? $"http://localhost:{options.HttpPort ?? 5080}";
-        return $"{baseUrl}/profile";
+        return options.WebBaseUrl?.TrimEnd('/') ?? $"http://localhost:{options.HttpPort ?? 5080}";
+    }
+
+    // Issues a single-use bridge token and surfaces the resulting URL on-screen so the
+    // user's terminal can render it as a clickable hyperlink. No modal dialog — both the
+    // bottom-row "Open in browser..." button and the URL hint in the avatar header funnel
+    // here. The URL replaces the static profile hint until a fresh link is needed.
+    private async Task OpenInBrowserAsync()
+    {
+        try
+        {
+            using var scope = _services.CreateScope();
+            var store = scope.ServiceProvider.GetRequiredService<Auth.IBridgeTokenStore>();
+            var token = await store.IssueAsync(_user.Id, default);
+            if (token is null)
+            {
+                _app.Invoke(() => _status.SetWarning(
+                    "[!] Too many browser links in the last hour — try again later (an existing link is probably still valid)."));
+                return;
+            }
+
+            var url = $"{ResolvePublicBaseUrl(_services)}/auth/bridge/{token}";
+
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorId = _user.Id,
+                Action = "web.bridge.issued",
+                TargetType = "user",
+                TargetId = _user.Id,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Details = System.Text.Json.JsonSerializer.SerializeToDocument(new { via = "tui", ip = _clientIp?.ToString() }),
+            });
+            await db.SaveChangesAsync();
+
+            _app.Invoke(() =>
+            {
+                _pfpHintLine2.Text = "One-time link (valid 5 min) — ctrl/cmd+click in your terminal:";
+                _pfpHintLine3.Text = url;
+                _status.SetSuccess("Browser link ready — click the URL above (or copy it).");
+                _pfpHintLine2.SetNeedsDraw();
+                _pfpHintLine3.SetNeedsDraw();
+            });
+        }
+        catch (Exception ex)
+        {
+            _app.Invoke(() => _status.SetWarning($"[!] bridge failed: {ex.Message}"));
+        }
     }
 }

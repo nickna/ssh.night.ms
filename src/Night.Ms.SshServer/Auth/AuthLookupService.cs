@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Night.Ms.SshServer.Domain;
@@ -88,21 +89,28 @@ public sealed class AuthLookupService(
             OfferedFingerprint: fingerprint, OfferedAlgorithm: algorithm, OfferedBlob: blob);
     }
 
-    private async Task<AuthDecision> HandlePasswordAsync(AuthQuery.Password q, CancellationToken ct)
+    private Task<AuthDecision> HandlePasswordAsync(AuthQuery.Password q, CancellationToken ct)
+        => EvaluatePasswordAsync(q.Handle, q.Secret, q.SourceIp, ct);
+
+    // Shared password-evaluation path. Used by the SSH password handler above and by the
+    // web /login/password endpoint — same rate-limit, same timing-safety, same RequireSshKey
+    // refusal. Exposing the bare primitives (handle/secret/ip) instead of AuthQuery.Password
+    // keeps the web call site from having to construct a transport-layer DTO.
+    public async Task<AuthDecision> EvaluatePasswordAsync(string handle, string secret, IPAddress? sourceIp, CancellationToken ct)
     {
         // Rate-limit first. Apply to all password attempts including unknown users — we
         // don't want to give a free-pass attack vector via "spray nonexistent handles".
-        var check = await rateLimiter.CheckAsync(q.Handle, q.SourceIp, ct);
+        var check = await rateLimiter.CheckAsync(handle, sourceIp, ct);
         if (check is RateLimitCheck.LockedOut locked)
         {
             // Still run a dummy verify so locked-out attempts take the same wall time as
             // unlocked ones — otherwise the lockout state itself is a side-channel.
-            hasher.VerifyDummy(q.Secret);
+            hasher.VerifyDummy(secret);
             return new AuthDecision.RateLimited(locked.RetryAfter);
         }
 
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var user = await ResolveUserAsync(db, q.Handle, ct);
+        var user = await ResolveUserAsync(db, handle, ct);
 
         if (user is null)
         {
@@ -110,12 +118,12 @@ public sealed class AuthLookupService(
             // and return signup. Recording a "failure" here would let an attacker enumerate
             // valid handles by counting which usernames produce a lockout vs not — instead,
             // unknown-handle attempts increment IP-only.
-            hasher.VerifyDummy(q.Secret);
-            await rateLimiter.RecordFailureAsync(q.Handle, q.SourceIp, ct);
+            hasher.VerifyDummy(secret);
+            await rateLimiter.RecordFailureAsync(handle, sourceIp, ct);
             // Signup invitation. The TUI prefills the handle and asks the user to set a
             // password (the SSH-side password they just typed is NOT used — too easy to
             // accidentally bootstrap an account with a botched password).
-            return new AuthDecision.SignupRequired(q.Handle);
+            return new AuthDecision.SignupRequired(handle);
         }
 
         if (user.IsBanned) return new AuthDecision.Banned("Account is banned.");
@@ -126,16 +134,16 @@ public sealed class AuthLookupService(
             // refuse. Banner-style hint isn't possible without a separate Failed shape, so
             // failure goes through the standard channel — the web profile guides users to
             // either set a password or upload a key.
-            hasher.VerifyDummy(q.Secret);
-            await rateLimiter.RecordFailureAsync(q.Handle, q.SourceIp, ct);
+            hasher.VerifyDummy(secret);
+            await rateLimiter.RecordFailureAsync(handle, sourceIp, ct);
             logger.LogInformation("Password attempt for handle={Handle} — no password set", user.Handle);
             return new AuthDecision.Refused("no password set for this account");
         }
 
-        var ok = hasher.Verify(q.Secret, user.PasswordHash, user.PasswordAlgo);
+        var ok = hasher.Verify(secret, user.PasswordHash, user.PasswordAlgo);
         if (!ok)
         {
-            await rateLimiter.RecordFailureAsync(q.Handle, q.SourceIp, ct);
+            await rateLimiter.RecordFailureAsync(handle, sourceIp, ct);
             logger.LogInformation("Password verify failed for handle={Handle}", user.Handle);
             return new AuthDecision.Refused("invalid password");
         }
@@ -147,16 +155,16 @@ public sealed class AuthLookupService(
         // Argon2id verify. Record as a failure so brute-force still tips the rate limiter.
         if (user.RequireSshKey)
         {
-            await rateLimiter.RecordFailureAsync(q.Handle, q.SourceIp, ct);
+            await rateLimiter.RecordFailureAsync(handle, sourceIp, ct);
             logger.LogInformation("Password verify succeeded but RequireSshKey is on for handle={Handle}; refusing", user.Handle);
             return new AuthDecision.Refused("account requires SSH key authentication");
         }
 
         // Successful login. Clear the handle counter; optionally rehash if algo drift.
-        await rateLimiter.ClearAsync(q.Handle, ct);
+        await rateLimiter.ClearAsync(handle, ct);
         if (hasher.NeedsRehash(user.PasswordAlgo))
         {
-            var fresh = hasher.Hash(q.Secret);
+            var fresh = hasher.Hash(secret);
             user.PasswordHash = fresh.Hash;
             user.PasswordAlgo = fresh.Algo;
             user.PasswordUpdatedAt = DateTimeOffset.UtcNow;

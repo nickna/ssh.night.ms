@@ -6,18 +6,26 @@
 
 <h1>Sign in</h1>
 
-@if (!Model.AnySsoConfigured)
+@if (Model.Flash is not null)
 {
-    <div class="box">
-        <p class="warn">No SSO providers are configured on this server.</p>
-        <p class="muted">
-            Set <code>NIGHTMS_GOOGLE_CLIENT_ID</code> + <code>NIGHTMS_GOOGLE_CLIENT_SECRET</code>
-            (and/or the Microsoft equivalents) and restart to enable web sign-in.
-        </p>
-    </div>
+    <div class="box flash"><p>@Model.Flash</p></div>
 }
-else
+
+<h2>Sign in with handle &amp; password</h2>
+<form method="post" action="/login/password" class="box">
+    @Html.AntiForgeryToken()
+    <p>Handle: <input type="text" name="handle" required autocomplete="username" /></p>
+    <p>Password: <input type="password" name="password" required autocomplete="current-password" /></p>
+    <button class="btn" type="submit">Sign in</button>
+</form>
+<p class="muted">
+    Accounts that require an SSH key for login can't sign in here. Open an SSH session and use
+    <strong>Profile &rarr; Open in browser</strong> to get a one-time link instead.
+</p>
+
+@if (Model.AnySsoConfigured)
 {
+    <h2>Or sign in with a linked SSO provider</h2>
     <div class="actions">
         @if (Model.GoogleConfigured)
         {
