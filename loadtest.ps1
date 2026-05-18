@@ -135,8 +135,12 @@ try {
 function Invoke-LoadTest {
     # Parameter is $ToolArgs, not $Args: PowerShell's automatic $args wins over a
     # function parameter of the same name and produces a silent empty splat.
+    #
+    # Pipe to Out-Host so the dotnet stdout/stderr lines render to the console but
+    # don't enter this function's pipeline. Without Out-Host, `$code = Invoke-LoadTest`
+    # captures every output line along with $LASTEXITCODE into the caller's variable.
     param([string[]]$ToolArgs)
-    & dotnet run --project $Project --no-build -- @ToolArgs
+    & dotnet run --project $Project --no-build -- @ToolArgs | Out-Host
     return $LASTEXITCODE
 }
 
