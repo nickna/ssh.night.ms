@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Drawing;
 using System.Text;
 using Terminal.Gui.Drivers;
@@ -89,7 +90,17 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         return true;
     }
 
-    protected override void Write(StringBuilder output) => WriteRawCore(output.ToString().AsSpan());
+    // StringBuilder is iterated chunk-by-chunk so we don't allocate a backing string just to
+    // hand it to the UTF-8 encoder. The base class produces small SGR + cell-content fragments
+    // that almost always fit in a single chunk; chunked iteration costs nothing extra.
+    protected override void Write(StringBuilder output)
+    {
+        if (_disposed || output.Length == 0) return;
+        foreach (var chunk in output.GetChunks())
+        {
+            WriteRawCore(chunk.Span);
+        }
+    }
 
     private void WriteRaw(string text)
     {
@@ -100,14 +111,26 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
     private void WriteRawCore(ReadOnlySpan<char> text)
     {
         if (_disposed || text.IsEmpty) return;
+
+        // Rent a UTF-8 byte buffer from the shared pool instead of allocating per call.
+        // Terminal.Gui's OutputBase invokes this many times per frame (one call per SGR
+        // change), and across hundreds of concurrent sessions the old shape (text.ToArray()
+        // + Encoding.UTF8.GetBytes(char[])) was a steady GC source — two allocations per
+        // call, multiplied by the per-frame cell-change count.
+        var byteCount = Encoding.UTF8.GetByteCount(text);
+        var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
         try
         {
-            var bytes = Encoding.UTF8.GetBytes(text.ToArray());
-            _stream.Write(bytes, 0, bytes.Length);
+            var written = Encoding.UTF8.GetBytes(text, buffer);
+            _stream.Write(buffer, 0, written);
         }
         catch (Exception)
         {
             // The channel may have closed under us — swallow so the main loop can shut down cleanly.
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

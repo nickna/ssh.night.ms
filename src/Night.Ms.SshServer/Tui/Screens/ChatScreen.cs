@@ -26,7 +26,11 @@ public sealed class ChatScreen : BbsWindow
     // Right (members) sidebar; left (channels) sidebar uses ChannelPaneWidth.
     private const int SidebarWidth = 16;
     private const int ChannelPaneWidth = 20;
-    private static readonly TimeSpan ChannelRefreshPeriod = TimeSpan.FromSeconds(5);
+    // Channel sidebar refresh cadence. 15s is the slowest that still feels live for "another
+    // session in my account just sent a message in #foo and the unread badge needs to update";
+    // tighter values (we used 5s previously) multiplied 1:1 with active chat sessions and made
+    // ListForUserAsync the dominant DB workload at scale.
+    private static readonly TimeSpan ChannelRefreshPeriod = TimeSpan.FromSeconds(15);
 
     // Image-render bounds for inline chat images. Cap is intentionally low so a big image
     // doesn't dominate the narrow chat column; floor stops tiny favicons from rendering
@@ -78,6 +82,14 @@ public sealed class ChatScreen : BbsWindow
     private readonly Dictionary<string, DateTimeOffset> _typers = new();
     private DateTimeOffset _lastTypingPublishedAt = DateTimeOffset.MinValue;
     private string _typingHint = string.Empty;
+
+    // Coalesces "the right sidebar needs to be re-fetched from Redis." Set by the presence
+    // subscriber whenever a non-typing event arrives; cleared by the heartbeat loop after a
+    // single refresh. Without this, every join/leave broadcast triggered a Redis ZRANGE in
+    // every receiver (O(N²) per channel — a #lobby with 500 users + one new joiner would
+    // produce 500 ZRANGE calls in a burst). 0 = clean, 1 = dirty.
+    private int _sidebarDirty;
+    private int _heartbeatTick;
 
     // Current sidebar contents. _channelEntries lives at Screen scope (not per-channel) so
     // Alt+digit can switch without re-querying. Rebuilt by RefreshChannelsAsync.
@@ -952,9 +964,11 @@ public sealed class ChatScreen : BbsWindow
                     NoteTyper(evt.Handle);
                     continue;
                 }
-                // Any non-typing presence ping triggers a refresh from authoritative state
-                // in Redis — we don't trust the wire to be the source of truth.
-                await RefreshSidebarAsync(ct);
+                // Mark the sidebar dirty; the heartbeat tick is responsible for actually
+                // fetching from Redis. Per-event refresh used to fan out one ZRANGE call to
+                // every member of the channel for every join/leave — coalescing pushes that
+                // to one Redis call per receiver per heartbeat regardless of event rate.
+                Volatile.Write(ref _sidebarDirty, 1);
             }
         }
         catch (OperationCanceledException) { /* expected on close/switch */ }
@@ -1080,8 +1094,15 @@ public sealed class ChatScreen : BbsWindow
             {
                 await Task.Delay(HeartbeatPeriod, ct);
                 await presence.HeartbeatAsync(channelId, _user.Id, _user.Handle, ct);
-                // Periodic refresh covers TTL-driven evictions that don't fire an event.
-                if (DateTimeOffset.UtcNow.Ticks % 3 == 0) // ~every 3rd heartbeat
+
+                // Refresh the right sidebar from Redis at most once per heartbeat. Two
+                // triggers: (a) presence subscriber set the dirty flag in response to a
+                // join/leave broadcast since the last tick; (b) rescue refresh every 3rd
+                // tick (~30s) to catch presence rows that aged out via TTL without firing
+                // an explicit event. Either path consumes the dirty flag.
+                var tick = ++_heartbeatTick;
+                var dirty = Interlocked.Exchange(ref _sidebarDirty, 0) == 1;
+                if (dirty || tick % 3 == 0)
                 {
                     await RefreshSidebarAsync(ct);
                 }

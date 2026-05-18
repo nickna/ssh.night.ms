@@ -23,7 +23,15 @@ using Night.Ms.SshServer.Tui;
 using Night.Ms.SshServer.Tui.Map;
 using Night.Ms.SshServer.Web;
 using Night.Ms.SshTransport;
+using Npgsql;
 using StackExchange.Redis;
+
+// Each SSH session pins a thread-pool worker for the duration of its Terminal.Gui main loop
+// (TG v2's loop is synchronous). At hundreds of concurrent users the default thread pool's
+// "grow by 1 per 0.5s past the processor count" policy turns a connection storm into a
+// cold-start cliff — sessions queue behind thread-pool starvation. Raising the floor doesn't
+// preallocate threads; it just removes the throttled growth ramp.
+ThreadPool.SetMinThreads(workerThreads: 256, completionPortThreads: 256);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -129,8 +137,16 @@ builder.Services.AddSingleton<ProfilePictureService>();
 // DbContextOptions<AppDbContext> must also be Singleton. The optionsLifetime arg below
 // bumps it from the default Scoped to Singleton; runtime DI validation rejects the dual
 // registration otherwise.
+// Pool sizing: Npgsql's default Max Pool Size is 100. At hundreds of concurrent SSH sessions
+// each doing periodic sidebar refresh + chat writes, the default queues short queries behind
+// pool acquisition. We bump the floor and ceiling here unless the operator has explicitly set
+// either in the connection string — that way prod can still pin pool sizes via env without
+// being silently overridden. Multiplexing is intentionally NOT enabled here because it has
+// subtle interactions with EF's per-context state; pool sizing alone handles the bottleneck.
+var bbsConnectionString = BuildBbsConnectionString(builder.Configuration.GetConnectionString("bbs"));
+
 void ConfigureDb(DbContextOptionsBuilder opt) =>
-    opt.UseNpgsql(builder.Configuration.GetConnectionString("bbs"))
+    opt.UseNpgsql(bbsConnectionString)
        .UseSnakeCaseNamingConvention();
 builder.Services.AddDbContext<AppDbContext>(ConfigureDb,
     contextLifetime: ServiceLifetime.Scoped,
@@ -702,6 +718,29 @@ static string? ResolveOidcScheme(string provider) => provider.ToLowerInvariant()
     "microsoft" => MicrosoftAccountDefaults.AuthenticationScheme,
     _ => null,
 };
+
+// Applies pool-sizing defaults to the configured connection string. Operator-set values for
+// Max/Min Pool Size are preserved (the builder reports them via the underlying key collection,
+// not the typed properties, since typed properties always return the default when unset). At
+// our target of hundreds of concurrent users a ceiling of 200 leaves ~1 connection per 2-3
+// sessions — sufficient because each session's DB activity is short and bursty, not held.
+static string BuildBbsConnectionString(string? raw)
+{
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        throw new InvalidOperationException("ConnectionStrings:bbs is not configured.");
+    }
+    var csb = new NpgsqlConnectionStringBuilder(raw);
+    if (!csb.ContainsKey("Maximum Pool Size") && !csb.ContainsKey("MaxPoolSize"))
+    {
+        csb.MaxPoolSize = 200;
+    }
+    if (!csb.ContainsKey("Minimum Pool Size") && !csb.ContainsKey("MinPoolSize"))
+    {
+        csb.MinPoolSize = 10;
+    }
+    return csb.ConnectionString;
+}
 
 // Endpoints with `[FromForm]` parameters are auto-validated by UseAntiforgery() middleware;
 // route-only POSTs (link/unlink/logout/etc.) need to call this themselves. Razor `<form

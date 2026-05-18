@@ -48,83 +48,97 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
     // every session sees). Ordered by most-recent-activity in the channel: a channel with
     // newer messages than my pointer floats above ones I'm caught up on. Capped at 24 since
     // the sidebar can't show much more anyway at typical terminal heights.
+    //
+    // One DB round-trip per call: a single SELECT against `channels` with correlated
+    // subqueries against `chat_messages` (last id/at, unread count) and `channel_reads`
+    // (pointer + updated_at). Earlier shape did N+1 COUNT queries in a loop — at every
+    // chat client's 15s sidebar refresh, that ballooned to thousands of queries/sec across
+    // a busy box. The (channel_id, created_at) index already supports MAX/COUNT
+    // efficiently, so the planner does the heavy lifting in-DB.
     public async Task<IReadOnlyList<ChannelEntry>> ListForUserAsync(long userId, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-        // Subquery: each channel's latest-message info (id + created-at) for unread math.
-        // Done as one round-trip via GroupBy → Max to keep the per-refresh cost small.
-        var reads = await db.ChannelReads
+        // Channels this user has touched, plus #lobby (the BBS-wide default every session
+        // sees even before they've sent a message). #lobby's id is cached after first hit —
+        // it's seeded by DatabaseInitializer at boot and never changes.
+        var subscribedIds = await db.ChannelReads
             .AsNoTracking()
             .Where(r => r.UserId == userId)
+            .Select(r => r.ChannelId)
             .ToListAsync(ct);
 
-        var subscribedIds = reads.Select(r => r.ChannelId).ToHashSet();
+        var lobbyId = await GetLobbyChannelIdAsync(db, ct);
+        var idSet = new HashSet<long>(subscribedIds);
+        if (lobbyId is long lid) idSet.Add(lid);
+        if (idSet.Count == 0) return Array.Empty<ChannelEntry>();
 
-        // Always show #lobby even if the user hasn't been there yet. A missing #lobby row
-        // here means the DatabaseInitializer hasn't seeded yet, which shouldn't happen at
-        // runtime — but the LINQ still has to be safe against it.
-        var lobby = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Name == "lobby", ct);
-        if (lobby is not null) subscribedIds.Add(lobby.Id);
-
-        if (subscribedIds.Count == 0) return Array.Empty<ChannelEntry>();
-
-        var ids = subscribedIds.ToArray();
-        // Pull channel metadata.
-        var channels = await db.Channels
+        var ids = idSet.ToArray();
+        // Single query: channel metadata + correlated subqueries for last-message stats,
+        // pointer, and unread count. The pointer subquery is referenced twice (once for the
+        // returned column, once inside the unread predicate); Postgres folds duplicate
+        // correlated subqueries during planning, so this stays one round-trip.
+        var rows = await db.Channels
             .AsNoTracking()
             .Where(c => ids.Contains(c.Id))
-            .ToDictionaryAsync(c => c.Id, ct);
-
-        // For each channel, find the most recent (still-undeleted) message + its id and
-        // count of post-pointer messages.
-        var latest = await db.ChatMessages
-            .AsNoTracking()
-            .Where(m => ids.Contains(m.ChannelId) && m.DeletedAt == null)
-            .GroupBy(m => m.ChannelId)
-            .Select(g => new
+            .Select(c => new
             {
-                ChannelId = g.Key,
-                LastMessageId = g.Max(x => x.Id),
-                LastMessageAt = g.Max(x => x.CreatedAt),
+                c.Id,
+                c.Name,
+                c.Topic,
+                c.IsPrivate,
+                c.CreatedAt,
+                LastMessageAt = db.ChatMessages
+                    .Where(m => m.ChannelId == c.Id && m.DeletedAt == null)
+                    .Max(m => (DateTimeOffset?)m.CreatedAt),
+                ReadUpdatedAt = db.ChannelReads
+                    .Where(r => r.UserId == userId && r.ChannelId == c.Id)
+                    .Select(r => (DateTimeOffset?)r.UpdatedAt)
+                    .FirstOrDefault(),
+                UnreadCount = db.ChatMessages.Count(m =>
+                    m.ChannelId == c.Id &&
+                    m.DeletedAt == null &&
+                    m.Id > (db.ChannelReads
+                        .Where(r => r.UserId == userId && r.ChannelId == c.Id)
+                        .Select(r => (long?)r.LastReadMessageId)
+                        .FirstOrDefault() ?? 0L)),
             })
             .ToListAsync(ct);
-
-        var readByChannel = reads.ToDictionary(r => r.ChannelId);
-
-        // Unread count = messages with id > my pointer. Done one channel at a time so each
-        // count is cheap (uses the (channel_id, created_at) descending index).
-        var unread = new Dictionary<long, int>();
-        foreach (var l in latest)
-        {
-            var pointer = readByChannel.TryGetValue(l.ChannelId, out var r) ? r.LastReadMessageId : 0;
-            if (l.LastMessageId > pointer)
-            {
-                unread[l.ChannelId] = await db.ChatMessages.AsNoTracking()
-                    .CountAsync(m => m.ChannelId == l.ChannelId && m.Id > pointer && m.DeletedAt == null, ct);
-            }
-        }
 
         // Sort: channels with unread first (newest activity first within that group), then
         // caught-up channels (also newest first). #lobby sticks to the top if it has zero
         // activity ever — gives the user a stable home row to return to.
-        var entries = ids
-            .Where(id => channels.ContainsKey(id))
-            .Select(id =>
+        return rows
+            .Select(r =>
             {
-                var c = channels[id];
-                var latestRow = latest.FirstOrDefault(x => x.ChannelId == id);
-                var lastAt = latestRow?.LastMessageAt
-                          ?? readByChannel.GetValueOrDefault(id)?.UpdatedAt
-                          ?? c.CreatedAt;
-                var u = unread.GetValueOrDefault(id);
-                return new ChannelEntry(c.Id, c.Name, c.Topic, c.IsPrivate, lastAt, u);
+                var lastAt = r.LastMessageAt ?? r.ReadUpdatedAt ?? r.CreatedAt;
+                return new ChannelEntry(r.Id, r.Name, r.Topic, r.IsPrivate, lastAt, r.UnreadCount);
             })
             .OrderByDescending(e => e.UnreadCount > 0)
             .ThenByDescending(e => e.LastActivityAt)
             .Take(24)
             .ToList();
+    }
 
-        return entries;
+    // Cached #lobby channel id. 0 = not yet resolved. Lobby is seeded at boot and never
+    // renamed, so the first successful lookup is good for the process lifetime. If lookup
+    // returns null (database in a half-initialized state), we don't cache — the next call
+    // will retry.
+    private long _cachedLobbyChannelId;
+
+    private async Task<long?> GetLobbyChannelIdAsync(AppDbContext db, CancellationToken ct)
+    {
+        var cached = Volatile.Read(ref _cachedLobbyChannelId);
+        if (cached != 0) return cached;
+        var id = await db.Channels.AsNoTracking()
+            .Where(c => c.Name == "lobby")
+            .Select(c => (long?)c.Id)
+            .FirstOrDefaultAsync(ct);
+        if (id is long resolved)
+        {
+            Volatile.Write(ref _cachedLobbyChannelId, resolved);
+            return resolved;
+        }
+        return null;
     }
 }
