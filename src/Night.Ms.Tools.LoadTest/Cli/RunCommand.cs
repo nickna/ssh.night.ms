@@ -13,7 +13,8 @@ internal sealed record RunOptions(
     int DurationSeconds,
     string KeysDir,
     string ReportsDir,
-    Mix Mix);
+    Mix Mix,
+    string? GatePath);
 
 // `run` — opens N SSH sessions against the configured host, runs the assigned scenarios
 // for the configured duration, writes a stdout table + CSV + JSON report.
@@ -31,17 +32,12 @@ internal static class RunCommand
             return 1;
         }
 
-        if (opts.Mix.ForumPct > 0)
-        {
-            Console.Out.WriteLine($"loadtest: forum scenario ships in Phase 4; mapping {opts.Mix.ForumPct}% forum bots to idle for now.");
-        }
-
         var keyStore = new BotKeyStore(opts.KeysDir);
         var idle = new IdleScenario();
         var assignment = new ProfileAssignment(
             mix: opts.Mix,
             chatFactory: idx => new ChatScenario(idx),
-            forumScenario: null, // Phase 4 plugs ForumScenario in here.
+            forumFactory: idx => new ForumScenario(idx),
             idleScenario: idle);
         var driverConfig = new DriverConfig(opts.Host, opts.Port, opts.Count, opts.RampSeconds, opts.DurationSeconds);
         var driver = new Driver.Driver(driverConfig, keyStore, assignment.For);
@@ -68,6 +64,29 @@ internal static class RunCommand
         Report.WriteJson(jsonPath, driver.Metrics, meta);
         Console.Out.WriteLine($"loadtest: wrote {csvPath}");
         Console.Out.WriteLine($"loadtest: wrote {jsonPath}");
+
+        if (opts.GatePath is not null)
+        {
+            Thresholds thresholds;
+            try
+            {
+                thresholds = Thresholds.Load(opts.GatePath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"loadtest: failed to load gate config '{opts.GatePath}': {ex.Message}");
+                return 1;
+            }
+            var result = thresholds.Evaluate(driver.Metrics);
+            if (result.Passed)
+            {
+                Console.Out.WriteLine($"loadtest: gate PASSED ({opts.GatePath})");
+                return 0;
+            }
+            Console.Error.WriteLine($"loadtest: gate FAILED ({opts.GatePath}):");
+            foreach (var f in result.Failures) Console.Error.WriteLine($"  - {f}");
+            return 1;
+        }
         return 0;
     }
 }

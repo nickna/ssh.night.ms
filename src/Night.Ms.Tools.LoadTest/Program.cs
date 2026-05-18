@@ -14,9 +14,10 @@ internal static class Program
 
           run    --count N [--host <h>] [--port <p>] [--ramp-seconds <s>]
                  [--duration-seconds <s>] [--mix chat/forum/idle]
-                 [--keys-dir <path>] [--reports-dir <path>]
+                 [--keys-dir <path>] [--reports-dir <path>] [--gate <path>]
                  Open N SSH sessions, run the scenario mix for the configured
-                 duration, write stdout table + CSV + JSON report.
+                 duration, write stdout table + CSV + JSON report. If --gate is
+                 set, evaluate metrics against thresholds JSON; exit 1 on fail.
 
           clean  Delete all loadbot-* users (cascade drops their SSH credentials).
 
@@ -25,7 +26,7 @@ internal static class Program
           --port             2222
           --ramp-seconds     30
           --duration-seconds 300
-          --mix              60/30/10  (chat/forum/idle; forum→idle until Phase 4)
+          --mix              60/30/10  (chat/forum/idle)
           --keys-dir         ./loadtest-keys (relative to the tool binary)
           --reports-dir      ./loadtest-reports
 
@@ -100,6 +101,7 @@ internal static class Program
         var keysDir = DefaultKeysDir();
         var reportsDir = Path.Combine(AppContext.BaseDirectory, "loadtest-reports");
         var mix = Driver.Mix.Default;
+        string? gatePath = null;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -124,11 +126,15 @@ internal static class Program
                     break;
                 case "--keys-dir": if (++i >= args.Length) return Fail("--keys-dir expects a path."); keysDir = args[i]; break;
                 case "--reports-dir": if (++i >= args.Length) return Fail("--reports-dir expects a path."); reportsDir = args[i]; break;
+                case "--gate":
+                    if (++i >= args.Length) return Fail("--gate expects a path.");
+                    gatePath = args[i];
+                    break;
                 default: return Fail($"run: unexpected argument: {args[i]}");
             }
         }
         if (count == 0) return Fail("run: --count is required.");
-        return await RunCommand.RunAsync(new RunOptions(host, port, count, ramp, duration, keysDir, reportsDir, mix), ct);
+        return await RunCommand.RunAsync(new RunOptions(host, port, count, ramp, duration, keysDir, reportsDir, mix, gatePath), ct);
     }
 
     private static string DefaultKeysDir() => Path.Combine(AppContext.BaseDirectory, "loadtest-keys");

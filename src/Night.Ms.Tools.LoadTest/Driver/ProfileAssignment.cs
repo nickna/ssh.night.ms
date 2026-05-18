@@ -9,15 +9,15 @@ namespace Night.Ms.Tools.LoadTest.Driver;
 public sealed class ProfileAssignment
 {
     private readonly Func<int, IScenario> _chatFactory;
-    private readonly IScenario _forumScenario;
+    private readonly Func<int, IScenario>? _forumFactory;
     private readonly IScenario _idleScenario;
     private readonly int _chatBuckets;
     private readonly int _forumBuckets;
 
-    public ProfileAssignment(Mix mix, Func<int, IScenario> chatFactory, IScenario? forumScenario, IScenario idleScenario)
+    public ProfileAssignment(Mix mix, Func<int, IScenario> chatFactory, Func<int, IScenario>? forumFactory, IScenario idleScenario)
     {
         _chatFactory = chatFactory;
-        _forumScenario = forumScenario ?? idleScenario;
+        _forumFactory = forumFactory;
         _idleScenario = idleScenario;
 
         // Normalize any total to 100 buckets so 60/30/10 and 6/3/1 produce the same
@@ -33,7 +33,7 @@ public sealed class ProfileAssignment
     {
         var bucket = (botIndex - 1) % 100;
         if (bucket < _chatBuckets) return _chatFactory(botIndex);
-        if (bucket < _chatBuckets + _forumBuckets) return _forumScenario;
+        if (bucket < _chatBuckets + _forumBuckets) return _forumFactory?.Invoke(botIndex) ?? _idleScenario;
         return _idleScenario;
     }
 }
