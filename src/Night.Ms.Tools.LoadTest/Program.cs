@@ -36,6 +36,11 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        // Force UTF-8 on the console streams. Without this, the em-dashes and box-drawing
+        // characters in Report.PrintTable render as Windows-1252 mojibake ("ΓÇö", "ΓöÇ")
+        // because Console defaults to the system code page on Windows.
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
