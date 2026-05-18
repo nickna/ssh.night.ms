@@ -133,8 +133,10 @@ try {
 }
 
 function Invoke-LoadTest {
-    param([string[]]$Args)
-    & dotnet run --project $Project --no-build -- @Args
+    # Parameter is $ToolArgs, not $Args: PowerShell's automatic $args wins over a
+    # function parameter of the same name and produces a silent empty splat.
+    param([string[]]$ToolArgs)
+    & dotnet run --project $Project --no-build -- @ToolArgs
     return $LASTEXITCODE
 }
 
