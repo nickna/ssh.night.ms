@@ -31,6 +31,10 @@ public sealed class ForumScenario : IScenario
             metrics.IncrementError("lobby.land");
             return;
         }
+        // Settle: see ChatScenario for the rationale — carousel hotkeys aren't bound
+        // until the first frame after "Welcome" renders.
+        try { await Task.Delay(500, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
 
         var rng = new Random(_botIndex * 7927);
         var seq = 0;
@@ -50,7 +54,7 @@ public sealed class ForumScenario : IScenario
     private async Task OnePassAsync(Bot bot, MetricsCollector metrics, int seq, CancellationToken ct)
     {
         // Step 1: lobby → ForumList
-        await bot.SendKeyAsync('B').ConfigureAwait(false);
+        await bot.SendKeyAsync('b').ConfigureAwait(false);
         if (!await bot.Screen.WaitForAsync("boards", TimeSpan.FromSeconds(5), ct).ConfigureAwait(false))
         {
             metrics.IncrementError("forum.enter_list");
@@ -69,7 +73,7 @@ public sealed class ForumScenario : IScenario
         }
 
         // Step 3: TopicList → NewTopicScreen
-        await bot.SendKeyAsync('N').ConfigureAwait(false);
+        await bot.SendKeyAsync('n').ConfigureAwait(false);
         if (!await bot.Screen.WaitForAsync("new topic", TimeSpan.FromSeconds(5), ct).ConfigureAwait(false))
         {
             metrics.IncrementError("forum.enter_new");

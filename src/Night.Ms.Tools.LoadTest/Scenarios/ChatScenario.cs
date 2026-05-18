@@ -21,6 +21,9 @@ public sealed class ChatScenario : IScenario
         @"mlt-(\d{4})-(\d+)-(\d+)",
         RegexOptions.Compiled);
 
+    // Gate so we only dump one bot's stuck-on-lobby screen even at N=500.
+    private static int s_chatEnterDumpsEmitted;
+
     private readonly int _botIndex;
 
     public ChatScenario(int botIndex)
@@ -40,14 +43,29 @@ public sealed class ChatScenario : IScenario
         }
         metrics.Record("lobby.land_ms", TimeSpan.Zero); // presence-only marker; the real timing is captured by the IdleScenario sample if mixed.
 
-        await bot.SendKeyAsync('C').ConfigureAwait(false);
+        // Brief settle: 'Welcome' is painted on first frame but the carousel's hotkey
+        // handlers can take an extra render tick to attach. Sending too early causes
+        // the keystroke to be swallowed before the binding lands.
+        try { await Task.Delay(500, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
 
-        // The chat screen renders the input prompt as "> " on the bottom row. We wait for
-        // a less ambiguous marker — the channel name banner "#lobby" lives in the title
-        // bar and persists for the whole session.
+        // Lowercase: TG v2's hotkey comparison maps 'c' (0x63) to Key.C; uppercase 'C'
+        // (0x43) is interpreted as Shift+C and may not match a hotkey defined as Key.C.
+        await bot.SendKeyAsync('c').ConfigureAwait(false);
+
+        // Chat-screen title contains "#lobby". The lobby's own title says "lobby" without
+        // the # so it can't false-positive against the lobby screen we just left.
         if (!await bot.Screen.WaitForAsync("#lobby", TimeSpan.FromSeconds(10), ct).ConfigureAwait(false))
         {
             metrics.IncrementError("chat.enter");
+            // Dump up to the last 600 chars of the ANSI-stripped screen — once per run —
+            // so the next run tells us what was actually rendered when the timeout hit.
+            if (Interlocked.Increment(ref s_chatEnterDumpsEmitted) == 1)
+            {
+                var snap = bot.Screen.StrippedSnapshot();
+                if (snap.Length > 600) snap = snap.Substring(snap.Length - 600);
+                Console.Error.WriteLine($"loadtest: bot {bot.Handle} chat.enter timeout; tail of screen:\n{snap}\n---");
+            }
             return;
         }
 
