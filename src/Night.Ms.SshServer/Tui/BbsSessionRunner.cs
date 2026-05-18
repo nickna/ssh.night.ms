@@ -191,7 +191,7 @@ internal static class BbsSessionRunner
 
         var lobbyScreen = new LobbyScreen(app, services, user, justRegistered, art);
         var nav = RunChild(app, lobbyScreen, out var lobbyResult) ?? (LobbyNavigation?)lobbyResult;
-        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Sysop)
+        while (nav is LobbyNavigation.Chat or LobbyNavigation.Boards or LobbyNavigation.Profile or LobbyNavigation.News or LobbyNavigation.Browser or LobbyNavigation.Gallery or LobbyNavigation.Map or LobbyNavigation.Weather or LobbyNavigation.Alerts or LobbyNavigation.Finance or LobbyNavigation.Doors or LobbyNavigation.Sysop)
         {
             if (nav == LobbyNavigation.Chat && lobbyChannel is not null)
             {
@@ -246,6 +246,10 @@ internal static class BbsSessionRunner
                 {
                     if (RunChild(app, new AlertsScreen(app, services, user, alerts), out _) is { } shortcut) { nav = shortcut; continue; }
                 }
+            }
+            else if (nav == LobbyNavigation.Doors)
+            {
+                if (RunChild(app, new DoorsScreen(app, services, user), out _) is { } shortcut) { nav = shortcut; continue; }
             }
             else if (nav == LobbyNavigation.Sysop && user.IsSysop)
             {

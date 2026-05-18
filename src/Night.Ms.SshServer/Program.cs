@@ -13,6 +13,7 @@ using Night.Ms.SshServer.Auth;
 using Night.Ms.SshServer.Configuration;
 using Night.Ms.SshServer.Diagnostics;
 using Night.Ms.SshServer.Domain;
+using Night.Ms.SshServer.Doors;
 using Night.Ms.SshServer.Hosting;
 using Night.Ms.SshServer.Persistence;
 using Night.Ms.SshServer.Providers;
@@ -179,6 +180,22 @@ builder.Services.AddSingleton<ReadStateService>();
 builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<SysopBootstrap>();
 builder.Services.AddSingleton<ArtProvider>();
+
+// Door games (slot machine, video poker). TimeProvider is shared so the wallet's daily
+// refresh boundary stays testable; the RNG must be crypto-strength so outcomes can't be
+// predicted from prior rounds. WalletService + GameLedger are Scoped because they ride on
+// the per-session AppDbContext.
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IGameRng, CryptoGameRng>();
+builder.Services.AddScoped<IWalletService, WalletService>();
+builder.Services.AddScoped<IGameLedger, GameLedger>();
+builder.Services.AddScoped<Night.Ms.SshServer.Doors.Leaderboards.ILeaderboardService, Night.Ms.SshServer.Doors.Leaderboards.LeaderboardService>();
+
+// Registered IDoorGame implementations are enumerated by DoorsScreen — order in DI doesn't
+// matter, but the catalog is sorted by Title for display so registering more games here is
+// the only required change to add them to the menu.
+builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.Slots.SlotsGame>();
+builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.VideoPoker.VideoPokerGame>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider, Night.Ms.SshServer.Tui.Art.FileSystemArtGalleryProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.ILobbyIconProvider, Night.Ms.SshServer.Tui.Art.FileSystemLobbyIconProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IWeatherAnimationProvider, Night.Ms.SshServer.Tui.Art.FileSystemWeatherAnimationProvider>();

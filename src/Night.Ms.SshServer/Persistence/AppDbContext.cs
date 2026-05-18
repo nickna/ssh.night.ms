@@ -19,6 +19,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<UserSavedLocation> UserSavedLocations => Set<UserSavedLocation>();
     public DbSet<UserWatchlistItem> UserWatchlistItems => Set<UserWatchlistItem>();
+    public DbSet<UserWallet> UserWallets => Set<UserWallet>();
+    public DbSet<GameRound> GameRounds => Set<GameRound>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -185,6 +187,29 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(w => new { w.UserId, w.Canonical }).IsUnique();
             b.HasIndex(w => new { w.UserId, w.SortOrder });
             b.HasOne(w => w.User).WithMany(u => u.Watchlist).HasForeignKey(w => w.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserWallet>(b =>
+        {
+            b.ToTable("user_wallets");
+            // UserId doubles as PK — one wallet per user, owned by the user row. Cascade
+            // delete keeps the audit decision symmetric with how other per-user data dies.
+            b.HasKey(w => w.UserId);
+            b.HasOne(w => w.User).WithOne().HasForeignKey<UserWallet>(w => w.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<GameRound>(b =>
+        {
+            b.ToTable("game_rounds");
+            b.Property(r => r.GameKey).HasMaxLength(32);
+            b.Property(r => r.Details).HasColumnType("jsonb");
+            // Per-user history (newest first), used by "your recent plays" and the wallet
+            // header. Game-key indexes serve the leaderboard queries (top-net + recency
+            // for "hot streaks"). Net descending matches how leaderboards rank.
+            b.HasIndex(r => new { r.UserId, r.PlayedAt }).IsDescending(false, true);
+            b.HasIndex(r => new { r.GameKey, r.Net }).IsDescending(false, true);
+            b.HasIndex(r => new { r.GameKey, r.PlayedAt }).IsDescending(false, true);
+            b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
