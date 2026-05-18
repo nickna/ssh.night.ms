@@ -40,6 +40,22 @@ public sealed class Bot : IAsyncDisposable
             // surfaces fast during ramp instead of pinning a task slot.
             Timeout = TimeSpan.FromSeconds(15),
         };
+
+        // Constrain the offered algorithm set to what Microsoft.DevTunnels.Ssh 3.x
+        // actually supports (matched against `ssh -vv` against the same server). The
+        // SSH.NET defaults include curve25519 and chacha20-poly1305, both of which
+        // the server rejects; pruning them avoids unnecessary negotiation work and
+        // keeps the client preference order aligned with what OpenSSH picked
+        // (ecdh-sha2-nistp256 + aes256-ctr + hmac-sha2-256-etm).
+        foreach (var name in info.KeyExchangeAlgorithms.Keys.Where(k => k.StartsWith("curve25519", StringComparison.Ordinal)).ToList())
+        {
+            info.KeyExchangeAlgorithms.Remove(name);
+        }
+        foreach (var name in info.Encryptions.Keys.Where(k => k.StartsWith("chacha20", StringComparison.Ordinal)).ToList())
+        {
+            info.Encryptions.Remove(name);
+        }
+
         _client = new SshClient(info);
         await _client.ConnectAsync(ct).ConfigureAwait(false);
 

@@ -10,7 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SSH.NET" Version="2024.2.0" />
+    <!-- Pinned to 2023.0.1 deliberately. 2024.x ships strict-kex client advertisement
+         (kex-strict-c-v00@openssh.com) which Microsoft.DevTunnels.Ssh 3.x doesn't
+         understand, causing the first encrypted packet's MAC check to fail and the
+         server to abort the socket. 2023.0.1 predates that change and negotiates
+         cleanly with the server's algorithm set (ecdh-sha2-nistp256 / aes256-ctr /
+         hmac-sha2-256-etm). Manually-verified with `ssh -vv` against the same key. -->
+    <PackageReference Include="SSH.NET" Version="2023.0.1" />
   </ItemGroup>
 
   <ItemGroup>
