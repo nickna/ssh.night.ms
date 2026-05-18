@@ -9,10 +9,16 @@ namespace Night.Ms.Tools.LoadTest.Driver;
 // duration, then signals cancellation and waits for clean disconnect with a hard ceiling.
 public sealed class Driver
 {
+    // Cap on per-category exception messages we surface to stderr. Without it, a
+    // misconfiguration at N=500 would flood the console with 500 identical stack traces.
+    private const int MaxLoggedFailuresPerCategory = 3;
+
     private readonly DriverConfig _config;
     private readonly Func<int, IScenario> _scenarioFor;
     private readonly BotKeyStore _keyStore;
     private readonly MetricsCollector _metrics = new();
+    private int _connectFailuresLogged;
+    private int _scenarioFailuresLogged;
 
     public Driver(DriverConfig config, BotKeyStore keyStore, Func<int, IScenario> scenarioFor)
     {
@@ -88,9 +94,13 @@ public sealed class Driver
             _metrics.Record("bot.connect_ms", connectSw.Elapsed);
         }
         catch (OperationCanceledException) { return; }
-        catch (Exception)
+        catch (Exception ex)
         {
             _metrics.IncrementError("bot.connect");
+            if (Interlocked.Increment(ref _connectFailuresLogged) <= MaxLoggedFailuresPerCategory)
+            {
+                Console.Error.WriteLine($"loadtest: bot {handle} connect failed: {ex.GetType().Name}: {ex.Message}");
+            }
             return;
         }
 
@@ -99,9 +109,13 @@ public sealed class Driver
             await scenario.RunAsync(bot, _metrics, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { /* expected on shutdown */ }
-        catch (Exception)
+        catch (Exception ex)
         {
             _metrics.IncrementError($"{scenario.Name}.unhandled");
+            if (Interlocked.Increment(ref _scenarioFailuresLogged) <= MaxLoggedFailuresPerCategory)
+            {
+                Console.Error.WriteLine($"loadtest: bot {handle} scenario '{scenario.Name}' threw: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 }
