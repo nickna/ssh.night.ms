@@ -52,7 +52,7 @@ public sealed class BbsStatusBar : View
         {
             X = Pos.Right(sep1) + 1,
             Y = 0,
-            Width = 40,
+            Width = Dim.Auto(DimAutoStyle.Text),
             Text = "weather: …",
             CanFocus = false,
         };
@@ -152,7 +152,7 @@ public sealed class BbsStatusBar : View
             {
                 _weatherLabel.Text = snap is null
                     ? "weather: (unavailable)"
-                    : $"{snap.LocationLabel} {_user.FormatTemperature(snap)} {snap.Conditions}";
+                    : $"{ShortenLocation(snap.LocationLabel)} {_user.FormatTemperature(snap)} {snap.Conditions}";
                 _weatherLabel.SetNeedsDraw();
             });
         }
@@ -162,6 +162,11 @@ public sealed class BbsStatusBar : View
             _app.Invoke(() => _weatherLabel.Text = $"weather: error ({ex.GetType().Name})");
         }
     }
+
+    // Footer real estate is tight, so we surface just the city name. The full canonical
+    // "{City}, {Admin1}, {Country}" string from the geocoder stays intact in storage and
+    // is used as-is by NewsScreen / WeatherScreen / profile views.
+    private static string ShortenLocation(string label) => label.Split(',', 2)[0].Trim();
 
     protected override void Dispose(bool disposing)
     {

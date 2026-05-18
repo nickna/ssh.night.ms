@@ -74,6 +74,13 @@ internal sealed class LobbyCarouselView : View
         return false;
     }
 
+    protected override bool OnMouseEvent(Mouse mouse)
+    {
+        if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))   { MoveLeft();  return true; }
+        if (mouse.Flags.HasFlag(MouseFlags.WheeledDown)) { MoveRight(); return true; }
+        return base.OnMouseEvent(mouse);
+    }
+
     private void OnKey(object? sender, Key key)
     {
         if (key == Key.CursorLeft || key == Key.H || key == Key.H.WithShift)
