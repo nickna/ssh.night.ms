@@ -9,15 +9,10 @@
     <AssemblyName>Night.Ms.Tools.LoadTest</AssemblyName>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- Pinned to 2023.0.1 deliberately. 2024.x ships strict-kex client advertisement
-         (kex-strict-c-v00@openssh.com) which Microsoft.DevTunnels.Ssh 3.x doesn't
-         understand, causing the first encrypted packet's MAC check to fail and the
-         server to abort the socket. 2023.0.1 predates that change and negotiates
-         cleanly with the server's algorithm set (ecdh-sha2-nistp256 / aes256-ctr /
-         hmac-sha2-256-etm). Manually-verified with `ssh -vv` against the same key. -->
-    <PackageReference Include="SSH.NET" Version="2023.0.1" />
-  </ItemGroup>
+  <!-- No SSH client library: the bot spawns ssh.exe (OpenSSH on Windows since 1809) as
+       a subprocess and pipes stdio. SSH.NET 2023.0.1 and 2024.2.0 both failed to interop
+       with Microsoft.DevTunnels.Ssh 3.x at the transport layer; OpenSSH is bug-free
+       against this server, just heavier per bot. -->
 
   <ItemGroup>
     <ProjectReference Include="..\Night.Ms.SshServer\Night.Ms.SshServer.csproj" />
