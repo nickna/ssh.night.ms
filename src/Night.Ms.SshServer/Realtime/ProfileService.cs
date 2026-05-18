@@ -67,6 +67,27 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
     public const int MaxRealNameLength = 64;
     public const int MaxTimeZoneIdLength = 64;
 
+    // Bulk "does this handle have a profile picture?" lookup. One round-trip vs. one query
+    // per handle (and one Task.Run per fresh handle) — used by ChatScreen to prime its pfp
+    // cache when a channel's history loads, so the on-screen "●" marker is correct on
+    // first paint instead of trickling in over the next few hundred milliseconds.
+    public async Task<IReadOnlyDictionary<string, bool>> BatchHasPfpAsync(
+        IReadOnlyCollection<string> handles, CancellationToken ct)
+    {
+        if (handles.Count == 0) return new Dictionary<string, bool>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // citext column makes the comparison case-insensitive; we still return the row's
+        // canonical Handle so the caller's dict keys match what they sent (the caller uses
+        // OrdinalIgnoreCase, so case differences fold there too).
+        var rows = await db.Users.AsNoTracking()
+            .Where(u => handles.Contains(u.Handle))
+            .Select(u => new { u.Handle, HasPfp = u.ProfilePictureUpdatedAt != null })
+            .ToListAsync(ct);
+        var result = new Dictionary<string, bool>(rows.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rows) result[r.Handle] = r.HasPfp;
+        return result;
+    }
+
     // Looks up a profile by handle, including derived counts. Returns null when the user
     // doesn't exist (the caller decides how to render that — /finger prints "no such user").
     public async Task<ProfileSnapshot?> GetByHandleAsync(string handle, CancellationToken ct)

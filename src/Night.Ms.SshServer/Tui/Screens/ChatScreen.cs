@@ -71,6 +71,15 @@ public sealed class ChatScreen : BbsWindow
     // cheap so we don't bother LRU-ing CellGrids — just keep what we've drawn.
     private readonly ConcurrentDictionary<Uri, CellGrid> _imageGrids = new();
     private readonly SemaphoreSlim _imageFetchSemaphore = new(ImageFetchConcurrency, ImageFetchConcurrency);
+    // Dedupes in-flight image fetches across the channel-load batch: if message A and
+    // message B both reference the same URL, only one fetcher runs; B's id rides along in
+    // this dict and gets the grid attached when the fetch completes. Without this, a
+    // 100-message history that includes the same hosted thumbnail in 10 messages would
+    // fire 10 parallel Task.Runs (capped at 2 concurrent by the semaphore, but all 10
+    // still queue). Lock is shared with the cache-write in FetchAndAttachAsync so racing
+    // schedulers see a consistent view of "is this URL cached / in-flight / neither?".
+    private readonly Dictionary<Uri, List<long>> _pendingImageAttachments = new();
+    private readonly object _imageFetchLock = new();
 
     // Cache of "has this handle uploaded a profile picture?". Looked up lazily the first
     // time we render a message from a handle; once known, future messages from the same
@@ -793,6 +802,30 @@ public sealed class ChatScreen : BbsWindow
             // off-screen parent anyway).
             var replyCounts = await muts.SnapshotReplyCountsAsync(ids, _channelCts.Token);
 
+            // Prime the pfp cache for every distinct handle in the loaded history in one
+            // query. The per-handle lazy HasPfp path still exists for live messages that
+            // trickle in afterwards from previously-unseen handles; pre-warming the batch
+            // here means the "●" marker is correct on first paint of channel history
+            // instead of populating across N background Task.Run lookups.
+            var distinctHandles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in history)
+            {
+                if (m.User?.Handle is { Length: > 0 } h) distinctHandles.Add(h);
+            }
+            // Skip handles already primed in this session.
+            distinctHandles.RemoveWhere(h => _hasPfpByHandle.ContainsKey(h));
+            if (distinctHandles.Count > 0)
+            {
+                var profile = scope.ServiceProvider.GetRequiredService<ProfileService>();
+                var batch = await profile.BatchHasPfpAsync(distinctHandles, _channelCts.Token);
+                foreach (var h in distinctHandles)
+                {
+                    // Missing-from-batch implies the user row no longer exists; default to
+                    // false so we don't keep retrying.
+                    _hasPfpByHandle[h] = batch.TryGetValue(h, out var v) && v;
+                }
+            }
+
             long highestSeenId = 0;
             foreach (var msg in history)
             {
@@ -1169,56 +1202,103 @@ public sealed class ChatScreen : BbsWindow
 
     // Scans the message body for image URLs and kicks off a background fetch+render for
     // each one. Cached grids (same URL already seen this session) paint immediately on the
-    // UI thread; new fetches go through the per-screen semaphore. Failures are silent —
-    // the link text remains visible in the body either way.
+    // UI thread; in-flight URLs piggy-back their messageId onto the existing fetch instead
+    // of starting a duplicate; otherwise a new fetch runs through the per-screen semaphore.
+    // Failures are silent — the link text remains visible in the body either way.
     private void ScheduleImageFetches(long messageId, string body)
     {
         var urls = UrlExtractor.FindImageUrls(body);
         if (urls.Count == 0) return;
         foreach (var url in urls)
         {
+            // Cheap path first: already-completed cache hit. ConcurrentDictionary read is
+            // safe under concurrent writers in FetchAndAttachAsync's completion path.
             if (_imageGrids.TryGetValue(url, out var cached))
             {
                 AttachImageOnUiThread(messageId, cached);
                 continue;
             }
-            Task.Run(() => FetchAndAttachAsync(messageId, url, Shutdown))
-                .FireAndLog(_services, nameof(FetchAndAttachAsync));
+
+            // Cache miss: either start a new fetch or attach this messageId to an
+            // already-running one. The lock guards both decisions atomically so two
+            // schedulers seeing the same URL miss in parallel can't both start a fetch.
+            CellGrid? lateCacheHit = null;
+            var startFetch = false;
+            lock (_imageFetchLock)
+            {
+                // Re-check the cache under the lock to absorb the rare race where a fetch
+                // completed (and populated _imageGrids) between our first check and the
+                // lock acquisition.
+                if (_imageGrids.TryGetValue(url, out lateCacheHit))
+                {
+                    // fall through — attach happens outside the lock
+                }
+                else if (_pendingImageAttachments.TryGetValue(url, out var pending))
+                {
+                    pending.Add(messageId);
+                }
+                else
+                {
+                    _pendingImageAttachments[url] = new List<long> { messageId };
+                    startFetch = true;
+                }
+            }
+            if (lateCacheHit is not null) AttachImageOnUiThread(messageId, lateCacheHit);
+            else if (startFetch)
+            {
+                Task.Run(() => FetchAndAttachAsync(url, Shutdown))
+                    .FireAndLog(_services, nameof(FetchAndAttachAsync));
+            }
         }
     }
 
-    private async Task FetchAndAttachAsync(long messageId, Uri url, CancellationToken ct)
+    private async Task FetchAndAttachAsync(Uri url, CancellationToken ct)
     {
-        IImageFetcher fetcher;
+        CellGrid? grid = null;
         try
         {
-            fetcher = _services.GetRequiredService<IImageFetcher>();
-        }
-        catch
-        {
-            return; // No fetcher registered in this build — leave the link as text.
-        }
+            IImageFetcher fetcher;
+            try { fetcher = _services.GetRequiredService<IImageFetcher>(); }
+            catch { return; /* no fetcher registered in this build — leave link as text */ }
 
-        await _imageFetchSemaphore.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var image = await fetcher.FetchAsync(url, ct).ConfigureAwait(false);
-            if (image is null || ct.IsCancellationRequested) return;
-
-            // String-roundtrip via SgrParser, same pattern as ReaderScreen — the renderer
-            // emits SGR + half-block "▀" and the parser folds that back into a CellGrid
-            // our view can paint. Keeps the imaging library decoupled from CellGrid.
-            var cols = Math.Clamp(image.Width / ImageSourcePixelsPerCell, ImageRenderColsFloor, ImageRenderColsCap);
-            var ansi = HalfBlockRenderer.Render(image, cols, ColorDepth.Truecolor, DitherMode.None);
-            var grid = SgrParser.Parse(ansi);
-            _imageGrids[url] = grid;
-            AttachImageOnUiThread(messageId, grid);
+            await _imageFetchSemaphore.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var image = await fetcher.FetchAsync(url, ct).ConfigureAwait(false);
+                if (image is not null && !ct.IsCancellationRequested)
+                {
+                    // String-roundtrip via SgrParser, same pattern as ReaderScreen — the
+                    // renderer emits SGR + half-block "▀" and the parser folds that back
+                    // into a CellGrid our view can paint. Keeps the imaging library
+                    // decoupled from CellGrid.
+                    var cols = Math.Clamp(image.Width / ImageSourcePixelsPerCell, ImageRenderColsFloor, ImageRenderColsCap);
+                    var ansi = HalfBlockRenderer.Render(image, cols, ColorDepth.Truecolor, DitherMode.None);
+                    grid = SgrParser.Parse(ansi);
+                }
+            }
+            catch (OperationCanceledException) { /* screen closed mid-fetch */ }
+            catch { /* fetcher already logs; leave link as text */ }
+            finally { _imageFetchSemaphore.Release(); }
         }
-        catch (OperationCanceledException) { /* screen closed mid-fetch */ }
-        catch { /* fetcher already logs; leave link as text */ }
         finally
         {
-            _imageFetchSemaphore.Release();
+            // Drain the pending-attachments list under the same lock that schedulers hold
+            // while consulting it, so a concurrent ScheduleImageFetches call either sees
+            // (a) the URL still pending and queues itself, or (b) the URL gone and falls
+            // back to the cache check (which sees grid if we succeeded). Failure drains
+            // the list with grid == null — later ScheduleImageFetches for the same URL
+            // can retry from scratch, matching the previous best-effort behavior.
+            List<long>? pending = null;
+            lock (_imageFetchLock)
+            {
+                if (grid is not null) _imageGrids[url] = grid;
+                if (_pendingImageAttachments.TryGetValue(url, out pending))
+                    _pendingImageAttachments.Remove(url);
+            }
+            if (grid is not null && pending is not null)
+            {
+                foreach (var mid in pending) AttachImageOnUiThread(mid, grid);
+            }
         }
     }
 
