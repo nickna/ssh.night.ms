@@ -1,6 +1,5 @@
 using System.Text;
 using Night.Ms.SshServer.Tui.Art;
-using Night.Ms.SshServer.Tui.Screens;
 using Night.Ms.SshServer.Tui.Theme;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -9,14 +8,15 @@ using Attribute = Terminal.Gui.Drawing.Attribute;
 
 namespace Night.Ms.SshServer.Tui.Views;
 
-// Centered horizontal carousel of lobby destination cards. The selected entry is drawn larger
-// with a double-line accent border at the visual center; unselected neighbours fan out in both
+// Centered horizontal carousel of destination cards. The selected entry is drawn larger with a
+// double-line accent border at the visual center; unselected neighbours fan out in both
 // directions with a single-line faint border, clipping cleanly at the viewport edges. ←/→ (or
-// H/L) re-centers; Enter fires EntryActivated. Direct-jump hotkeys are owned by the parent screen
-// and arrive via TrySelectByHotkey.
-internal sealed class LobbyCarouselView : View
+// H/L) re-centers; Enter fires EntryActivated. Direct-jump hotkeys are owned by the parent
+// screen and arrive via TrySelectByHotkey. The target type is generic so the same control
+// drives the main lobby (TTarget = LobbyNavigation) and sub-hubs like Doors (TTarget = Action).
+internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
 {
-    public sealed record Entry(string Label, Key Hotkey, LobbyNavigation Target, CellGrid Icon);
+    public sealed record Entry(string Label, Key Hotkey, TTarget Target, CellGrid Icon);
 
     public const int RowHeight = 6;
 
@@ -39,21 +39,20 @@ internal sealed class LobbyCarouselView : View
     }
 
     public int SelectedIndex => _index;
-    public LobbyNavigation SelectedTarget => _entries[_index].Target;
+    public TTarget SelectedTarget => _entries[_index].Target;
     public IReadOnlyList<Entry> Entries => _entries;
 
-    public event EventHandler<LobbyNavigation>? EntryActivated;
+    public event EventHandler<TTarget>? EntryActivated;
+    public event EventHandler<int>? SelectionChanged;
 
     public void MoveLeft()
     {
-        _index = (_index - 1 + _entries.Count) % _entries.Count;
-        SetNeedsDraw();
+        SetIndex((_index - 1 + _entries.Count) % _entries.Count);
     }
 
     public void MoveRight()
     {
-        _index = (_index + 1) % _entries.Count;
-        SetNeedsDraw();
+        SetIndex((_index + 1) % _entries.Count);
     }
 
     public bool TrySelectByHotkey(Key key)
@@ -63,15 +62,19 @@ internal sealed class LobbyCarouselView : View
             var hk = _entries[i].Hotkey;
             if (key == hk || key == hk.WithShift)
             {
-                if (_index != i)
-                {
-                    _index = i;
-                    SetNeedsDraw();
-                }
+                SetIndex(i);
                 return true;
             }
         }
         return false;
+    }
+
+    private void SetIndex(int newIndex)
+    {
+        if (newIndex == _index) return;
+        _index = newIndex;
+        SetNeedsDraw();
+        SelectionChanged?.Invoke(this, _index);
     }
 
     protected override bool OnMouseEvent(Mouse mouse)

@@ -89,11 +89,11 @@ public sealed class LobbyScreen : BbsWindow
 
         var carouselEntries = entries
             .Where(e => e.Visible)
-            .Select(e => new LobbyCarouselView.Entry(e.Label, e.Hotkey, e.Target, icons.Get(e.IconName)))
+            .Select(e => new LobbyCarouselView<LobbyNavigation>.Entry(e.Label, e.Hotkey, e.Target, icons.Get(e.IconName)))
             .ToList();
 
         var carouselY = contentTop + 2;
-        var carousel = new LobbyCarouselView(carouselEntries)
+        var carousel = new LobbyCarouselView<LobbyNavigation>(carouselEntries)
         {
             X = 0,
             Y = carouselY,
@@ -105,7 +105,7 @@ public sealed class LobbyScreen : BbsWindow
         var sysopBadge = new Label
         {
             X = 2,
-            Y = carouselY + LobbyCarouselView.RowHeight + 1,
+            Y = carouselY + LobbyCarouselView<LobbyNavigation>.RowHeight + 1,
             Text = user.IsSysop ? "[ sysop access granted — press S for the console ]" : string.Empty,
         };
         sysopBadge.SetScheme(BbsTheme.Success_);
@@ -149,7 +149,7 @@ public sealed class LobbyScreen : BbsWindow
 
     private async Task LoadAlertsAsync(
         IApplication app, IServiceProvider services, User user,
-        AlertsBannerView banner, LobbyCarouselView carousel, Label sysopBadge, int carouselY)
+        AlertsBannerView banner, LobbyCarouselView<LobbyNavigation> carousel, Label sysopBadge, int carouselY)
     {
         var alertProvider = services.GetRequiredService<IWeatherAlertProvider>();
 
@@ -195,7 +195,7 @@ public sealed class LobbyScreen : BbsWindow
             banner.Visible = true;
             var newCarouselY = carouselY + AlertsBannerView.BannerHeight;
             carousel.Y = newCarouselY;
-            sysopBadge.Y = newCarouselY + LobbyCarouselView.RowHeight + 1;
+            sysopBadge.Y = newCarouselY + LobbyCarouselView<LobbyNavigation>.RowHeight + 1;
         });
     }
 
