@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Night.Ms.SshServer\Night.Ms.SshServer.csproj" />
+    <ProjectReference Include="..\..\src\Night.Ms.Tools.LoadTest\Night.Ms.Tools.LoadTest.csproj" />
   </ItemGroup>
 
 </Project>

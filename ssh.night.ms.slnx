@@ -4,6 +4,7 @@
     <Project Path="src/Night.Ms.SshServer/Night.Ms.SshServer.csproj" />
     <Project Path="src/Night.Ms.SshTransport/Night.Ms.SshTransport.csproj" />
     <Project Path="src/Night.Ms.Tools.AnsiConvert/Night.Ms.Tools.AnsiConvert.csproj" />
+    <Project Path="src/Night.Ms.Tools.LoadTest/Night.Ms.Tools.LoadTest.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Night.Ms.SshServer.Tests/Night.Ms.SshServer.Tests.csproj" />
