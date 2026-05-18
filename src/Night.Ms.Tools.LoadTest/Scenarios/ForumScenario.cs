@@ -53,8 +53,12 @@ public sealed class ForumScenario : IScenario
 
     private async Task OnePassAsync(Bot bot, MetricsCollector metrics, int seq, CancellationToken ct)
     {
-        // Step 1: lobby → ForumList
+        // Step 1: lobby → ForumList. Lobby carousel hotkey only selects; Enter activates.
+        // See ChatScenario for the same pattern.
         await bot.SendKeyAsync('b').ConfigureAwait(false);
+        try { await Task.Delay(100, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
+        await bot.SendEnterAsync().ConfigureAwait(false);
         if (!await bot.Screen.WaitForAsync("boards", TimeSpan.FromSeconds(5), ct).ConfigureAwait(false))
         {
             metrics.IncrementError("forum.enter_list");

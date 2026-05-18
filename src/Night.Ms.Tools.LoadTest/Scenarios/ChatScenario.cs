@@ -49,9 +49,14 @@ public sealed class ChatScenario : IScenario
         try { await Task.Delay(500, ct).ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
 
-        // Lowercase: TG v2's hotkey comparison maps 'c' (0x63) to Key.C; uppercase 'C'
-        // (0x43) is interpreted as Shift+C and may not match a hotkey defined as Key.C.
+        // Lobby carousel pattern: a letter hotkey only *selects* the destination via
+        // LobbyCarouselView.TrySelectByHotkey — it doesn't activate. The carousel's own
+        // KeyDown then fires EntryActivated on Enter. So: 'c' selects, Enter confirms.
+        // The brief delay gives the carousel one render tick to commit the selection.
         await bot.SendKeyAsync('c').ConfigureAwait(false);
+        try { await Task.Delay(100, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
+        await bot.SendEnterAsync().ConfigureAwait(false);
 
         // Chat-screen title contains "#lobby". The lobby's own title says "lobby" without
         // the # so it can't false-positive against the lobby screen we just left.
