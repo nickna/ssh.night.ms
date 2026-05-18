@@ -1,6 +1,7 @@
 using Night.Ms.Tools.LoadTest.Bots;
 using Night.Ms.Tools.LoadTest.Driver;
 using Night.Ms.Tools.LoadTest.Metrics;
+using Night.Ms.Tools.LoadTest.Scenarios;
 
 namespace Night.Ms.Tools.LoadTest.Cli;
 
@@ -11,7 +12,8 @@ internal sealed record RunOptions(
     int RampSeconds,
     int DurationSeconds,
     string KeysDir,
-    string ReportsDir);
+    string ReportsDir,
+    Mix Mix);
 
 // `run` — opens N SSH sessions against the configured host, runs the assigned scenarios
 // for the configured duration, writes a stdout table + CSV + JSON report.
@@ -29,8 +31,18 @@ internal static class RunCommand
             return 1;
         }
 
+        if (opts.Mix.ForumPct > 0)
+        {
+            Console.Out.WriteLine($"loadtest: forum scenario ships in Phase 4; mapping {opts.Mix.ForumPct}% forum bots to idle for now.");
+        }
+
         var keyStore = new BotKeyStore(opts.KeysDir);
-        var assignment = ProfileAssignment.AllIdle();
+        var idle = new IdleScenario();
+        var assignment = new ProfileAssignment(
+            mix: opts.Mix,
+            chatFactory: idx => new ChatScenario(idx),
+            forumScenario: null, // Phase 4 plugs ForumScenario in here.
+            idleScenario: idle);
         var driverConfig = new DriverConfig(opts.Host, opts.Port, opts.Count, opts.RampSeconds, opts.DurationSeconds);
         var driver = new Driver.Driver(driverConfig, keyStore, assignment.For);
 
@@ -46,7 +58,7 @@ internal static class RunCommand
             DurationSeconds: opts.DurationSeconds,
             Host: opts.Host,
             Port: opts.Port,
-            Scenarios: "idle");
+            Scenarios: $"mix={opts.Mix}");
 
         Report.PrintTable(driver.Metrics, meta);
         var stamp = startedAt.ToString("yyyyMMdd-HHmmss");

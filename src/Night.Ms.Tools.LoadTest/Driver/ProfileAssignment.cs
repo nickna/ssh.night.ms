@@ -2,25 +2,38 @@ using Night.Ms.Tools.LoadTest.Scenarios;
 
 namespace Night.Ms.Tools.LoadTest.Driver;
 
-// Maps a 1-based bot index → scenario. Phase 2 only knows IdleScenario; Phase 3/4
-// extend this with chat + forum and parse a `--mix` flag here. Keeping the indirection
-// now means RunCommand doesn't need to change when those land.
+// Maps a 1-based bot index → scenario, deterministically and stably across runs.
+// Layout: every bot's slot is `(index - 1) % 100`. The first ChatPct slots run chat,
+// the next ForumPct slots run forum, and the remainder run idle. At any N this gives
+// ≈ the requested proportions with at most 1 bot of rounding error per scenario kind.
 public sealed class ProfileAssignment
 {
-    private readonly IReadOnlyList<IScenario> _scenarios;
+    private readonly Func<int, IScenario> _chatFactory;
+    private readonly IScenario _forumScenario;
+    private readonly IScenario _idleScenario;
+    private readonly int _chatBuckets;
+    private readonly int _forumBuckets;
 
-    private ProfileAssignment(IReadOnlyList<IScenario> scenarios)
+    public ProfileAssignment(Mix mix, Func<int, IScenario> chatFactory, IScenario? forumScenario, IScenario idleScenario)
     {
-        _scenarios = scenarios;
+        _chatFactory = chatFactory;
+        _forumScenario = forumScenario ?? idleScenario;
+        _idleScenario = idleScenario;
+
+        // Normalize any total to 100 buckets so 60/30/10 and 6/3/1 produce the same
+        // assignment. Idle gets the remainder so the buckets fully fill the [0, 100)
+        // range — no bot falls into an unassigned slot.
+        var total = Math.Max(1, mix.ChatPct + mix.ForumPct + mix.IdlePct);
+        _chatBuckets = (int)Math.Round(100.0 * mix.ChatPct / total);
+        _forumBuckets = (int)Math.Round(100.0 * mix.ForumPct / total);
+        if (_chatBuckets + _forumBuckets > 100) _forumBuckets = 100 - _chatBuckets;
     }
 
-    public static ProfileAssignment AllIdle()
+    public IScenario For(int botIndex)
     {
-        var idle = new IdleScenario();
-        return new ProfileAssignment([idle]);
+        var bucket = (botIndex - 1) % 100;
+        if (bucket < _chatBuckets) return _chatFactory(botIndex);
+        if (bucket < _chatBuckets + _forumBuckets) return _forumScenario;
+        return _idleScenario;
     }
-
-    // Deterministic: bot index N% scenarios.Count picks the slot. Until the mix flag
-    // is wired, every bot lands on _scenarios[0] (idle).
-    public IScenario For(int botIndex) => _scenarios[(botIndex - 1) % _scenarios.Count];
 }

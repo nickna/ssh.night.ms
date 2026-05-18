@@ -13,7 +13,8 @@ internal static class Program
                  loadbot-NNNN users + identity_credentials rows. Idempotent.
 
           run    --count N [--host <h>] [--port <p>] [--ramp-seconds <s>]
-                 [--duration-seconds <s>] [--keys-dir <path>] [--reports-dir <path>]
+                 [--duration-seconds <s>] [--mix chat/forum/idle]
+                 [--keys-dir <path>] [--reports-dir <path>]
                  Open N SSH sessions, run the scenario mix for the configured
                  duration, write stdout table + CSV + JSON report.
 
@@ -24,6 +25,7 @@ internal static class Program
           --port             2222
           --ramp-seconds     30
           --duration-seconds 300
+          --mix              60/30/10  (chat/forum/idle; forum→idle until Phase 4)
           --keys-dir         ./loadtest-keys (relative to the tool binary)
           --reports-dir      ./loadtest-reports
 
@@ -97,6 +99,7 @@ internal static class Program
         var duration = 300;
         var keysDir = DefaultKeysDir();
         var reportsDir = Path.Combine(AppContext.BaseDirectory, "loadtest-reports");
+        var mix = Driver.Mix.Default;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -114,13 +117,18 @@ internal static class Program
                 case "--duration-seconds":
                     if (++i >= args.Length || !int.TryParse(args[i], out duration) || duration <= 0) return Fail("--duration-seconds expects a positive integer.");
                     break;
+                case "--mix":
+                    if (++i >= args.Length) return Fail("--mix expects a value like 60/30/10.");
+                    try { mix = Driver.Mix.Parse(args[i]); }
+                    catch (FormatException ex) { return Fail(ex.Message); }
+                    break;
                 case "--keys-dir": if (++i >= args.Length) return Fail("--keys-dir expects a path."); keysDir = args[i]; break;
                 case "--reports-dir": if (++i >= args.Length) return Fail("--reports-dir expects a path."); reportsDir = args[i]; break;
                 default: return Fail($"run: unexpected argument: {args[i]}");
             }
         }
         if (count == 0) return Fail("run: --count is required.");
-        return await RunCommand.RunAsync(new RunOptions(host, port, count, ramp, duration, keysDir, reportsDir), ct);
+        return await RunCommand.RunAsync(new RunOptions(host, port, count, ramp, duration, keysDir, reportsDir, mix), ct);
     }
 
     private static string DefaultKeysDir() => Path.Combine(AppContext.BaseDirectory, "loadtest-keys");
