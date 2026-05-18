@@ -22,11 +22,11 @@ public class BotKeyTests
     }
 
     [Fact]
-    public void Pkcs8_pem_round_trips()
+    public void Pem_round_trips()
     {
         var original = BotKey.Generate();
-        var pem = original.ExportPkcs8Pem();
-        var restored = BotKey.FromPkcs8Pem(pem);
+        var pem = original.ExportPrivateKeyPem();
+        var restored = BotKey.FromPem(pem);
         Assert.Equal(original.Fingerprint, restored.Fingerprint);
         Assert.Equal(original.PublicKeyBlob, restored.PublicKeyBlob);
     }

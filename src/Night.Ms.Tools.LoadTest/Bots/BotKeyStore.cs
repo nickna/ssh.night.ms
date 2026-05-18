@@ -23,10 +23,10 @@ public sealed class BotKeyStore
         var path = PathFor(botIndex);
         if (File.Exists(path))
         {
-            return BotKey.FromPkcs8Pem(File.ReadAllText(path));
+            return BotKey.FromPem(File.ReadAllText(path));
         }
         var key = BotKey.Generate();
-        File.WriteAllText(path, key.ExportPkcs8Pem());
+        File.WriteAllText(path, key.ExportPrivateKeyPem());
         return key;
     }
 }

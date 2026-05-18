@@ -30,14 +30,21 @@ public sealed class BotKey
         return Wrap(rsa);
     }
 
-    public static BotKey FromPkcs8Pem(string pem)
+    // Format-neutral on import: .NET's ImportFromPem accepts PKCS#1
+    // (-----BEGIN RSA PRIVATE KEY-----) and PKCS#8 (-----BEGIN PRIVATE KEY-----)
+    // transparently. Keys we wrote with older builds (PKCS#8) still load here.
+    public static BotKey FromPem(string pem)
     {
         var rsa = RSA.Create();
         rsa.ImportFromPem(pem);
         return Wrap(rsa);
     }
 
-    public string ExportPkcs8Pem() => Rsa.ExportPkcs8PrivateKeyPem();
+    // Export as PKCS#1 traditional ("-----BEGIN RSA PRIVATE KEY-----"). SSH.NET 2023.0.1
+    // (pinned to dodge the 2024.x strict-kex issue with DevTunnels) only handles PKCS#1
+    // RSA; OpenSSH ssh accepts it too. PKCS#8 export would lock us out of the pinned
+    // SSH.NET version.
+    public string ExportPrivateKeyPem() => Rsa.ExportRSAPrivateKeyPem();
 
     private static BotKey Wrap(RSA rsa)
     {
