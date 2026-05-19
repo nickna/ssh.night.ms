@@ -197,6 +197,25 @@ builder.Services.AddScoped<Night.Ms.SshServer.Doors.Leaderboards.ILeaderboardSer
 builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.Slots.SlotsGame>();
 builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.VideoPoker.VideoPokerGame>();
 builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.Blackjack.BlackjackGame>();
+
+// Multiplayer-door framework + Hold'em. HoldemGame doubles as the IDoorGame discovery
+// entry (DoorsScreen lists it next to slots/blackjack) and the IMultiplayerDoor metadata
+// for the registry. Ledger is Scoped (rides on AppDbContext via the per-screen DI scope);
+// registry/coordinator/client are Singletons because table state lives in-process.
+builder.Services.AddScoped<Night.Ms.SshServer.Doors.Multiplayer.IMultiplayerGameLedger,
+                           Night.Ms.SshServer.Doors.Multiplayer.MultiplayerGameLedger>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Doors.Multiplayer.ICpuPersonaRegistry,
+                              Night.Ms.SshServer.Doors.Multiplayer.CpuPersonaRegistry>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Doors.Games.Holdem.HoldemGame>();
+builder.Services.AddSingleton<IDoorGame>(sp => sp.GetRequiredService<Night.Ms.SshServer.Doors.Games.Holdem.HoldemGame>());
+builder.Services.AddSingleton<Night.Ms.SshServer.Doors.Multiplayer.ITableRegistry,
+                              Night.Ms.SshServer.Doors.Multiplayer.TableRegistry>();
+builder.Services.AddSingleton<Night.Ms.SshServer.Doors.Games.Holdem.IPokerClient,
+                              Night.Ms.SshServer.Doors.Games.Holdem.InProcPokerClient>();
+// Reconciliation runs once at startup to reclaim chips orphaned by ungraceful shutdowns;
+// shutdown service cashes out seated humans on ApplicationStopping.
+builder.Services.AddHostedService<Night.Ms.SshServer.Doors.Multiplayer.TableReconciliationService>();
+builder.Services.AddHostedService<Night.Ms.SshServer.Doors.Multiplayer.TableShutdownService>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider, Night.Ms.SshServer.Tui.Art.FileSystemArtGalleryProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.ILobbyIconProvider, Night.Ms.SshServer.Tui.Art.FileSystemLobbyIconProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IWeatherAnimationProvider, Night.Ms.SshServer.Tui.Art.FileSystemWeatherAnimationProvider>();

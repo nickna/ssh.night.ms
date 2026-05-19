@@ -17,5 +17,10 @@ public sealed class GameRound
     public JsonDocument? Details { get; set; }
     public DateTimeOffset PlayedAt { get; set; }
 
+    // Non-null on rows produced by a multiplayer door's hand-settle: groups the per-player
+    // rows for one Hold'em hand under a shared MultiplayerHand row that owns the heavy JSON.
+    public long? HandId { get; set; }
+
     public User? User { get; set; }
+    public MultiplayerHand? Hand { get; set; }
 }

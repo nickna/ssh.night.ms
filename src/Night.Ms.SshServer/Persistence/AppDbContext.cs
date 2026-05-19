@@ -21,6 +21,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserWatchlistItem> UserWatchlistItems => Set<UserWatchlistItem>();
     public DbSet<UserWallet> UserWallets => Set<UserWallet>();
     public DbSet<GameRound> GameRounds => Set<GameRound>();
+    public DbSet<MultiplayerHand> MultiplayerHands => Set<MultiplayerHand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -210,6 +211,22 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             b.HasIndex(r => new { r.GameKey, r.Net }).IsDescending(false, true);
             b.HasIndex(r => new { r.GameKey, r.PlayedAt }).IsDescending(false, true);
             b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
+            // Multiplayer linkage: per-player rows for one hand share a MultiplayerHand. FK
+            // is SetNull so deleting the hand (e.g. retention sweep) doesn't wipe the
+            // per-player audit row — the per-player economic outcome survives even if the
+            // shared blob is gone.
+            b.HasOne(r => r.Hand).WithMany().HasForeignKey(r => r.HandId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MultiplayerHand>(b =>
+        {
+            b.ToTable("multiplayer_hands");
+            b.Property(h => h.GameKey).HasMaxLength(32);
+            b.Property(h => h.Details).HasColumnType("jsonb");
+            // (game_key, table_id, hand_no) is the natural key — coordinator increments
+            // HandNo monotonically per table. Unique so a buggy re-settle can't insert
+            // a second row for the same hand.
+            b.HasIndex(h => new { h.GameKey, h.TableId, h.HandNo }).IsUnique();
         });
     }
 }
