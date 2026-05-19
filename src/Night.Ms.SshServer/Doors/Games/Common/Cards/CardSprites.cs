@@ -2,7 +2,7 @@ using System.Text;
 using Night.Ms.SshServer.Doors.Games.Slots;
 using Night.Ms.SshServer.Tui.Art;
 
-namespace Night.Ms.SshServer.Doors.Games.VideoPoker;
+namespace Night.Ms.SshServer.Doors.Games.Common.Cards;
 
 internal enum CardStyle
 {
@@ -10,12 +10,13 @@ internal enum CardStyle
     Held,
     Winning,
     Empty,
+    FaceDown,
 }
 
-// 6×5 colored card sprite. Three live styles (Normal / Held / Winning) plus an Empty
-// pre-deal slot. The slots palette is reused so both door games share the same casino
-// look. Cherry-red hearts/diamonds, white-on-black clubs/spades — chosen because the
-// terminal background is black and "real" black would be invisible.
+// 6×5 colored card sprite. Live styles (Normal / Held / Winning / FaceDown) plus an Empty
+// pre-deal slot. The slots palette is reused so all door games share the same casino look.
+// Cherry-red hearts/diamonds, white-on-black clubs/spades — chosen because the terminal
+// background is black and "real" black would be invisible.
 //
 // Layout (cols 0-5, rows 0-4):
 //   row 0: ┌────┐   border
@@ -37,6 +38,8 @@ internal static class CardSprites
 
     public static Cell[,] Build(Card? card, CardStyle style)
     {
+        if (style == CardStyle.FaceDown)
+            return BuildFaceDown();
         if (card is null || style == CardStyle.Empty)
             return BuildEmpty();
 
@@ -96,6 +99,19 @@ internal static class CardSprites
         var grid = new Cell[Width, Height];
         FillInterior(grid, DimGray);
         DrawBorder(grid, DimGray, ArtStyle.None);
+        return grid;
+    }
+
+    // Dealer hole card: gold-bordered card with a hatched back. ASCII-only ('X') keeps
+    // alignment portable on every SSH client.
+    private static Cell[,] BuildFaceDown()
+    {
+        var grid = new Cell[Width, Height];
+        FillInterior(grid, Gold);
+        DrawBorder(grid, Gold, ArtStyle.None);
+        for (var y = 1; y < Height - 1; y++)
+            for (var x = 1; x < Width - 1; x++)
+                grid[x, y] = new Cell(new Rune('X'), Gold, Black, ArtStyle.Bold);
         return grid;
     }
 

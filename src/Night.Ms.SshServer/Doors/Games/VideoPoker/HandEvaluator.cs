@@ -1,3 +1,5 @@
+using Night.Ms.SshServer.Doors.Games.Common.Cards;
+
 namespace Night.Ms.SshServer.Doors.Games.VideoPoker;
 
 // Classifies a 5-card hand into one of the HandRank tiers used by the 9/6 Jacks-or-Better

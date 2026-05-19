@@ -196,6 +196,7 @@ builder.Services.AddScoped<Night.Ms.SshServer.Doors.Leaderboards.ILeaderboardSer
 // the only required change to add them to the menu.
 builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.Slots.SlotsGame>();
 builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.VideoPoker.VideoPokerGame>();
+builder.Services.AddSingleton<IDoorGame, Night.Ms.SshServer.Doors.Games.Blackjack.BlackjackGame>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IArtGalleryProvider, Night.Ms.SshServer.Tui.Art.FileSystemArtGalleryProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.ILobbyIconProvider, Night.Ms.SshServer.Tui.Art.FileSystemLobbyIconProvider>();
 builder.Services.AddSingleton<Night.Ms.SshServer.Tui.Art.IWeatherAnimationProvider, Night.Ms.SshServer.Tui.Art.FileSystemWeatherAnimationProvider>();

@@ -1,3 +1,4 @@
+using Night.Ms.SshServer.Doors.Games.Common.Cards;
 using Night.Ms.SshServer.Doors.Games.VideoPoker;
 
 namespace Night.Ms.SshServer.Tests.Doors;

@@ -1,10 +1,10 @@
-namespace Night.Ms.SshServer.Doors.Games.VideoPoker;
+namespace Night.Ms.SshServer.Doors.Games.Common.Cards;
 
 public enum Suit { Clubs, Diamonds, Hearts, Spades }
 
-// Numeric Rank values are deliberate: comparisons in the evaluator (Jack or better, straight
-// detection, royal-flush top card) treat Rank as the underlying int. Ace is high; the
-// ace-low straight (A-2-3-4-5) is handled as a special case in IsStraight.
+// Numeric Rank values are deliberate: card games compare Rank as the underlying int.
+// Ace is high; ace-low straights (A-2-3-4-5) and blackjack's soft-ace logic are handled
+// by the consuming engine, not here.
 public enum Rank
 {
     Two = 2, Three = 3, Four = 4, Five = 5, Six = 6, Seven = 7,

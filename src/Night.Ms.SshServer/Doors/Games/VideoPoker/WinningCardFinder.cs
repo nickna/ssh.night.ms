@@ -1,3 +1,5 @@
+using Night.Ms.SshServer.Doors.Games.Common.Cards;
+
 namespace Night.Ms.SshServer.Doors.Games.VideoPoker;
 
 // Given a final hand and the HandRank that HandEvaluator returned for it, surface the
