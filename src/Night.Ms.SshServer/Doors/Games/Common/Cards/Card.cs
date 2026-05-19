@@ -23,17 +23,18 @@ public sealed record Card(Rank Rank, Suit Suit)
         _ => ((int)Rank).ToString(),
     };
 
-    public string SuitGlyph => Suit switch
+    // Unicode pip. ♠♥♦♣ are East Asian Width "ambiguous" and a few clients render them as
+    // emoji (double-wide), which would misalign rows of cards. CardSprites pairs each pip
+    // cell with U+FE0E (text-presentation variation selector) via Cell.Modifier to force
+    // single-cell rendering on clients that respect it.
+    public char SuitGlyph => Suit switch
     {
-        Suit.Clubs => "C",
-        Suit.Diamonds => "D",
-        Suit.Hearts => "H",
-        Suit.Spades => "S",
-        _ => "?",
+        Suit.Clubs    => '♣', // ♣
+        Suit.Diamonds => '♦', // ♦
+        Suit.Hearts   => '♥', // ♥
+        Suit.Spades   => '♠', // ♠
+        _ => '?',
     };
 
-    // ASCII-only on purpose: ♣♦♥♠ have East Asian Width "ambiguous" and render as wide on
-    // a handful of SSH clients, which would misalign the row of cards. Letter suits stay
-    // exactly one column on every terminal.
     public override string ToString() => RankLabel + SuitGlyph;
 }

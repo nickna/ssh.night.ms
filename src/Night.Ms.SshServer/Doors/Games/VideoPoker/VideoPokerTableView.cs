@@ -357,7 +357,15 @@ internal sealed class VideoPokerTableView : View
                 var bg = new Color(cell.Background.R, cell.Background.G, cell.Background.B, 0xFF);
                 var style = cell.Style.HasFlag(ArtStyle.Bold) ? TextStyle.Bold : TextStyle.None;
                 SetAttribute(new Attribute(fg, bg, style));
-                AddRune(x, y, cell.Glyph);
+                if (cell.Modifier is { } mod)
+                {
+                    Move(x, y);
+                    AddStr(cell.Glyph.ToString() + mod.ToString());
+                }
+                else
+                {
+                    AddRune(x, y, cell.Glyph);
+                }
             }
         }
         return true;

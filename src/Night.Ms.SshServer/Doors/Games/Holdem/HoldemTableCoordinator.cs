@@ -367,7 +367,18 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
             catch (InvalidOperationException ex)
             {
                 _log.LogWarning(ex, "CPU at seat {Seat} produced illegal action; defaulting", actor);
-                HoldemEngine.ApplyAction(_state, actor, HoldemAction.Default());
+                try { HoldemEngine.ApplyAction(_state, actor, HoldemAction.Default()); }
+                catch (InvalidOperationException ex2)
+                {
+                    // Belt-and-suspenders: with the engine fixes Default() should always
+                    // succeed (ApplyTimeout no longer throws on non-Active seats). If this
+                    // fires, the engine state is unrecoverably wedged for this hand —
+                    // surface a loud error and break out of the drive loop so the clock
+                    // loop survives. The hand sits frozen until OnHandComplete fires
+                    // through another path or the table restarts.
+                    _log.LogError(ex2, "CPU at seat {Seat} fallback Default also failed; abandoning drive loop", actor);
+                    return;
+                }
             }
             await PublishActionTakenAsync(actor, WireActionName(action.Kind), action.Amount, ct);
             await PublishBoardIfAdvancedAsync(ct);

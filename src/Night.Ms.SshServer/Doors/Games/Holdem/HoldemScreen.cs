@@ -393,7 +393,7 @@ internal sealed class HoldemScreen : BbsWindow
             _myHole2 = e.Card2;
             UiInvoke(RenderAll);
         },
-        OnActionRejected = e => _app.Invoke(() => _actionLabel.Text = $"[!] {e.Reason}"),
+        OnActionRejected = e => UiInvoke(() => _actionLabel.Text = $"[!] {e.Reason}"),
     };
 
     // -- State application ------------------------------------------------------------
@@ -766,7 +766,16 @@ internal sealed class HoldemScreen : BbsWindow
         finally { _app.Invoke(_app.RequestStop); }
     }
 
-    private void UiInvoke(Action a) => _app.Invoke(() => { try { a(); } catch { } });
+    // Marshals an action onto the UI thread but swallows the teardown race: subscriber
+    // tasks may still deliver events after the IApplication has been disposed, and
+    // Application.Invoke throws NotInitializedException in that window. Dropping the
+    // UI update is the right outcome — there's nothing left to redraw onto.
+    private void UiInvoke(Action a)
+    {
+        try { _app.Invoke(() => { try { a(); } catch { } }); }
+        catch (NotInitializedException) { }
+        catch (InvalidOperationException) { }
+    }
 
     private static string TitleCase(string s) =>
         string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];

@@ -170,4 +170,65 @@ public class HoldemEngineTests
 
         Assert.Equal(HoldemSeatStatus.SittingOut, state.Seats[0].Status);
     }
+
+    [Fact]
+    public void StartHand_heads_up_short_stack_sb_does_not_set_actor_on_allin_seat()
+    {
+        // Regression: with the previous logic, NextLivePlayer (which accepts AllIn) wrapped
+        // back to the SB. CPU strategy returned no legal actions, devolved to Default →
+        // ApplyTimeout → "seat not active" crash. Actor must land on the only Active seat.
+        var state = new HoldemTableState(2, smallBlind: 5, bigBlind: 10, new DeterministicRng(7));
+        state.Seats[0].Status = HoldemSeatStatus.Active;
+        state.Seats[0].Stack = 4; // less than SB → posts all and goes AllIn
+        state.Seats[1].Status = HoldemSeatStatus.Active;
+        state.Seats[1].Stack = 1000;
+
+        HoldemEngine.StartHand(state, dealerButtonIndex: 0);
+
+        Assert.Equal(HoldemSeatStatus.AllIn, state.Seats[0].Status);
+        Assert.Equal(HoldemSeatStatus.Active, state.Seats[1].Status);
+        Assert.Equal(1, state.ActorIndex); // the BB, only Active seat that can act
+    }
+
+    [Fact]
+    public void StartHand_heads_up_both_blinds_all_in_fast_forwards_to_showdown()
+    {
+        // Both seats are short enough that posting blinds drains them. No Active seats
+        // remain, so there is no betting round to run — StartHand should fast-forward
+        // through every street and resolve the hand.
+        var state = new HoldemTableState(2, smallBlind: 5, bigBlind: 10, new DeterministicRng(11));
+        state.Seats[0].Status = HoldemSeatStatus.Active;
+        state.Seats[0].Stack = 4;  // posts 4 of SB → AllIn
+        state.Seats[1].Status = HoldemSeatStatus.Active;
+        state.Seats[1].Stack = 9;  // posts 9 of BB → AllIn
+
+        HoldemEngine.StartHand(state, dealerButtonIndex: 0);
+
+        Assert.Equal(HoldemSeatStatus.AllIn, state.Seats[0].Status);
+        Assert.Equal(HoldemSeatStatus.AllIn, state.Seats[1].Status);
+        Assert.Equal(HoldemPhase.HandComplete, state.Phase);
+        Assert.Null(state.ActorIndex);
+        Assert.Equal(5, state.Board.Count);
+        Assert.NotEmpty(state.Payouts);
+    }
+
+    [Fact]
+    public void ApplyTimeout_on_non_active_actor_advances_without_throwing()
+    {
+        // Defensive: if some path leaves ActorIndex pointing at an AllIn (or Folded) seat,
+        // ApplyTimeout used to throw and kill the clock loop. It should skip past instead.
+        var state = NewState(3);
+        HoldemEngine.StartHand(state, dealerButtonIndex: 0);
+        var actor = state.ActorIndex!.Value;
+        var nextExpected = (actor + 1) % 3;
+
+        // Force the current actor to AllIn (bypassing the normal action path) to simulate
+        // the wedged state. ConsecutiveMisses must not increment — they didn't actually miss.
+        state.Seats[actor].Status = HoldemSeatStatus.AllIn;
+
+        HoldemEngine.ApplyTimeout(state, actor);
+
+        Assert.Equal(nextExpected, state.ActorIndex);
+        Assert.False(state.ConsecutiveMisses.ContainsKey(actor));
+    }
 }

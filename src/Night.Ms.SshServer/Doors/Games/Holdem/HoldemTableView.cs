@@ -257,7 +257,15 @@ internal sealed class HoldemTableView : View
                 var bg = new Color(cell.Background.R, cell.Background.G, cell.Background.B, 0xFF);
                 var tgStyle = cell.Style.HasFlag(ArtStyle.Bold) ? TextStyle.Bold : TextStyle.None;
                 SetAttribute(new Attribute(fg, bg, tgStyle));
-                AddRune(x, y, cell.Glyph);
+                if (cell.Modifier is { } mod)
+                {
+                    Move(x, y);
+                    AddStr(cell.Glyph.ToString() + mod.ToString());
+                }
+                else
+                {
+                    AddRune(x, y, cell.Glyph);
+                }
             }
         }
         return true;

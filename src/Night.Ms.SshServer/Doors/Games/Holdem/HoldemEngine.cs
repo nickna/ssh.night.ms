@@ -82,7 +82,22 @@ public static class HoldemEngine
         }
 
         state.Phase = HoldemPhase.PreFlop;
-        state.ActorIndex = NextLivePlayer(state, bbIndex);
+
+        // Pick the first to act. Must be an Active seat — NextLivePlayer would also accept
+        // AllIn, which is wrong here: blinds can drive the SB (or both blinds in heads-up)
+        // into AllIn, and an AllIn seat has nothing to decide. If no Active seat remains
+        // (heads-up short-stack edge case where both blinds went AllIn) there is no betting
+        // round to run — fast-forward via the same path EndBettingRound takes for its
+        // "actionable ≤ 1" branch: deal remaining streets, resolve showdown.
+        var firstActor = NextActorOrNone(state, bbIndex);
+        if (firstActor is int actor)
+        {
+            state.ActorIndex = actor;
+        }
+        else
+        {
+            EndBettingRound(state);
+        }
     }
 
     // -- Action queries -----------------------------------------------------------------
@@ -244,11 +259,20 @@ public static class HoldemEngine
 
     public static void ApplyTimeout(HoldemTableState state, int seatIndex)
     {
-        var seat = state.Seats[seatIndex];
-        if (seat.Status != HoldemSeatStatus.Active)
-            throw new InvalidOperationException($"seat {seatIndex} not active");
         if (state.ActorIndex != seatIndex)
             throw new InvalidOperationException($"seat {seatIndex} is not the actor");
+
+        var seat = state.Seats[seatIndex];
+
+        // Tolerate the seat being non-Active. This shouldn't happen if StartHand is honest
+        // about its actor pick, but if it does, the right behavior is "skip past them": they
+        // have nothing to act on, and throwing would crash whichever loop drove the call.
+        // Increments no miss counter — they didn't actually miss, the actor was wrong.
+        if (seat.Status != HoldemSeatStatus.Active)
+        {
+            AdvanceActorOrEndRound(state);
+            return;
+        }
 
         var misses = state.ConsecutiveMisses.GetValueOrDefault(seatIndex) + 1;
         state.ConsecutiveMisses[seatIndex] = misses;

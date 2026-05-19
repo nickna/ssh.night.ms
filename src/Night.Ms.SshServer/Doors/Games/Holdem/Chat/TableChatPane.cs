@@ -87,7 +87,7 @@ internal sealed class TableChatPane : View
 
     // -- Public surface ----------------------------------------------------------------
 
-    public void FocusInput() => _app.Invoke(() => _input.SetFocus());
+    public void FocusInput() => SafeInvoke(() => _input.SetFocus());
 
     public bool IsInputFocused => _input.HasFocus;
 
@@ -151,7 +151,7 @@ internal sealed class TableChatPane : View
             if (_lines.Count > MaxLogLines)
                 _lines.RemoveRange(0, _lines.Count - MaxLogLines);
         }
-        _app.Invoke(() =>
+        SafeInvoke(() =>
         {
             string text;
             lock (_linesLock)
@@ -164,6 +164,19 @@ internal sealed class TableChatPane : View
             // Scroll to bottom — TextView exposes MoveEnd for this.
             _logView.MoveEnd();
         });
+    }
+
+    // Marshals an action onto the UI thread without throwing if the IApplication has
+    // already been disposed. The subscriber tasks (bus, dispatcher) keep running for a
+    // short window after the screen exits — until the cancellation token propagates —
+    // and any message that lands in that window would otherwise raise
+    // NotInitializedException out of Application.Invoke. Dropping the UI update during
+    // teardown is correct: there is no view left to draw onto.
+    private void SafeInvoke(Action a)
+    {
+        try { _app.Invoke(a); }
+        catch (NotInitializedException) { }
+        catch (InvalidOperationException) { }
     }
 
     // -- Input handling ----------------------------------------------------------------

@@ -13,21 +13,27 @@ internal enum CardStyle
     FaceDown,
 }
 
-// 6×5 colored card sprite. Live styles (Normal / Held / Winning / FaceDown) plus an Empty
-// pre-deal slot. The slots palette is reused so all door games share the same casino look.
-// Cherry-red hearts/diamonds, white-on-black clubs/spades — chosen because the terminal
-// background is black and "real" black would be invisible.
+// 6×5 colored card sprite shared by every door game. Live styles (Normal / Held / Winning /
+// FaceDown) plus an Empty pre-deal slot. The slots palette is reused so all door games share
+// the same casino look. Cherry-red hearts/diamonds, white-on-black clubs/spades — chosen
+// because the terminal background is black and "real" black would be invisible.
 //
 // Layout (cols 0-5, rows 0-4):
 //   row 0: ┌────┐   border
-//   row 1: │ R..│   rank top-left  (1-char ranks at col 2; "10" spans cols 2-3)
-//   row 2: │ S  │   suit letter at col 2
-//   row 3: │..R │   rank bottom-right (1-char at col 4; "10" spans cols 3-4)
+//   row 1: │R   │   rank in true upper-left corner (1-char at col 1; "10" spans cols 1-2)
+//   row 2: │ S  │   suit pip centered
+//   row 3: │   R│   rank in true lower-right corner (1-char at col 4; "10" spans cols 3-4)
 //   row 4: └────┘   border
+//
+// Suit cells carry Cell.Modifier = U+FE0E (text-presentation selector) so the renderer
+// emits "♠︎" — forcing single-cell text rendering on clients that would otherwise pick the
+// double-wide emoji form for ♠♥♦♣ and break row alignment.
 internal static class CardSprites
 {
     public const int Width = 6;
     public const int Height = 5;
+
+    private static readonly Rune TextPresentationSelector = new(0xFE0E);
 
     private static readonly ArtColor Black = SlotSymbolSprites.Palette.Black;
     private static readonly ArtColor White = SlotSymbolSprites.Palette.BrightWhite;
@@ -73,23 +79,25 @@ internal static class CardSprites
         DrawBorder(grid, borderColor, borderStyle);
 
         var rank = card.RankLabel;
-        var suit = card.SuitGlyph[0];
+        var pip = card.SuitGlyph;
 
         if (rank.Length == 1)
         {
-            SetGlyph(grid, 2, 1, rank[0], rankColor, rankStyle);
+            // True diagonal corners: upper-left (1,1) and lower-right (4,3).
+            SetGlyph(grid, 1, 1, rank[0], rankColor, rankStyle);
             SetGlyph(grid, 4, 3, rank[0], rankColor, rankStyle);
         }
         else
         {
-            // "10": top-left occupies cols 2-3, bottom-right cols 3-4 (mirrors corner pip pattern).
-            SetGlyph(grid, 2, 1, rank[0], rankColor, rankStyle);
-            SetGlyph(grid, 3, 1, rank[1], rankColor, rankStyle);
+            // "10": top-left spans cols 1-2, bottom-right spans cols 3-4 (rotational mirror).
+            SetGlyph(grid, 1, 1, rank[0], rankColor, rankStyle);
+            SetGlyph(grid, 2, 1, rank[1], rankColor, rankStyle);
             SetGlyph(grid, 3, 3, rank[0], rankColor, rankStyle);
             SetGlyph(grid, 4, 3, rank[1], rankColor, rankStyle);
         }
 
-        SetGlyph(grid, 2, 2, suit, suitColor, ArtStyle.None);
+        // Center pip. Bold so it reads even when ranks dominate the corners.
+        SetSuit(grid, 2, 2, pip, suitColor, ArtStyle.Bold);
 
         return grid;
     }
@@ -102,8 +110,7 @@ internal static class CardSprites
         return grid;
     }
 
-    // Dealer hole card: gold-bordered card with a hatched back. ASCII-only ('X') keeps
-    // alignment portable on every SSH client.
+    // Dealer hole card: gold-bordered card with a hatched back.
     private static Cell[,] BuildFaceDown()
     {
         var grid = new Cell[Width, Height];
@@ -111,7 +118,7 @@ internal static class CardSprites
         DrawBorder(grid, Gold, ArtStyle.None);
         for (var y = 1; y < Height - 1; y++)
             for (var x = 1; x < Width - 1; x++)
-                grid[x, y] = new Cell(new Rune('X'), Gold, Black, ArtStyle.Bold);
+                grid[x, y] = new Cell(new Rune('▒'), Gold, Black, ArtStyle.Bold);
         return grid;
     }
 
@@ -142,4 +149,7 @@ internal static class CardSprites
 
     private static void SetGlyph(Cell[,] grid, int x, int y, char glyph, ArtColor fg, ArtStyle style)
         => grid[x, y] = new Cell(new Rune(glyph), fg, Black, style);
+
+    private static void SetSuit(Cell[,] grid, int x, int y, char pip, ArtColor fg, ArtStyle style)
+        => grid[x, y] = new Cell(new Rune(pip), fg, Black, style, TextPresentationSelector);
 }
