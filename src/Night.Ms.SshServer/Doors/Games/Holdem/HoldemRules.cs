@@ -17,4 +17,11 @@ public static class HoldemRules
     public const long DefaultBigBlind = 10;
     public const int DefaultMinBuyInChips = 100;   // 10× BB
     public const int DefaultMaxBuyInChips = 2000;  // 200× BB
+
+    // CPU "think time" between deciding and acting. Random within [Min, Max], biased per
+    // action class (fold = fast, raise = slow) inside the coordinator. Settable (not const)
+    // so integration tests can zero them out for fast determinism; flipping these to Zero
+    // disables the delay entirely.
+    public static TimeSpan CpuThinkMin = TimeSpan.FromMilliseconds(600);
+    public static TimeSpan CpuThinkMax = TimeSpan.FromMilliseconds(1800);
 }

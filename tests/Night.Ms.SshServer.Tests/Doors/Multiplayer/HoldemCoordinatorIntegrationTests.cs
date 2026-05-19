@@ -31,6 +31,11 @@ public class HoldemCoordinatorIntegrationTests : IClassFixture<PostgresFixture>,
 
     public async Task InitializeAsync()
     {
+        // Disable CPU think-time delays so the test's poll deadline holds. The delays are
+        // a UX nicety for spectators; they aren't part of any behavior this test asserts.
+        HoldemRules.CpuThinkMin = TimeSpan.Zero;
+        HoldemRules.CpuThinkMax = TimeSpan.Zero;
+
         // Create a per-test database AND remember its connection string so DI can wire
         // against the same db EF migrations ran on.
         _dbOptions = await _pg.CreateFreshDatabaseAsync();

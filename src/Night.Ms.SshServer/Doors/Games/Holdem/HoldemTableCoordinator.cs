@@ -38,6 +38,10 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
     private readonly ConcurrentDictionary<long, int> _userIdToSeat = new();
     private readonly Dictionary<int, DateTimeOffset> _lastSeenBySeat = new();
     private DateTimeOffset? _turnDeadline;
+    // Set by OnHandCompleteAsync to ask the clock loop to start the next hand on its next
+    // tick. Replaces a direct recursive TryStartHandAsync call, which blew the stack on
+    // all-CPU tables (StartHand → CPUs play → OnHandComplete → TryStartHand → …).
+    private volatile bool _pendingNextHand;
 
     // How long a human seat can go without a heartbeat before the coordinator cashes
     // them out and frees the seat. Five minutes per the original plan — long enough to
@@ -288,9 +292,13 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
     {
         if (_state.Phase != HoldemPhase.Idle && _state.Phase != HoldemPhase.HandComplete) return;
 
+        // Mirror HoldemEngine.StartHand's promotion: Folded/AllIn/AwaitingNextHand seats
+        // with chips will be reset to Active on the next deal. Only Empty/SittingOut are
+        // excluded. Without this, a hand that ended on a fold leaves the loser status=Folded
+        // and the dealable count stays below the minimum until something else nudges state.
         var dealable = _state.Seats.Count(s =>
-            (s.Status == HoldemSeatStatus.Active || s.Status == HoldemSeatStatus.AwaitingNextHand)
-            && s.Stack > 0);
+            s.Stack > 0
+            && s.Status is not (HoldemSeatStatus.Empty or HoldemSeatStatus.SittingOut));
         if (dealable < MinSeatedToStart) return;
 
         var nextButton = ChooseNextButton();
@@ -354,6 +362,7 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
             if (!IsCpuSeat(actor)) return;
             var strategy = _cpuStrategies[actor];
             var action = strategy.Decide(_state, actor);
+            await ApplyCpuThinkDelayAsync(action, ct);
             try { HoldemEngine.ApplyAction(_state, actor, action); }
             catch (InvalidOperationException ex)
             {
@@ -365,6 +374,39 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
             await PublishTurnStartedAsync(ct);
         }
         if (_state.Phase == HoldemPhase.HandComplete) await OnHandCompleteAsync(ct);
+    }
+
+    // Lock-held sleep between deciding and applying a CPU action. We deliberately don't
+    // release the write lock during the delay: the clock loop's timeout sweep would
+    // otherwise fire ApplyTimeout on the actor mid-think and the resume-after-delay would
+    // call ApplyAction on a now-Folded seat. Snapshots can stall briefly but only for one
+    // CPU's think-time; humans on this table are blocked anyway because it isn't their turn.
+    private async Task ApplyCpuThinkDelayAsync(HoldemAction action, CancellationToken ct)
+    {
+        var max = HoldemRules.CpuThinkMax;
+        if (max <= TimeSpan.Zero) return;
+        var min = HoldemRules.CpuThinkMin;
+        if (min < TimeSpan.Zero) min = TimeSpan.Zero;
+        if (min > max) min = max;
+
+        // Per-action scaling: forced/cheap moves are quick, real decisions take longer.
+        var (lowFrac, highFrac) = action.Kind switch
+        {
+            HoldemActionKind.Fold => (0.20, 0.55),
+            HoldemActionKind.Check => (0.30, 0.65),
+            HoldemActionKind.Call => (0.45, 0.85),
+            HoldemActionKind.Bet or HoldemActionKind.Raise => (0.70, 1.00),
+            HoldemActionKind.AllIn => (0.85, 1.00),
+            _ => (0.50, 0.85),
+        };
+
+        var range = (max - min).TotalMilliseconds;
+        var low = min.TotalMilliseconds + lowFrac * range;
+        var high = min.TotalMilliseconds + highFrac * range;
+        var ms = (int)Math.Round(low + _rng.NextDouble() * (high - low));
+        if (ms <= 0) return;
+        try { await Task.Delay(ms, ct); }
+        catch (OperationCanceledException) { /* shutdown */ }
     }
 
     private async Task OnHandCompleteAsync(CancellationToken ct)
@@ -449,7 +491,11 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
         _state.Phase = HoldemPhase.Idle;
 
         await EnsureCpuFloorAsync(ct);
-        await TryStartHandAsync(ct);
+        // Don't recurse into TryStartHandAsync here — DriveCpuOrAdvanceAsync is on the stack
+        // above us via the CPU loop, and starting another hand would re-enter it and
+        // eventually blow the stack on all-CPU tables. The clock loop picks this up on the
+        // next 1Hz tick, which also rate-limits all-CPU runaway at ~1 hand/second.
+        _pendingNextHand = true;
     }
 
     // -- Publish helpers --------------------------------------------------------------
@@ -734,6 +780,14 @@ public sealed class HoldemTableCoordinator : ITableCoordinator
                 {
                     lastAbandonedScan = now;
                     await SweepAbandonedSeatsAsync(now, ct);
+                }
+
+                if (_pendingNextHand)
+                {
+                    _pendingNextHand = false;
+                    await _writeLock.WaitAsync(ct);
+                    try { await TryStartHandAsync(ct); }
+                    finally { _writeLock.Release(); }
                 }
             }
         }
