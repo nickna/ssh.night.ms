@@ -472,11 +472,42 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         var labelLen = labelText.Length;
         var labelStartX = innerLeft + (innerWidth - labelLen) / 2;
         var labelY = topY + height - 2;
-        SetAttribute(new Attribute(labelColor, bg, isSelectedStyle ? TextStyle.Bold : TextStyle.None));
+
+        // Find the first case-insensitive occurrence of the hotkey letter so we can underline
+        // it as a subtle binding hint. Hotkeys that aren't a letter in the label (e.g. Key.W
+        // for "Browser", Key.F for "Weather", digit keys in the Doors hub) yield -1 here and
+        // the loop renders the label without any underline.
+        var hotkeyIndex = FindHotkeyIndex(labelText, entry.Hotkey);
+        var baseStyle = isSelectedStyle ? TextStyle.Bold : TextStyle.None;
+        var baseAttr = new Attribute(labelColor, bg, baseStyle);
+        var hotkeyAttr = new Attribute(labelColor, bg, baseStyle | TextStyle.Underline);
+
+        SetAttribute(baseAttr);
         for (var i = 0; i < labelLen; i++)
         {
-            Plot(labelStartX + i, labelY, new Rune(labelText[i]), viewportWidth);
+            if (i == hotkeyIndex)
+            {
+                SetAttribute(hotkeyAttr);
+                Plot(labelStartX + i, labelY, new Rune(labelText[i]), viewportWidth);
+                SetAttribute(baseAttr);
+            }
+            else
+            {
+                Plot(labelStartX + i, labelY, new Rune(labelText[i]), viewportWidth);
+            }
         }
+    }
+
+    private static int FindHotkeyIndex(string labelText, Key hotkey)
+    {
+        var rune = hotkey.AsRune;
+        if (rune.Value == 0) return -1;
+        var target = char.ToLowerInvariant((char)rune.Value);
+        for (var i = 0; i < labelText.Length; i++)
+        {
+            if (char.ToLowerInvariant(labelText[i]) == target) return i;
+        }
+        return -1;
     }
 
     // Blend a color toward BbsTheme.Bg by (1 - alpha). alpha=1.0 returns the input, alpha=0.0
