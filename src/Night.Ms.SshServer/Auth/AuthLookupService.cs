@@ -120,9 +120,10 @@ public sealed class AuthLookupService(
             // unknown-handle attempts increment IP-only.
             hasher.VerifyDummy(secret);
             await rateLimiter.RecordFailureAsync(handle, sourceIp, ct);
-            // Signup invitation. The TUI prefills the handle and asks the user to set a
-            // password (the SSH-side password they just typed is NOT used — too easy to
-            // accidentally bootstrap an account with a botched password).
+            // Signup invitation. The TUI prefills the handle from the SSH username; the
+            // transport carries the typed password forward (via PendingAuth.OfferedPassword)
+            // so the signup screen can pre-fill the password fields too — the user just typed
+            // it during SSH auth, no reason to make them type it again.
             return new AuthDecision.SignupRequired(handle);
         }
 

@@ -95,6 +95,7 @@ internal static class BbsSessionRunner
                     var nightMsOptions = scope.ServiceProvider.GetRequiredService<Configuration.NightMsOptions>();
                     var registerResult = app.Run(new RegisterScreen(app, scope.ServiceProvider,
                         signup, ssh.Inner.OfferedFingerprint, ssh.Inner.OfferedAlgorithm, ssh.Inner.OfferedBlob,
+                        ssh.Inner.OfferedPassword,
                         db, sysopBootstrap, passwordHasher, nightMsOptions, art));
                     if (registerResult is User registered)
                     {

@@ -37,7 +37,11 @@ public sealed class BbsSshServer : IAsyncDisposable
         byte[] PublicKeyBlob,
         string? OfferedFingerprint = null,
         string? OfferedAlgorithm = null,
-        byte[]? OfferedBlob = null);
+        byte[]? OfferedBlob = null,
+        // Plaintext password the client typed during this session's password auth, retained
+        // ONLY when the handle was unknown (SignupRequired) so the signup screen can pre-fill
+        // it. Never set on Known auth or publickey auth.
+        string? OfferedPassword = null);
 
     public BbsSshServer(BbsSshServerOptions options, ILogger<BbsSshServer> logger)
     {
@@ -236,11 +240,11 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         return decision switch
         {
-            AuthDecision.Known k => StashAndBuildPrincipal(session, decision, query.Fingerprint, query.Algorithm, query.Blob, offeredFp: null, offeredAlgo: null, offeredBlob: null, knownHandle: k.Handle, signupHandle: null, kind: "publickey", isSysop: k.IsSysop, userId: k.UserId),
+            AuthDecision.Known k => StashAndBuildPrincipal(session, decision, query.Fingerprint, query.Algorithm, query.Blob, offeredFp: null, offeredAlgo: null, offeredBlob: null, offeredPassword: null, knownHandle: k.Handle, signupHandle: null, kind: "publickey", isSysop: k.IsSysop, userId: k.UserId),
             // Signup via publickey: the user is connecting as an unknown handle with a key
             // offered. Accept the auth (so they reach the TUI) and preserve the key blob as
             // OfferedFingerprint/etc so the signup screen can adopt it on creation.
-            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, decision, fingerprint: "", algorithm: "", blob: [], offeredFp: query.Fingerprint, offeredAlgo: query.Algorithm, offeredBlob: query.Blob, knownHandle: null, signupHandle: s.Handle, kind: "publickey-signup", isSysop: false, userId: -1),
+            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, decision, fingerprint: "", algorithm: "", blob: [], offeredFp: query.Fingerprint, offeredAlgo: query.Algorithm, offeredBlob: query.Blob, offeredPassword: null, knownHandle: null, signupHandle: s.Handle, kind: "publickey-signup", isSysop: false, userId: -1),
             AuthDecision.Banned b => RejectBanned(query.Handle, b.Reason),
             AuthDecision.RateLimited r => RejectRateLimited(query.Handle, r.RetryAfter),
             AuthDecision.Refused ref_ => RejectRefused(query.Handle, ref_.Reason, "publickey", session, fingerprint: query.Fingerprint, algorithm: query.Algorithm, blob: query.Blob),
@@ -272,8 +276,10 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         return decision switch
         {
-            AuthDecision.Known k => StashAndBuildPrincipal(session, k with { OfferedFingerprint = carriedOfferedFp, OfferedAlgorithm = carriedOfferedAlgo, OfferedBlob = carriedOfferedBlob }, fingerprint: "", algorithm: "", blob: [], offeredFp: carriedOfferedFp, offeredAlgo: carriedOfferedAlgo, offeredBlob: carriedOfferedBlob, knownHandle: k.Handle, signupHandle: null, kind: "password", isSysop: k.IsSysop, userId: k.UserId),
-            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, s with { OfferedFingerprint = carriedOfferedFp, OfferedAlgorithm = carriedOfferedAlgo, OfferedBlob = carriedOfferedBlob }, fingerprint: "", algorithm: "", blob: [], offeredFp: carriedOfferedFp, offeredAlgo: carriedOfferedAlgo, offeredBlob: carriedOfferedBlob, knownHandle: null, signupHandle: s.Handle, kind: "password-signup", isSysop: false, userId: -1),
+            AuthDecision.Known k => StashAndBuildPrincipal(session, k with { OfferedFingerprint = carriedOfferedFp, OfferedAlgorithm = carriedOfferedAlgo, OfferedBlob = carriedOfferedBlob }, fingerprint: "", algorithm: "", blob: [], offeredFp: carriedOfferedFp, offeredAlgo: carriedOfferedAlgo, offeredBlob: carriedOfferedBlob, offeredPassword: null, knownHandle: k.Handle, signupHandle: null, kind: "password", isSysop: k.IsSysop, userId: k.UserId),
+            // SignupRequired carries the typed password forward so the signup screen can
+            // pre-fill it — the user just typed it during SSH auth, no need to ask again.
+            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, s with { OfferedFingerprint = carriedOfferedFp, OfferedAlgorithm = carriedOfferedAlgo, OfferedBlob = carriedOfferedBlob }, fingerprint: "", algorithm: "", blob: [], offeredFp: carriedOfferedFp, offeredAlgo: carriedOfferedAlgo, offeredBlob: carriedOfferedBlob, offeredPassword: query.Secret, knownHandle: null, signupHandle: s.Handle, kind: "password-signup", isSysop: false, userId: -1),
             AuthDecision.Banned b => RejectBanned(query.Handle, b.Reason),
             AuthDecision.RateLimited r => RejectRateLimited(query.Handle, r.RetryAfter),
             AuthDecision.Refused ref_ => RejectRefused(query.Handle, ref_.Reason, "password", session, fingerprint: "", algorithm: "", blob: []),
@@ -296,7 +302,7 @@ public sealed class BbsSshServer : IAsyncDisposable
             // None auth never accepts a Known login (no credential was presented). The host
             // can still return SignupRequired here to let an unknown handle reach the TUI
             // with no key offered — they'll set a password during signup.
-            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, decision, fingerprint: "", algorithm: "", blob: [], offeredFp: null, offeredAlgo: null, offeredBlob: null, knownHandle: null, signupHandle: s.Handle, kind: "none-signup", isSysop: false, userId: -1),
+            AuthDecision.SignupRequired s => StashAndBuildPrincipal(session, decision, fingerprint: "", algorithm: "", blob: [], offeredFp: null, offeredAlgo: null, offeredBlob: null, offeredPassword: null, knownHandle: null, signupHandle: s.Handle, kind: "none-signup", isSysop: false, userId: -1),
             AuthDecision.Banned b => RejectBanned(query.Handle, b.Reason),
             AuthDecision.RateLimited r => RejectRateLimited(query.Handle, r.RetryAfter),
             AuthDecision.Refused ref_ => RejectRefused(query.Handle, ref_.Reason, "none", session, fingerprint: "", algorithm: "", blob: []),
@@ -313,6 +319,7 @@ public sealed class BbsSshServer : IAsyncDisposable
         string? offeredFp,
         string? offeredAlgo,
         byte[]? offeredBlob,
+        string? offeredPassword,
         string? knownHandle,
         string? signupHandle,
         string kind,
@@ -321,7 +328,7 @@ public sealed class BbsSshServer : IAsyncDisposable
     {
         if (session is not null)
         {
-            _pendingAuth[session] = new PendingAuth(decision, fingerprint, algorithm, blob, offeredFp, offeredAlgo, offeredBlob);
+            _pendingAuth[session] = new PendingAuth(decision, fingerprint, algorithm, blob, offeredFp, offeredAlgo, offeredBlob, offeredPassword);
         }
 
         var identity = new ClaimsIdentity(authenticationType: $"ssh-{kind}");
@@ -409,7 +416,8 @@ public sealed class BbsSshServer : IAsyncDisposable
             pty: null, remoteIPAddress: remoteIp,
             offeredFingerprint: pending?.OfferedFingerprint,
             offeredAlgorithm: pending?.OfferedAlgorithm,
-            offeredBlob: pending?.OfferedBlob);
+            offeredBlob: pending?.OfferedBlob,
+            offeredPassword: pending?.OfferedPassword);
         e.Channel.Request += (s, args) => HandleChannelRequest(bbsSession, args);
     }
 

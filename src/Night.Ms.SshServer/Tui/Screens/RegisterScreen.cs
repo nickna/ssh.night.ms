@@ -39,6 +39,7 @@ public sealed class RegisterScreen : BbsWindow
         string? offeredFingerprint,
         string? offeredAlgorithm,
         byte[]? offeredBlob,
+        string? offeredPassword,
         AppDbContext db,
         SysopBootstrap sysopBootstrap,
         IPasswordHasher hasher,
@@ -70,14 +71,21 @@ public sealed class RegisterScreen : BbsWindow
         }
         var contentTop = art.LineCount + 1;
 
+        // Greeting copy adapts to what came through from SSH auth: if we got both handle
+        // and password, the form is effectively a confirmation step ("review and Register").
+        // Otherwise it's a full signup ask.
+        var hasOfferedPassword = !string.IsNullOrEmpty(offeredPassword);
         var greeting = new Label
         {
             X = 2,
             Y = contentTop,
-            Text =
-                "Welcome to ssh.night.ms. Looks like you're new here.\n" +
-                "Pick a handle, set a password, and you're in. If you SSHed in with\n" +
-                "a key, you can adopt it now so future logins skip the password.",
+            Text = hasOfferedPassword
+                ? "Welcome to ssh.night.ms. We've pre-filled your handle and password\n" +
+                  "from what you typed at the SSH prompt. Review and hit Register to\n" +
+                  "create your account, or edit anything you'd like to change."
+                : "Welcome to ssh.night.ms. Looks like you're new here.\n" +
+                  "Pick a handle, set a password, and you're in. If you SSHed in with\n" +
+                  "a key, you can adopt it now so future logins skip the password.",
         };
         greeting.SetScheme(BbsTheme.Header_);
 
@@ -106,12 +114,19 @@ public sealed class RegisterScreen : BbsWindow
         };
         pwLabel.SetScheme(BbsTheme.Hint);
 
+        // Pre-fill from the password the user just typed at the SSH prompt (when they got
+        // there via password auth). Saves them from re-typing what they already typed —
+        // and matches the user's mental model: "I gave the server my password during ssh,
+        // it should use that." A short SSH password fails the length check on submit, which
+        // is fine: the user sees the error and adjusts.
+        var preFilledPassword = offeredPassword ?? string.Empty;
         var pwField = new TextField
         {
             X = 2,
             Y = contentTop + 8,
             Width = 36,
             Secret = true,
+            Text = preFilledPassword,
         };
         pwField.SetScheme(BbsTheme.Input);
 
@@ -129,6 +144,7 @@ public sealed class RegisterScreen : BbsWindow
             Y = contentTop + 11,
             Width = 36,
             Secret = true,
+            Text = preFilledPassword,
         };
         pwConfirmField.SetScheme(BbsTheme.Input);
 
