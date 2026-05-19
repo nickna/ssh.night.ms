@@ -14,9 +14,9 @@ internal enum CardStyle
 }
 
 // 6×5 colored card sprite shared by every door game. Live styles (Normal / Held / Winning /
-// FaceDown) plus an Empty pre-deal slot. The slots palette is reused so all door games share
-// the same casino look. Cherry-red hearts/diamonds, white-on-black clubs/spades — chosen
-// because the terminal background is black and "real" black would be invisible.
+// FaceDown) plus an Empty pre-deal slot. Face-up cards render as ink-on-ivory like real
+// playing cards: cherry-red hearts/diamonds, near-black clubs/spades on a warm paper body.
+// Empty and FaceDown keep the original black-background look (placeholder + dealer hole back).
 //
 // Layout (cols 0-5, rows 0-4):
 //   row 0: ┌────┐   border
@@ -36,11 +36,15 @@ internal static class CardSprites
     private static readonly Rune TextPresentationSelector = new(0xFE0E);
 
     private static readonly ArtColor Black = SlotSymbolSprites.Palette.Black;
-    private static readonly ArtColor White = SlotSymbolSprites.Palette.BrightWhite;
     private static readonly ArtColor Gold = SlotSymbolSprites.Palette.Gold;
     private static readonly ArtColor BarGold = SlotSymbolSprites.Palette.BarGold;
     private static readonly ArtColor Red = SlotSymbolSprites.Palette.CherryRed;
     private static readonly ArtColor DimGray = SlotSymbolSprites.Palette.DimGray;
+
+    // Card-local: warm ivory body and near-black ink. True #000000 can render oddly on some
+    // clients against a near-black bg; RGB(20,20,20) reads black to the eye and dodges that.
+    private static readonly ArtColor Paper = new(245, 240, 225);
+    private static readonly ArtColor Ink = new(20, 20, 20);
 
     public static Cell[,] Build(Card? card, CardStyle style)
     {
@@ -49,34 +53,28 @@ internal static class CardSprites
         if (card is null || style == CardStyle.Empty)
             return BuildEmpty();
 
-        ArtColor borderColor;
-        ArtColor rankColor;
-        var borderStyle = ArtStyle.None;
+        var suitColor = card.Suit is Suit.Hearts or Suit.Diamonds ? Red : Ink;
+        var rankColor = suitColor;
         var rankStyle = ArtStyle.None;
+        var borderColor = Ink;
+        var borderStyle = ArtStyle.None;
 
         switch (style)
         {
             case CardStyle.Held:
                 borderColor = BarGold;
-                rankColor = White;
+                borderStyle = ArtStyle.Bold;
                 break;
             case CardStyle.Winning:
                 borderColor = Gold;
-                rankColor = Gold;
                 borderStyle = ArtStyle.Bold;
                 rankStyle = ArtStyle.Bold;
                 break;
-            default:
-                borderColor = White;
-                rankColor = White;
-                break;
         }
 
-        var suitColor = card.Suit is Suit.Hearts or Suit.Diamonds ? Red : White;
-
         var grid = new Cell[Width, Height];
-        FillInterior(grid, White);
-        DrawBorder(grid, borderColor, borderStyle);
+        FillInterior(grid, Ink, Paper);
+        DrawBorder(grid, borderColor, Paper, borderStyle);
 
         var rank = card.RankLabel;
         var pip = card.SuitGlyph;
@@ -84,20 +82,20 @@ internal static class CardSprites
         if (rank.Length == 1)
         {
             // True diagonal corners: upper-left (1,1) and lower-right (4,3).
-            SetGlyph(grid, 1, 1, rank[0], rankColor, rankStyle);
-            SetGlyph(grid, 4, 3, rank[0], rankColor, rankStyle);
+            SetGlyph(grid, 1, 1, rank[0], rankColor, Paper, rankStyle);
+            SetGlyph(grid, 4, 3, rank[0], rankColor, Paper, rankStyle);
         }
         else
         {
             // "10": top-left spans cols 1-2, bottom-right spans cols 3-4 (rotational mirror).
-            SetGlyph(grid, 1, 1, rank[0], rankColor, rankStyle);
-            SetGlyph(grid, 2, 1, rank[1], rankColor, rankStyle);
-            SetGlyph(grid, 3, 3, rank[0], rankColor, rankStyle);
-            SetGlyph(grid, 4, 3, rank[1], rankColor, rankStyle);
+            SetGlyph(grid, 1, 1, rank[0], rankColor, Paper, rankStyle);
+            SetGlyph(grid, 2, 1, rank[1], rankColor, Paper, rankStyle);
+            SetGlyph(grid, 3, 3, rank[0], rankColor, Paper, rankStyle);
+            SetGlyph(grid, 4, 3, rank[1], rankColor, Paper, rankStyle);
         }
 
         // Center pip. Bold so it reads even when ranks dominate the corners.
-        SetSuit(grid, 2, 2, pip, suitColor, ArtStyle.Bold);
+        SetSuit(grid, 2, 2, pip, suitColor, Paper, ArtStyle.Bold);
 
         return grid;
     }
@@ -105,8 +103,8 @@ internal static class CardSprites
     private static Cell[,] BuildEmpty()
     {
         var grid = new Cell[Width, Height];
-        FillInterior(grid, DimGray);
-        DrawBorder(grid, DimGray, ArtStyle.None);
+        FillInterior(grid, DimGray, Black);
+        DrawBorder(grid, DimGray, Black, ArtStyle.None);
         return grid;
     }
 
@@ -114,42 +112,42 @@ internal static class CardSprites
     private static Cell[,] BuildFaceDown()
     {
         var grid = new Cell[Width, Height];
-        FillInterior(grid, Gold);
-        DrawBorder(grid, Gold, ArtStyle.None);
+        FillInterior(grid, Gold, Black);
+        DrawBorder(grid, Gold, Black, ArtStyle.None);
         for (var y = 1; y < Height - 1; y++)
             for (var x = 1; x < Width - 1; x++)
                 grid[x, y] = new Cell(new Rune('▒'), Gold, Black, ArtStyle.Bold);
         return grid;
     }
 
-    private static void FillInterior(Cell[,] grid, ArtColor fg)
+    private static void FillInterior(Cell[,] grid, ArtColor fg, ArtColor bg)
     {
         for (var y = 0; y < Height; y++)
             for (var x = 0; x < Width; x++)
-                grid[x, y] = new Cell(new Rune(' '), fg, Black, ArtStyle.None);
+                grid[x, y] = new Cell(new Rune(' '), fg, bg, ArtStyle.None);
     }
 
-    private static void DrawBorder(Cell[,] grid, ArtColor color, ArtStyle style)
+    private static void DrawBorder(Cell[,] grid, ArtColor color, ArtColor bg, ArtStyle style)
     {
-        SetGlyph(grid, 0, 0, '┌', color, style);
-        SetGlyph(grid, Width - 1, 0, '┐', color, style);
-        SetGlyph(grid, 0, Height - 1, '└', color, style);
-        SetGlyph(grid, Width - 1, Height - 1, '┘', color, style);
+        SetGlyph(grid, 0, 0, '┌', color, bg, style);
+        SetGlyph(grid, Width - 1, 0, '┐', color, bg, style);
+        SetGlyph(grid, 0, Height - 1, '└', color, bg, style);
+        SetGlyph(grid, Width - 1, Height - 1, '┘', color, bg, style);
         for (var x = 1; x < Width - 1; x++)
         {
-            SetGlyph(grid, x, 0, '─', color, style);
-            SetGlyph(grid, x, Height - 1, '─', color, style);
+            SetGlyph(grid, x, 0, '─', color, bg, style);
+            SetGlyph(grid, x, Height - 1, '─', color, bg, style);
         }
         for (var y = 1; y < Height - 1; y++)
         {
-            SetGlyph(grid, 0, y, '│', color, style);
-            SetGlyph(grid, Width - 1, y, '│', color, style);
+            SetGlyph(grid, 0, y, '│', color, bg, style);
+            SetGlyph(grid, Width - 1, y, '│', color, bg, style);
         }
     }
 
-    private static void SetGlyph(Cell[,] grid, int x, int y, char glyph, ArtColor fg, ArtStyle style)
-        => grid[x, y] = new Cell(new Rune(glyph), fg, Black, style);
+    private static void SetGlyph(Cell[,] grid, int x, int y, char glyph, ArtColor fg, ArtColor bg, ArtStyle style)
+        => grid[x, y] = new Cell(new Rune(glyph), fg, bg, style);
 
-    private static void SetSuit(Cell[,] grid, int x, int y, char pip, ArtColor fg, ArtStyle style)
-        => grid[x, y] = new Cell(new Rune(pip), fg, Black, style, TextPresentationSelector);
+    private static void SetSuit(Cell[,] grid, int x, int y, char pip, ArtColor fg, ArtColor bg, ArtStyle style)
+        => grid[x, y] = new Cell(new Rune(pip), fg, bg, style, TextPresentationSelector);
 }
