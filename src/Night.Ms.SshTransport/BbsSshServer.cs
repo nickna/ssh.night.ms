@@ -206,7 +206,13 @@ public sealed class BbsSshServer : IAsyncDisposable
 
         return decision switch
         {
-            AuthDecision.Known or AuthDecision.SignupRequired => new ClaimsPrincipal(new ClaimsIdentity()),
+            // Accept the offered key AND stash it. The stash is the safety net for the case
+            // where phase 2 (HandlePublicKeyAsync) never runs — e.g., DevTunnels rejects the
+            // signature, or the client falls through to password before signing — and the
+            // user ends up in password-signup. Without this stash, password-signup wouldn't
+            // know about the key the client just offered and the signup screen couldn't
+            // adopt it. If phase 2 does run, it overwrites this row with the full decision.
+            AuthDecision.Known or AuthDecision.SignupRequired => AcceptAndRememberOfferedKey(session, query.Fingerprint, query.Algorithm, query.Blob),
             _ => RememberOfferedKey(session, query.Fingerprint, query.Algorithm, query.Blob),
         };
     }
@@ -226,6 +232,27 @@ public sealed class BbsSshServer : IAsyncDisposable
             OfferedAlgorithm: algorithm,
             OfferedBlob: blob);
         return null;
+    }
+
+    // Returns the "yes, proceed to phase 2" empty principal AND stashes the offered key so
+    // the offered key survives a possible password fallback later in the session. The
+    // placeholder Decision is overwritten by whatever method ultimately authenticates the
+    // session (phase 2 publickey, or password); it's only read at channel-open if no other
+    // auth ever wrote a row, which shouldn't be reachable on a successful session.
+    private ClaimsPrincipal AcceptAndRememberOfferedKey(SshSession? session, string fingerprint, string algorithm, byte[] blob)
+    {
+        if (session is not null && !string.IsNullOrEmpty(fingerprint) && blob.Length > 0)
+        {
+            _pendingAuth[session] = new PendingAuth(
+                Decision: new AuthDecision.Refused("publickey-query: awaiting signature or fallback"),
+                Fingerprint: "",
+                KeyAlgorithm: "",
+                PublicKeyBlob: [],
+                OfferedFingerprint: fingerprint,
+                OfferedAlgorithm: algorithm,
+                OfferedBlob: blob);
+        }
+        return new ClaimsPrincipal(new ClaimsIdentity());
     }
 
     private async Task<ClaimsPrincipal?> HandlePublicKeyAsync(AuthQuery.PublicKey query, SshSession? session, CancellationToken ct)
