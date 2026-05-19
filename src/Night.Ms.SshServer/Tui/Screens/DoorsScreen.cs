@@ -73,7 +73,7 @@ internal sealed class DoorsScreen : BbsWindow
         _descriptions = descriptions;
 
         var carouselY = 4;
-        var carousel = new LobbyCarouselView<Action>(entries)
+        var carousel = new LobbyCarouselView<Action>(app, entries)
         {
             X = 0, Y = carouselY, Width = Dim.Fill(),
         };

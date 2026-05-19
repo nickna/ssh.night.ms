@@ -93,7 +93,7 @@ public sealed class LobbyScreen : BbsWindow
             .ToList();
 
         var carouselY = contentTop + 2;
-        var carousel = new LobbyCarouselView<LobbyNavigation>(carouselEntries)
+        var carousel = new LobbyCarouselView<LobbyNavigation>(app, carouselEntries)
         {
             X = 0,
             Y = carouselY,
