@@ -43,6 +43,14 @@ internal static class SgrParser
 
             if (ch == '\r')
             {
+                // CRLF (Windows-style) is one newline, not "reset-row + newline" — that
+                // mistakenly wiped the top row of every 2-row ANS file we shipped.
+                if (i + 1 < span.Length && span[i + 1] == '\n')
+                {
+                    rows.Add(new List<Cell>());
+                    i += 2;
+                    continue;
+                }
                 rows[^1].Clear();
                 i++;
                 continue;

@@ -167,6 +167,18 @@ public class SgrParserTests
     }
 
     [Fact]
+    public void Crlf_is_one_newline_not_row_reset()
+    {
+        var grid = SgrParser.Parse("ab\r\ncd");
+
+        Assert.Equal(2, grid.Height);
+        Assert.Equal(new Rune('a'), grid[0, 0].Glyph);
+        Assert.Equal(new Rune('b'), grid[1, 0].Glyph);
+        Assert.Equal(new Rune('c'), grid[0, 1].Glyph);
+        Assert.Equal(new Rune('d'), grid[1, 1].Glyph);
+    }
+
+    [Fact]
     public void Trailing_newline_is_trimmed()
     {
         var grid = SgrParser.Parse("one\ntwo\n");

@@ -450,8 +450,14 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         var innerLeft = leftX + 1;
 
         var icon = entry.Icon;
-        var iconRows = Math.Min(2, icon.Height);
-        var iconStartY = isSelectedStyle ? topY + 2 : topY + 1;
+        // Interior rows available for the icon = card height minus top border, bottom border,
+        // and label row. The selected card (h=7) has 4; the unselected card (h=5) has 2. Center
+        // the icon within whatever's available so 2-row icons keep their old padding above in
+        // the selected card, while taller icons (e.g. the 3-row weather glyph) render fully
+        // instead of getting clipped to 2 rows.
+        var iconAreaRows = Math.Max(0, height - 3);
+        var iconRows = Math.Min(iconAreaRows, icon.Height);
+        var iconStartY = topY + 1 + (iconAreaRows - iconRows) / 2;
         var iconCols = Math.Min(icon.Width, innerWidth);
         var iconStartX = innerLeft + (innerWidth - iconCols) / 2;
         for (var iy = 0; iy < iconRows; iy++)
