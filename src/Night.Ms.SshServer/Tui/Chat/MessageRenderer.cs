@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
 using Night.Ms.SshServer.Tui.Art;
 
@@ -26,6 +27,12 @@ internal static class MessageRenderer
         @"|(?<italic>_(?=[^\s_])[^_\n]*?(?<=[^\s_])_)" +
         @"|(?<code>`[^`\n]+?`)",
         RegexOptions.Compiled);
+
+    // Trigger characters that any Inline match must include. If the body has none of these,
+    // we can skip the regex entirely (which otherwise allocates a MatchCollection per call)
+    // and emit the body as a single plain run. SearchValues is vectorized for repeated
+    // multi-char IndexOfAny calls — significantly faster than a manual loop.
+    private static readonly SearchValues<char> InlineTriggers = SearchValues.Create("@*_`");
 
     // All per-token colors live in ChatPalette so the renderer can be re-themed in one file.
 
@@ -138,6 +145,15 @@ internal static class MessageRenderer
     {
         var text = EmojiTable.Substitute(body ?? string.Empty);
         if (text.Length == 0) return false;
+
+        // Fast path: most chat messages are plain prose with no @mention, *bold*, _italic_,
+        // or `code` markers. The regex always allocates a MatchCollection even on no-match,
+        // so a single IndexOfAny over the trigger set lets us skip it for the common case.
+        if (text.AsSpan().IndexOfAny(InlineTriggers) < 0)
+        {
+            runs.Add(new ChatRun(text, ArtColor.DefaultForeground, baseStyle));
+            return false;
+        }
 
         var selfMentioned = false;
         var cursor = 0;
