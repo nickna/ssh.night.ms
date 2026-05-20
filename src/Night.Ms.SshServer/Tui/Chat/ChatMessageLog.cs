@@ -13,24 +13,32 @@ namespace Night.Ms.SshServer.Tui.Chat;
 internal sealed class ChatMessageLog
 {
     private readonly List<MessageRef> _messages = new();
+    private readonly Dictionary<long, MessageRef> _byId = new();
     private readonly Dictionary<long, Dictionary<string, HashSet<long>>> _reactions = new();
 
     public IReadOnlyList<MessageRef> Messages => _messages;
     public int Count => _messages.Count;
 
-    public MessageRef? Find(long messageId)
+    public MessageRef? Find(long messageId) => _byId.GetValueOrDefault(messageId);
+
+    public bool Contains(long messageId) => _byId.ContainsKey(messageId);
+
+    public void Add(MessageRef msgRef)
     {
-        foreach (var m in _messages) if (m.MessageId == messageId) return m;
-        return null;
+        _messages.Add(msgRef);
+        _byId[msgRef.MessageId] = msgRef;
     }
 
-    public bool Contains(long messageId) => Find(messageId) is not null;
+    public void Insert(int index, MessageRef msgRef)
+    {
+        _messages.Insert(index, msgRef);
+        _byId[msgRef.MessageId] = msgRef;
+    }
 
-    public void Add(MessageRef msgRef) => _messages.Add(msgRef);
-    public void Insert(int index, MessageRef msgRef) => _messages.Insert(index, msgRef);
     public void Clear()
     {
         _messages.Clear();
+        _byId.Clear();
         _reactions.Clear();
     }
 
