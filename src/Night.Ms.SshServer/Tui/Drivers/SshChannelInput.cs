@@ -19,33 +19,26 @@ internal sealed class SshChannelInput : InputImpl<char>
     private readonly ConcurrentQueue<char> _pending = new();
     private int _pendingCount;
     private readonly CancellationTokenSource _pumpCts = new();
-    private Task? _pumpTask;
+    private readonly Task _pumpTask;
 
     public SshChannelInput(Stream stream)
     {
         _stream = stream;
+        // Start the pump in the ctor — the old lazy-start variant had a non-atomic
+        // "is _pumpTask null?" check that could race two callers into starting two pumps
+        // reading the same stream. Single deterministic start here avoids the race entirely.
+        _pumpTask = Task.Run(PumpAsync);
     }
 
-    public override bool Peek()
-    {
-        EnsurePumpStarted();
-        return !_pending.IsEmpty;
-    }
+    public override bool Peek() => !_pending.IsEmpty;
 
     public override IEnumerable<char> Read()
     {
-        EnsurePumpStarted();
         while (_pending.TryDequeue(out var c))
         {
             Interlocked.Decrement(ref _pendingCount);
             yield return c;
         }
-    }
-
-    private void EnsurePumpStarted()
-    {
-        if (_pumpTask is not null) return;
-        _pumpTask = Task.Run(PumpAsync);
     }
 
     private async Task PumpAsync()
@@ -100,7 +93,7 @@ internal sealed class SshChannelInput : InputImpl<char>
         try
         {
             _pumpCts.Cancel();
-            _pumpTask?.Wait(TimeSpan.FromMilliseconds(200));
+            _pumpTask.Wait(TimeSpan.FromMilliseconds(200));
         }
         catch
         {

@@ -91,7 +91,7 @@ public sealed class BbsStatusBar : View
 
     // Updates the middle "reserved slot" — call from screens or background services to surface
     // ambient counters (users online, unread DMs, etc.). Empty string clears it.
-    public void SetSlot(string text) => _app.Invoke(() =>
+    public void SetSlot(string text) => SafeInvoke(() =>
     {
         _slot.Text = text ?? string.Empty;
         _slot.SetNeedsDraw();
@@ -102,6 +102,19 @@ public sealed class BbsStatusBar : View
     // periodic tick.
     public void Refresh() =>
         RefreshWeatherAsync().FireAndLog(_services, nameof(RefreshWeatherAsync));
+
+    // _app.Invoke queues work that may execute after this status bar has been disposed (the
+    // user navigated away, the session torn down, etc.). Double-checking _disposed inside
+    // the lambda prevents the queued action from touching a disposed view.
+    private void SafeInvoke(Action action)
+    {
+        if (_disposed) return;
+        _app.Invoke(() =>
+        {
+            if (_disposed) return;
+            action();
+        });
+    }
 
     // Marks the weather segment as clickable: switches it to the bright-cyan Hint scheme
     // (matching the right-side brand label) as a visible affordance, then wires the click
@@ -115,7 +128,7 @@ public sealed class BbsStatusBar : View
     private bool Tick()
     {
         if (_disposed) return false;
-        _app.Invoke(() =>
+        SafeInvoke(() =>
         {
             _clock.Text = _user.FormatClockWithSeconds(DateTimeOffset.Now);
             _clock.SetNeedsDraw();
@@ -127,13 +140,13 @@ public sealed class BbsStatusBar : View
     {
         if (_weather is null)
         {
-            _app.Invoke(() => _weatherLabel.Text = "weather: (offline)");
+            SafeInvoke(() => _weatherLabel.Text = "weather: (offline)");
             return;
         }
 
         if (_user?.LocationLatitude is not double lat || _user.LocationLongitude is not double lon)
         {
-            _app.Invoke(() =>
+            SafeInvoke(() =>
             {
                 _weatherLabel.Text = "weather: set a city in profile";
                 _weatherLabel.SetNeedsDraw();
@@ -148,7 +161,7 @@ public sealed class BbsStatusBar : View
                 longitude: lon,
                 label: _user.LocationCanonical ?? _user.Location,
                 cancellationToken: _shutdown.Token).ConfigureAwait(false);
-            _app.Invoke(() =>
+            SafeInvoke(() =>
             {
                 _weatherLabel.Text = snap is null
                     ? "weather: (unavailable)"
@@ -159,7 +172,7 @@ public sealed class BbsStatusBar : View
         catch (OperationCanceledException) { /* shutting down */ }
         catch (Exception ex)
         {
-            _app.Invoke(() => _weatherLabel.Text = $"weather: error ({ex.GetType().Name})");
+            SafeInvoke(() => _weatherLabel.Text = $"weather: error ({ex.GetType().Name})");
         }
     }
 

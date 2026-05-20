@@ -62,7 +62,7 @@ internal sealed class BbsChatStatusLine : View
         var col = 0;
         foreach (var run in _line.Runs)
         {
-            SetAttribute(ToAttribute(run));
+            SetAttribute(AttributeCache.For(run.Foreground, run.Style));
             foreach (var rune in run.Text.EnumerateRunes())
             {
                 if (col >= width) return true;
@@ -74,18 +74,5 @@ internal sealed class BbsChatStatusLine : View
         return true;
     }
 
-    private static Attribute ToAttribute(ChatRun run)
-    {
-        var fg = new Color(run.Foreground.R, run.Foreground.G, run.Foreground.B);
-        var bg = new Color(0, 0, 0);
-        var ts = TextStyle.None;
-        if (run.Style.HasFlag(ArtStyle.Bold))      ts |= TextStyle.Bold;
-        if (run.Style.HasFlag(ArtStyle.Italic))    ts |= TextStyle.Italic;
-        if (run.Style.HasFlag(ArtStyle.Underline)) ts |= TextStyle.Underline;
-        return new Attribute(fg, bg, ts);
-    }
-
-    private static readonly Attribute Default = new(
-        new Color(ArtColor.DefaultForeground.R, ArtColor.DefaultForeground.G, ArtColor.DefaultForeground.B),
-        new Color(0, 0, 0));
+    private static readonly Attribute Default = AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None);
 }

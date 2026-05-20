@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Drawing;
 using System.Text;
 using Terminal.Gui.Drivers;
@@ -9,12 +8,24 @@ namespace Night.Ms.SshServer.Tui.Drivers;
 // OutputBase already handles the dirty-cell walk + sequence batching; we only have to (a) push
 // bytes to the channel and (b) report the PTY size that came in via the SSH session's pty-req
 // (and, later, window-change) events.
+//
+// Write strategy: a single session-scoped UTF-8 byte buffer accumulates every fragment produced
+// during a frame, and Flush() drains the whole frame in one _stream.Write + _stream.Flush call.
+// The earlier shape rented from ArrayPool and called _stream.Write *per SGR fragment* —
+// OutputBase emits dozens of fragments per frame, so the old shape was N small stream writes
+// per frame per session. This shape is one large write per frame per session.
 internal sealed class SshChannelOutput : OutputBase, IOutput
 {
     private readonly Stream _stream;
     private readonly Func<Size> _getSize;
     private Cursor _currentCursor = new();
     private bool _disposed;
+
+    // Reusable per-session UTF-8 write buffer. Grows monotonically (Array.Resize) to the
+    // largest frame seen — typically settles at a few KB and stays there. 16 KB initial is
+    // enough for a full 80×24 repaint with SGR changes.
+    private byte[] _outBuf = new byte[16 * 1024];
+    private int _outLen;
 
     public SshChannelOutput(Stream stream, Func<Size> getSize)
     {
@@ -108,34 +119,37 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         WriteRawCore(text.AsSpan());
     }
 
+    // Encodes text directly into the session-scoped _outBuf at _outLen, growing the buffer if
+    // needed. No allocation, no syscall — bytes sit in the buffer until Flush().
     private void WriteRawCore(ReadOnlySpan<char> text)
     {
         if (_disposed || text.IsEmpty) return;
 
-        // Rent a UTF-8 byte buffer from the shared pool instead of allocating per call.
-        // Terminal.Gui's OutputBase invokes this many times per frame (one call per SGR
-        // change), and across hundreds of concurrent sessions the old shape (text.ToArray()
-        // + Encoding.UTF8.GetBytes(char[])) was a steady GC source — two allocations per
-        // call, multiplied by the per-frame cell-change count.
         var byteCount = Encoding.UTF8.GetByteCount(text);
-        var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
-        try
+        var needed = _outLen + byteCount;
+        if (needed > _outBuf.Length)
         {
-            var written = Encoding.UTF8.GetBytes(text, buffer);
-            _stream.Write(buffer, 0, written);
+            // Grow by powers of two so repeated grows stay O(1) amortized. Caps at whatever
+            // the largest frame demands; subsequent frames reuse the buffer in place.
+            var newSize = _outBuf.Length;
+            while (newSize < needed) newSize *= 2;
+            Array.Resize(ref _outBuf, newSize);
         }
-        catch (Exception)
-        {
-            // The channel may have closed under us — swallow so the main loop can shut down cleanly.
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+
+        var written = Encoding.UTF8.GetBytes(text, _outBuf.AsSpan(_outLen));
+        _outLen += written;
     }
 
+    // Drains the accumulated buffer in one _stream.Write + _stream.Flush. Called at the end
+    // of Write(IOutputBuffer) (per frame) and from ctor/Dispose for the alt-screen toggles.
     private void Flush()
     {
+        if (_outLen > 0)
+        {
+            try { _stream.Write(_outBuf, 0, _outLen); }
+            catch { /* channel closed — swallow so the main loop can shut down cleanly */ }
+            _outLen = 0;
+        }
         try { _stream.Flush(); }
         catch { /* channel closed */ }
     }

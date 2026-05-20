@@ -26,6 +26,12 @@ internal sealed class ChatLogView : View
     // can't OOM the session.
     private const int MaxEntries = 5000;
 
+    // Once _entries fills to MaxEntries, every new Append would otherwise trigger
+    // RemoveRange(0, 1) which shifts ~5000 list slots down by one — O(N) per insert in
+    // steady state. Letting the list overflow by TrimSlack before trimming amortizes the
+    // shift to one batch per TrimSlack inserts, so steady-state insert cost stays O(1).
+    private const int TrimSlack = 64;
+
     private readonly List<Entry> _entries = new();
     private readonly List<DisplayRow> _displayRows = new();
     // O(1) message-id → entry lookup for in-place mutations (edits / reactions / images).
@@ -49,7 +55,7 @@ internal sealed class ChatLogView : View
         var entry = new Entry { MessageId = messageId, Line = line };
         _entries.Add(entry);
         if (messageId is long mid) _entryById[mid] = entry;
-        if (_entries.Count > MaxEntries)
+        if (_entries.Count > MaxEntries + TrimSlack)
         {
             var trim = _entries.Count - MaxEntries;
             for (var i = 0; i < trim; i++)
@@ -189,7 +195,7 @@ internal sealed class ChatLogView : View
         var col = 0;
         foreach (var seg in row.Segments)
         {
-            SetAttribute(ToAttribute(seg));
+            SetAttribute(seg.Attr);
             foreach (var rune in seg.Text.EnumerateRunes())
             {
                 if (col >= width) return;
@@ -199,19 +205,15 @@ internal sealed class ChatLogView : View
         }
     }
 
-    // Image rows carry a per-cell (fg, bg) pair from the half-block renderer; paint each
-    // cell with its own attribute so background colors are honored (unlike text rows which
-    // always assume black background).
+    // Image rows carry pre-baked Attribute per cell (computed when the row is built in
+    // BuildEntryRows). Painting is a flat indexed walk — no per-cell color/style construction.
     private void PaintImageRow(ImageDisplayRow row, int y, int width)
     {
-        for (var col = 0; col < row.Cells.Count && col < width; col++)
+        var len = Math.Min(row.Glyphs.Length, width);
+        for (var col = 0; col < len; col++)
         {
-            var cell = row.Cells[col];
-            var fg = new Color(cell.Foreground.R, cell.Foreground.G, cell.Foreground.B);
-            var bg = new Color(cell.Background.R, cell.Background.G, cell.Background.B);
-            var style = cell.Style.HasFlag(ArtStyle.Bold) ? TextStyle.Bold : TextStyle.None;
-            SetAttribute(new Attribute(fg, bg, style));
-            AddRune(col, y, cell.Glyph);
+            SetAttribute(row.Attrs[col]);
+            AddRune(col, y, row.Glyphs[col]);
         }
     }
 
@@ -244,15 +246,22 @@ internal sealed class ChatLogView : View
         var rows = new List<DisplayRow>();
         WrapInto(rows, entry.Line, width);
         // Image rows render after the message body and before any reactions. One display
-        // row per source CellGrid row; widths > viewport clip rather than wrap.
+        // row per source CellGrid row; widths > viewport clip rather than wrap. Pre-bake the
+        // Attribute per cell here so the paint loop is a plain indexed walk.
         foreach (var grid in entry.Images)
         {
             for (var y = 0; y < grid.Height; y++)
             {
                 var rowWidth = Math.Min(grid.Width, width);
-                var cells = new Cell[rowWidth];
-                for (var x = 0; x < rowWidth; x++) cells[x] = grid[x, y];
-                rows.Add(new ImageDisplayRow(cells));
+                var attrs = new Attribute[rowWidth];
+                var glyphs = new Rune[rowWidth];
+                for (var x = 0; x < rowWidth; x++)
+                {
+                    var cell = grid[x, y];
+                    attrs[x] = AttributeCache.ForCell(cell.Foreground, cell.Background, cell.Style);
+                    glyphs[x] = cell.Glyph;
+                }
+                rows.Add(new ImageDisplayRow(attrs, glyphs));
             }
         }
         if (entry.Reactions.Count > 0)
@@ -270,7 +279,7 @@ internal sealed class ChatLogView : View
         var segments = new List<RunSegment>();
         var col = 0;
         var indent = "  ";
-        segments.Add(new RunSegment(indent, ArtColor.DefaultForeground, ArtStyle.None));
+        segments.Add(new RunSegment(indent, AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None)));
         col += indent.Length;
 
         var sep = "  ";
@@ -279,7 +288,7 @@ internal sealed class ChatLogView : View
         {
             if (!first)
             {
-                segments.Add(new RunSegment(sep, ArtColor.DefaultForeground, ArtStyle.None));
+                segments.Add(new RunSegment(sep, AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None)));
                 col += sep.Length;
             }
             first = false;
@@ -288,7 +297,7 @@ internal sealed class ChatLogView : View
             if (col + emojiWidth > width) break; // truncate rather than wrap reaction footer
             var style = r.ByMe ? ArtStyle.Bold : ArtStyle.None;
             var color = r.ByMe ? ChatPalette.ReactionByMe : ChatPalette.ReactionByOther;
-            segments.Add(new RunSegment(emojiText, color, style));
+            segments.Add(new RunSegment(emojiText, AttributeCache.For(color, style)));
             col += emojiWidth;
         }
 
@@ -318,13 +327,13 @@ internal sealed class ChatLogView : View
                     Flush();
                     if (current.Count == 0)
                     {
-                        current.Add(new RunSegment(continuationIndent, ArtColor.DefaultForeground, ArtStyle.None));
+                        current.Add(new RunSegment(continuationIndent, AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None)));
                         currentWidth = continuationIndent.Length;
                     }
                     sliceEnd = TruncateToWidth(word, width - currentWidth);
                     if (sliceEnd == 0) sliceEnd = 1;
                 }
-                current.Add(new RunSegment(word[..sliceEnd], fg, style));
+                current.Add(new RunSegment(word[..sliceEnd], AttributeCache.For(fg, style)));
                 Flush();
                 word = word[sliceEnd..];
             }
@@ -333,10 +342,10 @@ internal sealed class ChatLogView : View
             if (currentWidth + needed > width && current.Count > 0)
             {
                 Flush();
-                current.Add(new RunSegment(continuationIndent, ArtColor.DefaultForeground, ArtStyle.None));
+                current.Add(new RunSegment(continuationIndent, AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None)));
                 currentWidth = continuationIndent.Length;
             }
-            current.Add(new RunSegment(word, fg, style));
+            current.Add(new RunSegment(word, AttributeCache.For(fg, style)));
             currentWidth += needed;
         }
 
@@ -359,7 +368,7 @@ internal sealed class ChatLogView : View
                 {
                     var space = i;
                     while (i < text.Length && text[i] == ' ') i++;
-                    var run2 = new RunSegment(text[space..i], run.Foreground, run.Style);
+                    var run2 = new RunSegment(text[space..i], AttributeCache.For(run.Foreground, run.Style));
                     if (currentWidth + (i - space) > width && current.Count > 0) Flush();
                     if (currentWidth + (i - space) <= width)
                     {
@@ -401,20 +410,7 @@ internal sealed class ChatLogView : View
         return idx;
     }
 
-    private static Attribute ToAttribute(RunSegment seg)
-    {
-        var fg = new Color(seg.Foreground.R, seg.Foreground.G, seg.Foreground.B);
-        var bg = new Color(0, 0, 0);
-        var ts = TextStyle.None;
-        if (seg.Style.HasFlag(ArtStyle.Bold))      ts |= TextStyle.Bold;
-        if (seg.Style.HasFlag(ArtStyle.Italic))    ts |= TextStyle.Italic;
-        if (seg.Style.HasFlag(ArtStyle.Underline)) ts |= TextStyle.Underline;
-        return new Attribute(fg, bg, ts);
-    }
-
-    private static readonly Attribute Default = new(
-        new Color(ArtColor.DefaultForeground.R, ArtColor.DefaultForeground.G, ArtColor.DefaultForeground.B),
-        new Color(0, 0, 0));
+    private static readonly Attribute Default = AttributeCache.For(ArtColor.DefaultForeground, ArtStyle.None);
 
     // Owned by the view (not exposed to callers) so future fields can be added without
     // breaking the public surface. Use Append / TryReplace / TrySetReactions to mutate.
@@ -434,11 +430,15 @@ internal sealed class ChatLogView : View
         public int CachedWidth;
     }
 
-    private readonly record struct RunSegment(string Text, ArtColor Foreground, ArtStyle Style);
+    // Attribute is baked once at construction by AttributeCache so paint loops just SetAttribute
+    // directly — no per-frame Color/Attribute allocation. The cache hits 100% after warmup
+    // because the palette is small and bounded.
+    private readonly record struct RunSegment(string Text, Attribute Attr);
 
     // Display rows are tagged so the painter can switch between text (default-black bg) and
-    // image rows (per-cell bg from the half-block renderer).
+    // image rows (per-cell bg from the half-block renderer). Image rows store pre-baked
+    // Attribute + Rune arrays so the paint loop is a flat indexed walk.
     private abstract record DisplayRow;
     private sealed record TextDisplayRow(IReadOnlyList<RunSegment> Segments) : DisplayRow;
-    private sealed record ImageDisplayRow(IReadOnlyList<Cell> Cells) : DisplayRow;
+    private sealed record ImageDisplayRow(Attribute[] Attrs, Rune[] Glyphs) : DisplayRow;
 }

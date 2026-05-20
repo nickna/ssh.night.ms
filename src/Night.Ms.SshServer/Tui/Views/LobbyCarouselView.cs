@@ -53,8 +53,17 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
     // Tween state. _animTimerToken is null when idle.
     private object? _animTimerToken;
     private DateTime _animStartUtc;
-    private Dictionary<int, CardGeom> _animFrom = new();
-    private Dictionary<int, CardGeom> _animTo = new();
+    private Dictionary<int, CardGeom> _animFrom = new(16);
+    private Dictionary<int, CardGeom> _animTo = new(16);
+
+    // Reusable scratch buffers — refilled in place each frame instead of allocating new
+    // collections. The paint path runs at ~30 FPS during animations, and the previous shape
+    // built a fresh Dictionary + LINQ Union + OrderByDescending.ToList() per frame.
+    // _geomBuf is non-readonly because RetargetTo swaps it with _animFrom to avoid
+    // reallocating either dictionary on user input.
+    private Dictionary<int, CardGeom> _geomBuf = new(16);
+    private readonly List<KeyValuePair<int, CardGeom>> _sortBuf = new(16);
+    private readonly List<int> _idxBuf = new(16);
 
     private struct CardGeom
     {
@@ -119,25 +128,35 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
 
         // Snapshot the current visual state as the new tween origin. If a tween is in flight,
         // this captures the half-way interpolated geometry; if idle, it's just the static
-        // layout for the current _index.
-        _animFrom = SnapshotCurrentGeom();
+        // layout for the current _index. We write into _geomBuf and swap with _animFrom so
+        // neither dictionary is reallocated.
+        SnapshotCurrentGeomInto(_geomBuf);
+        (_animFrom, _geomBuf) = (_geomBuf, _animFrom);
+        _geomBuf.Clear();
 
         _index = newIndex;
-        _animTo = BuildTargetGeom(direction);
+        _animTo.Clear();
+        BuildTargetGeomInto(_animTo);
 
         // Indices in the origin set that aren't in the target set keep their from-geom but
         // need a to-geom that slides them off-screen in the move direction.
-        foreach (var (idx, fromGeom) in _animFrom)
+        foreach (var kv in _animFrom)
         {
-            if (_animTo.ContainsKey(idx)) continue;
-            _animTo[idx] = OffscreenGeomMatching(fromGeom, direction);
+            if (_animTo.ContainsKey(kv.Key)) continue;
+            _animTo[kv.Key] = OffscreenGeomMatching(kv.Value, direction);
         }
         // Conversely, indices in the target set that weren't in the origin set need a
-        // from-geom that slides them in from the opposite edge.
-        foreach (var (idx, toGeom) in _animTo.ToList())
+        // from-geom that slides them in from the opposite edge. Collect keys first so we
+        // don't mutate _animFrom while iterating _animTo.
+        _idxBuf.Clear();
+        foreach (var kv in _animTo)
         {
-            if (_animFrom.ContainsKey(idx)) continue;
-            _animFrom[idx] = OffscreenGeomMatching(toGeom, -direction);
+            if (!_animFrom.ContainsKey(kv.Key)) _idxBuf.Add(kv.Key);
+        }
+        for (var i = 0; i < _idxBuf.Count; i++)
+        {
+            var idx = _idxBuf[i];
+            _animFrom[idx] = OffscreenGeomMatching(_animTo[idx], -direction);
         }
 
         _animStartUtc = DateTime.UtcNow;
@@ -175,37 +194,39 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         return 1.0 - inv * inv * inv;
     }
 
-    private Dictionary<int, CardGeom> SnapshotCurrentGeom()
+    private void SnapshotCurrentGeomInto(Dictionary<int, CardGeom> output)
     {
+        output.Clear();
         if (_animTimerToken is null)
         {
             // Idle — just compute the static layout for _index.
-            return BuildTargetGeom(direction: 0);
+            BuildTargetGeomInto(output);
+            return;
         }
         var p = Progress();
-        var result = new Dictionary<int, CardGeom>(capacity: Math.Max(_animFrom.Count, _animTo.Count));
-        foreach (var idx in _animFrom.Keys.Union(_animTo.Keys))
+        // Lerp every index present in either set, without LINQ Union. Anything in _animFrom
+        // gets a from-value; we look up a matching to-value (falling back to from for keys
+        // only in _animFrom). Then handle keys present only in _animTo.
+        foreach (var kv in _animFrom)
         {
-            var hasFrom = _animFrom.TryGetValue(idx, out var f);
-            var hasTo = _animTo.TryGetValue(idx, out var t);
-            if (!hasFrom) f = t;
-            if (!hasTo) t = f;
-            result[idx] = Lerp(f, t, p);
+            var f = kv.Value;
+            var t = _animTo.TryGetValue(kv.Key, out var tv) ? tv : f;
+            output[kv.Key] = Lerp(f, t, p);
         }
-        return result;
+        foreach (var kv in _animTo)
+        {
+            if (output.ContainsKey(kv.Key)) continue;
+            output[kv.Key] = Lerp(kv.Value, kv.Value, p);
+        }
     }
 
-    private Dictionary<int, CardGeom> BuildTargetGeom(int direction)
+    private void BuildTargetGeomInto(Dictionary<int, CardGeom> output)
     {
         // Walks slots 0, +1, -1, +2, -2 ... from the visual center, computing the geometry of
-        // each. The "direction" parameter is unused here but kept on the signature for
-        // symmetry with callers; off-screen placement is handled in RetargetTo.
-        _ = direction;
-
+        // each. Off-screen placement is handled in RetargetTo.
         var viewportWidth = Viewport.Width;
-        if (viewportWidth <= 0) return new Dictionary<int, CardGeom>();
+        if (viewportWidth <= 0) return;
 
-        var result = new Dictionary<int, CardGeom>();
         var cx = viewportWidth / 2;
 
         // Selected card centered on cx.
@@ -217,7 +238,7 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
             Height = SelectedHeight,
             Alpha = SlotAlpha[0],
         };
-        result[_index] = sel;
+        output[_index] = sel;
 
         // Right-side neighbours.
         var rightEdge = sel.LeftX + SelectedWidth + Gap;
@@ -225,8 +246,8 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         {
             if (rightEdge >= viewportWidth) break;
             var idx = (_index + slot) % _entries.Count;
-            if (result.ContainsKey(idx)) break; // wrap collision (very few entries)
-            result[idx] = new CardGeom
+            if (output.ContainsKey(idx)) break; // wrap collision (very few entries)
+            output[idx] = new CardGeom
             {
                 LeftX = rightEdge,
                 TopY = RowHeight - UnselectedHeight,
@@ -243,8 +264,8 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         {
             if (leftEdge + UnselectedWidth <= 0) break;
             var idx = (_index - slot + _entries.Count) % _entries.Count;
-            if (result.ContainsKey(idx)) break;
-            result[idx] = new CardGeom
+            if (output.ContainsKey(idx)) break;
+            output[idx] = new CardGeom
             {
                 LeftX = leftEdge,
                 TopY = RowHeight - UnselectedHeight,
@@ -254,8 +275,6 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
             };
             leftEdge -= UnselectedWidth + Gap;
         }
-
-        return result;
     }
 
     // Off-screen position one slot past where this card currently sits, in the given direction
@@ -317,23 +336,43 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
         var viewportWidth = Viewport.Width;
         if (viewportWidth <= 0) return null;
 
-        var render = SnapshotCurrentGeom();
+        SnapshotCurrentGeomInto(_geomBuf);
         var cx = viewportWidth / 2.0;
 
-        var byDistance = render
-            .Where(kv => kv.Value.Alpha > 0.0)
-            .OrderBy(kv => Math.Abs((kv.Value.LeftX + kv.Value.Width / 2.0) - cx))
-            .ToList();
-
-        foreach (var (idx, geom) in byDistance)
+        // Copy visible (alpha > 0) entries into the sort buffer, then sort ascending by
+        // distance-from-center so the closest card wins ties. Manual insertion sort avoids
+        // both the LINQ pipeline and the closure allocation of List.Sort(Comparison).
+        _sortBuf.Clear();
+        foreach (var kv in _geomBuf)
         {
+            if (kv.Value.Alpha > 0.0) _sortBuf.Add(kv);
+        }
+        for (var i = 1; i < _sortBuf.Count; i++)
+        {
+            var cur = _sortBuf[i];
+            var curD = Math.Abs((cur.Value.LeftX + cur.Value.Width / 2.0) - cx);
+            var j = i - 1;
+            while (j >= 0)
+            {
+                var prev = _sortBuf[j];
+                var prevD = Math.Abs((prev.Value.LeftX + prev.Value.Width / 2.0) - cx);
+                if (prevD <= curD) break;
+                _sortBuf[j + 1] = prev;
+                j--;
+            }
+            _sortBuf[j + 1] = cur;
+        }
+
+        for (var i = 0; i < _sortBuf.Count; i++)
+        {
+            var geom = _sortBuf[i].Value;
             var left = (int)Math.Round(geom.LeftX);
             var top = (int)Math.Round(geom.TopY);
             var width = (int)Math.Round(geom.Width);
             var height = (int)Math.Round(geom.Height);
             if (x >= left && x < left + width && y >= top && y < top + height)
             {
-                return idx;
+                return _sortBuf[i].Key;
             }
         }
         return null;
@@ -376,33 +415,35 @@ internal sealed class LobbyCarouselView<TTarget> : View where TTarget : notnull
             }
         }
 
-        // Determine which set we're rendering. Idle = static target geometry for _index.
-        Dictionary<int, CardGeom> render;
-        if (_animTimerToken is null)
+        // Refill the geometry buffer in place — SnapshotCurrentGeomInto handles both the idle
+        // case (static target layout) and the in-flight case (lerp between _animFrom / _animTo).
+        SnapshotCurrentGeomInto(_geomBuf);
+
+        // Paint farthest-from-center first so the selected card overdraws any seams at the
+        // borders. Manual insertion sort over _sortBuf — same shape as HitTest, descending order.
+        var cx = viewportWidth / 2.0;
+        _sortBuf.Clear();
+        foreach (var kv in _geomBuf) _sortBuf.Add(kv);
+        for (var i = 1; i < _sortBuf.Count; i++)
         {
-            render = BuildTargetGeom(direction: 0);
-        }
-        else
-        {
-            var p = Progress();
-            render = new Dictionary<int, CardGeom>(capacity: Math.Max(_animFrom.Count, _animTo.Count));
-            foreach (var idx in _animFrom.Keys.Union(_animTo.Keys))
+            var cur = _sortBuf[i];
+            var curD = Math.Abs((cur.Value.LeftX + cur.Value.Width / 2.0) - cx);
+            var j = i - 1;
+            while (j >= 0)
             {
-                var hasFrom = _animFrom.TryGetValue(idx, out var f);
-                var hasTo = _animTo.TryGetValue(idx, out var t);
-                if (!hasFrom) f = t;
-                if (!hasTo) t = f;
-                render[idx] = Lerp(f, t, p);
+                var prev = _sortBuf[j];
+                var prevD = Math.Abs((prev.Value.LeftX + prev.Value.Width / 2.0) - cx);
+                if (prevD >= curD) break;
+                _sortBuf[j + 1] = prev;
+                j--;
             }
+            _sortBuf[j + 1] = cur;
         }
 
-        // Paint farthest first so the selected card overdraws any seams at the borders.
-        var ordered = render
-            .OrderByDescending(kv => Math.Abs((kv.Value.LeftX + kv.Value.Width / 2.0) - (viewportWidth / 2.0)))
-            .ToList();
-        foreach (var (idx, geom) in ordered)
+        for (var i = 0; i < _sortBuf.Count; i++)
         {
-            PaintCardAt(geom, _entries[idx], viewportWidth);
+            var kv = _sortBuf[i];
+            PaintCardAt(kv.Value, _entries[kv.Key], viewportWidth);
         }
 
         return true;

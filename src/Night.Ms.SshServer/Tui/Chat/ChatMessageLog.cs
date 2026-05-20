@@ -15,6 +15,13 @@ internal sealed class ChatMessageLog
     private readonly List<MessageRef> _messages = new();
     private readonly Dictionary<long, MessageRef> _byId = new();
     private readonly Dictionary<long, Dictionary<string, HashSet<long>>> _reactions = new();
+    // Memoized sorted summaries keyed by messageId. ChatScreen calls BuildSummaries every
+    // time it repaints a reaction footer, which previously ran a LINQ pipeline
+    // (Select + OrderByDescending + ThenBy + ToArray) per call. Cache is invalidated on
+    // every state change in ApplyReaction / SeedReactions / Clear. Viewer-specific state
+    // (the ByMe flag) is folded into the cached entry because each ChatMessageLog is bound
+    // to a single screen and therefore a single viewer.
+    private readonly Dictionary<long, IReadOnlyList<ReactionSummary>> _summaryCache = new();
 
     public IReadOnlyList<MessageRef> Messages => _messages;
     public int Count => _messages.Count;
@@ -40,6 +47,7 @@ internal sealed class ChatMessageLog
         _messages.Clear();
         _byId.Clear();
         _reactions.Clear();
+        _summaryCache.Clear();
     }
 
     // Apply* return the affected MessageRef (or null if it wasn't in the log) so the caller
@@ -100,17 +108,42 @@ internal sealed class ChatMessageLog
         var changed = add ? users.Add(react.UserId) : users.Remove(react.UserId);
         if (users.Count == 0) map.Remove(react.Emoji);
         if (map.Count == 0) _reactions.Remove(react.MessageId);
+        if (changed) _summaryCache.Remove(react.MessageId);
         return changed;
     }
 
     public IReadOnlyList<ReactionSummary> BuildSummaries(long messageId, long viewerUserId)
     {
+        if (_summaryCache.TryGetValue(messageId, out var cached)) return cached;
         if (!_reactions.TryGetValue(messageId, out var map) || map.Count == 0)
             return Array.Empty<ReactionSummary>();
-        return map.Select(kv => new ReactionSummary(kv.Key, kv.Value.Count, kv.Value.Contains(viewerUserId)))
-                  .OrderByDescending(s => s.Count)
-                  .ThenBy(s => s.Emoji, StringComparer.Ordinal)
-                  .ToArray();
+
+        var summaries = new ReactionSummary[map.Count];
+        var i = 0;
+        foreach (var kv in map)
+        {
+            summaries[i++] = new ReactionSummary(kv.Key, kv.Value.Count, kv.Value.Contains(viewerUserId));
+        }
+        // Sort: descending Count, then ordinal Emoji ascending. Manual sort avoids the LINQ
+        // pipeline allocation; the array is tiny (typically <10 entries) so insertion sort
+        // is fine and produces stable output.
+        for (var x = 1; x < summaries.Length; x++)
+        {
+            var cur = summaries[x];
+            var y = x - 1;
+            while (y >= 0)
+            {
+                var prev = summaries[y];
+                var cmp = prev.Count - cur.Count;
+                if (cmp == 0) cmp = string.CompareOrdinal(prev.Emoji, cur.Emoji);
+                if (cmp <= 0) break;
+                summaries[y + 1] = prev;
+                y--;
+            }
+            summaries[y + 1] = cur;
+        }
+        _summaryCache[messageId] = summaries;
+        return summaries;
     }
 
     public void SeedReactions(long messageId, IEnumerable<MessageReaction> rows)
@@ -125,6 +158,10 @@ internal sealed class ChatMessageLog
             }
             set.Add(r.UserId);
         }
-        if (map.Count > 0) _reactions[messageId] = map;
+        if (map.Count > 0)
+        {
+            _reactions[messageId] = map;
+            _summaryCache.Remove(messageId);
+        }
     }
 }
