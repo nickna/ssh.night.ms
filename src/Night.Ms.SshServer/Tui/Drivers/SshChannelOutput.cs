@@ -74,6 +74,11 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         {
             SetCursorPositionImpl(cursor.Position?.X ?? 0, cursor.Position?.Y ?? 0);
             _currentCursor = cursor;
+            // Flush so the cursor sequence reaches the wire this frame. Terminal.Gui calls
+            // SetCursor after Write(IOutputBuffer) returns; without an explicit Flush here
+            // the bytes would sit in _outBuf until the next frame, lagging the user-visible
+            // cursor by one frame and making input feel sluggish.
+            Flush();
         }
     }
 
@@ -157,9 +162,12 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
         try
         {
+            // Order matters: _disposed must be set *after* these writes, because WriteRawCore
+            // early-returns on _disposed. The original code set it first and silently dropped
+            // every cleanup sequence, leaving the terminal in alternate-screen + mouse-tracking
+            // + hidden-cursor state on clean disconnect.
             WriteRaw(EscSeqUtils.CSI_DisableMouseEvents);
             WriteRaw(EscSeqUtils.CSI_ResetAttributes);
             WriteRaw(EscSeqUtils.CSI_RestoreCursorAndRestoreAltBufferWithBackscroll);
@@ -169,6 +177,10 @@ internal sealed class SshChannelOutput : OutputBase, IOutput
         catch
         {
             // best-effort
+        }
+        finally
+        {
+            _disposed = true;
         }
     }
 }
