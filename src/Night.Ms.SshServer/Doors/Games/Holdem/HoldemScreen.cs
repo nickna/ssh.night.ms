@@ -128,9 +128,9 @@ internal sealed class HoldemScreen : BbsWindow
                 _chatPane = new TableChatPane(_app, _services, _user, _handle.ChatChannelId)
                 {
                     X = 2,
-                    Y = Pos.AnchorEnd(10),
+                    Y = Pos.AnchorEnd(7),
                     Width = Dim.Fill(2),
-                    Height = 8,
+                    Height = 5,
                 };
                 Add(_chatPane);
             });

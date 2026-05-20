@@ -28,6 +28,7 @@ internal static class SlotSymbolSprites
         public static readonly ArtColor CherryStem = new(60, 180, 60);
         public static readonly ArtColor DimGray = new(95, 95, 95);
         public static readonly ArtColor CoinGold = new(255, 215, 0);
+        public static readonly ArtColor Felt = new(14, 77, 43);
     }
 
     // Sprite layout per symbol. '#' = primary color cell (the symbol's fg color on black).
