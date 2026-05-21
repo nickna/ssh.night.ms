@@ -157,35 +157,41 @@ internal static class MessageRenderer
 
         var selfMentioned = false;
         var cursor = 0;
-        foreach (Match m in Inline.Matches(text))
+        // EnumerateMatches yields ValueMatch structs and skips the MatchCollection / Match /
+        // GroupCollection allocations entirely. Each alternative in Inline starts with a unique
+        // sentinel char (@ / * / _ / `), so we can dispatch on the first char of the match
+        // instead of poking named groups.
+        foreach (var m in Inline.EnumerateMatches(text))
         {
             if (m.Index > cursor)
             {
                 runs.Add(new ChatRun(text.Substring(cursor, m.Index - cursor), ArtColor.DefaultForeground, baseStyle));
             }
 
-            if (m.Groups["mention"].Success)
+            var matchSpan = text.AsSpan(m.Index, m.Length);
+            switch (matchSpan[0])
             {
-                var who = m.Groups["who"].Value;
-                var isSelf = !string.IsNullOrEmpty(selfHandle)
-                          && string.Equals(who, selfHandle, StringComparison.OrdinalIgnoreCase);
-                if (isSelf) selfMentioned = true;
-                runs.Add(new ChatRun(
-                    m.Value,
-                    isSelf ? ChatPalette.MentionSelf : ChatPalette.MentionOther,
-                    baseStyle | ArtStyle.Bold));
-            }
-            else if (m.Groups["bold"].Success)
-            {
-                runs.Add(new ChatRun(m.Value[1..^1], ChatPalette.BoldFg, baseStyle | ArtStyle.Bold));
-            }
-            else if (m.Groups["italic"].Success)
-            {
-                runs.Add(new ChatRun(m.Value[1..^1], ArtColor.DefaultForeground, baseStyle | ArtStyle.Italic));
-            }
-            else if (m.Groups["code"].Success)
-            {
-                runs.Add(new ChatRun(m.Value[1..^1], ChatPalette.CodeFg, baseStyle));
+                case '@':
+                {
+                    var whoSpan = matchSpan[1..];
+                    var isSelf = !string.IsNullOrEmpty(selfHandle)
+                              && whoSpan.Equals(selfHandle.AsSpan(), StringComparison.OrdinalIgnoreCase);
+                    if (isSelf) selfMentioned = true;
+                    runs.Add(new ChatRun(
+                        text.Substring(m.Index, m.Length),
+                        isSelf ? ChatPalette.MentionSelf : ChatPalette.MentionOther,
+                        baseStyle | ArtStyle.Bold));
+                    break;
+                }
+                case '*':
+                    runs.Add(new ChatRun(text.Substring(m.Index + 1, m.Length - 2), ChatPalette.BoldFg, baseStyle | ArtStyle.Bold));
+                    break;
+                case '_':
+                    runs.Add(new ChatRun(text.Substring(m.Index + 1, m.Length - 2), ArtColor.DefaultForeground, baseStyle | ArtStyle.Italic));
+                    break;
+                case '`':
+                    runs.Add(new ChatRun(text.Substring(m.Index + 1, m.Length - 2), ChatPalette.CodeFg, baseStyle));
+                    break;
             }
 
             cursor = m.Index + m.Length;

@@ -95,9 +95,7 @@ internal sealed class ChatLogView : View
     public bool TryAddImage(long messageId, CellGrid grid)
     {
         if (!_entryById.TryGetValue(messageId, out var entry)) return false;
-        var images = entry.Images.ToList();
-        images.Add(grid);
-        entry.Images = images;
+        (entry.Images ??= new List<CellGrid>()).Add(grid);
         entry.CachedRows = null;
         InvalidateLayout();
         return true;
@@ -108,8 +106,8 @@ internal sealed class ChatLogView : View
     public bool TryClearImages(long messageId)
     {
         if (!_entryById.TryGetValue(messageId, out var entry)) return false;
-        if (entry.Images.Count == 0) return false;
-        entry.Images = Array.Empty<CellGrid>();
+        if (entry.Images is null || entry.Images.Count == 0) return false;
+        entry.Images.Clear();
         entry.CachedRows = null;
         InvalidateLayout();
         return true;
@@ -248,20 +246,23 @@ internal sealed class ChatLogView : View
         // Image rows render after the message body and before any reactions. One display
         // row per source CellGrid row; widths > viewport clip rather than wrap. Pre-bake the
         // Attribute per cell here so the paint loop is a plain indexed walk.
-        foreach (var grid in entry.Images)
+        if (entry.Images is { Count: > 0 } images)
         {
-            for (var y = 0; y < grid.Height; y++)
+            foreach (var grid in images)
             {
-                var rowWidth = Math.Min(grid.Width, width);
-                var attrs = new Attribute[rowWidth];
-                var glyphs = new Rune[rowWidth];
-                for (var x = 0; x < rowWidth; x++)
+                for (var y = 0; y < grid.Height; y++)
                 {
-                    var cell = grid[x, y];
-                    attrs[x] = AttributeCache.ForCell(cell.Foreground, cell.Background, cell.Style);
-                    glyphs[x] = cell.Glyph;
+                    var rowWidth = Math.Min(grid.Width, width);
+                    var attrs = new Attribute[rowWidth];
+                    var glyphs = new Rune[rowWidth];
+                    for (var x = 0; x < rowWidth; x++)
+                    {
+                        var cell = grid[x, y];
+                        attrs[x] = AttributeCache.ForCell(cell.Foreground, cell.Background, cell.Style);
+                        glyphs[x] = cell.Glyph;
+                    }
+                    rows.Add(new ImageDisplayRow(attrs, glyphs));
                 }
-                rows.Add(new ImageDisplayRow(attrs, glyphs));
             }
         }
         if (entry.Reactions.Count > 0)
@@ -420,8 +421,9 @@ internal sealed class ChatLogView : View
         public required ChatLine Line { get; set; }
         public IReadOnlyList<ReactionSummary> Reactions { get; set; } = Array.Empty<ReactionSummary>();
         // Inline images attached to this message. Each grid renders as a contiguous block
-        // of ImageDisplayRows between the message body and the reactions footer.
-        public IReadOnlyList<CellGrid> Images { get; set; } = Array.Empty<CellGrid>();
+        // of ImageDisplayRows between the message body and the reactions footer. Lazily
+        // allocated on first attach so messages without images carry no list overhead.
+        public List<CellGrid>? Images;
         // Pre-wrapped display rows for this entry at CachedWidth. Set to null whenever the
         // entry's content changes (line / reactions / images); Relayout rebuilds it on next
         // pass. Keeping the cache on the entry means a single chat event only re-wraps the
