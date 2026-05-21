@@ -26,13 +26,13 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         if (string.IsNullOrWhiteSpace(body)) return new ChatOpResult.Invalid("Empty message.");
         if (body.Length > 2000)              return new ChatOpResult.Invalid("Message too long.");
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct).ConfigureAwait(false);
         if (channel is null) return ChatOpResult.NotFoundInstance;
         if (channel.IsPrivate)
         {
-            var isMember = await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserId == actorUserId, ct);
+            var isMember = await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserId == actorUserId, ct).ConfigureAwait(false);
             if (!isMember) return new ChatOpResult.Forbidden("You no longer have access to this channel.");
         }
 
@@ -46,10 +46,10 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
             ParentMessageId = parentMessageId,
         };
         db.ChatMessages.Add(msg);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,channelId, ChatEventKind.Message,
-            new ChatMessageDto(msg.Id, channelId, actorUserId, actorHandle, body, now, parentMessageId), ct);
+            new ChatMessageDto(msg.Id, channelId, actorUserId, actorHandle, body, now, parentMessageId), ct).ConfigureAwait(false);
         return new ChatOpResult.Posted(msg.Id, now);
     }
 
@@ -65,8 +65,8 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         if (string.IsNullOrWhiteSpace(newBody)) return new ChatOpResult.Invalid("New body is empty.");
         if (newBody.Length > 2000)              return new ChatOpResult.Invalid("Message too long.");
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct).ConfigureAwait(false);
         if (msg is null) return ChatOpResult.NotFoundInstance;
         if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, actorIsSysop))
             return new ChatOpResult.Forbidden("You can only edit your own messages.");
@@ -76,10 +76,10 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         var editedAt = DateTimeOffset.UtcNow;
         msg.Body = newBody;
         msg.EditedAt = editedAt;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,msg.ChannelId, ChatEventKind.Edit,
-            new ChatEditDto(msg.Id, msg.ChannelId, msg.Body, editedAt), ct);
+            new ChatEditDto(msg.Id, msg.ChannelId, msg.Body, editedAt), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
@@ -87,18 +87,18 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     // renderer paints "(deleted)" in faint gray. Author-only unless actorIsSysop is true.
     public async Task<ChatOpResult> DeleteAsync(long messageId, long actorUserId, bool actorIsSysop, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct).ConfigureAwait(false);
         if (msg is null) return ChatOpResult.NotFoundInstance;
         if (!ChatAuthorization.CanModifyMessage(msg, actorUserId, actorIsSysop))
             return new ChatOpResult.Forbidden("You can only delete your own messages.");
         if (msg.DeletedAt is not null) return ChatOpResult.OkInstance;
 
         msg.DeletedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,msg.ChannelId, ChatEventKind.Delete,
-            new ChatDeleteDto(msg.Id, msg.ChannelId), ct);
+            new ChatDeleteDto(msg.Id, msg.ChannelId), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
@@ -111,8 +111,8 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         if (string.IsNullOrEmpty(emoji)) return new ChatOpResult.Invalid("Empty emoji.");
         if (emoji.Length > 32)            return new ChatOpResult.Invalid("Emoji too long.");
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var msg = await db.ChatMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var msg = await db.ChatMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, ct).ConfigureAwait(false);
         if (msg is null) return ChatOpResult.NotFoundInstance;
         if (msg.DeletedAt is not null) return new ChatOpResult.Forbidden("This message was deleted.");
 
@@ -126,7 +126,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
                 Emoji = emoji,
                 CreatedAt = now,
             });
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateException)
         {
@@ -135,25 +135,25 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         }
 
         await PublishEnvelopeAsync(bus,msg.ChannelId, ChatEventKind.React,
-            new ChatReactionDto(messageId, msg.ChannelId, actorUserId, actorHandle, emoji), ct);
+            new ChatReactionDto(messageId, msg.ChannelId, actorUserId, actorHandle, emoji), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
     public async Task<ChatOpResult> UnreactAsync(long messageId, long actorUserId, string actorHandle, string emoji, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var row = await db.MessageReactions.FirstOrDefaultAsync(
-            r => r.MessageId == messageId && r.UserId == actorUserId && r.Emoji == emoji, ct);
+            r => r.MessageId == messageId && r.UserId == actorUserId && r.Emoji == emoji, ct).ConfigureAwait(false);
         if (row is null) return ChatOpResult.NotFoundInstance;
 
-        var msg = await db.ChatMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        var msg = await db.ChatMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, ct).ConfigureAwait(false);
         if (msg is null) return ChatOpResult.NotFoundInstance;
 
         db.MessageReactions.Remove(row);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,msg.ChannelId, ChatEventKind.Unreact,
-            new ChatReactionDto(messageId, msg.ChannelId, actorUserId, actorHandle, emoji), ct);
+            new ChatReactionDto(messageId, msg.ChannelId, actorUserId, actorHandle, emoji), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
@@ -162,27 +162,27 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     // reversible and non-destructive. Idempotent: pinning an already-pinned message is Ok.
     public async Task<ChatOpResult> PinAsync(long messageId, long actorUserId, CancellationToken ct)
     {
-        return await SetPinAsync(messageId, actorUserId, pin: true, ct);
+        return await SetPinAsync(messageId, actorUserId, pin: true, ct).ConfigureAwait(false);
     }
 
     public async Task<ChatOpResult> UnpinAsync(long messageId, long actorUserId, CancellationToken ct)
     {
-        return await SetPinAsync(messageId, actorUserId, pin: false, ct);
+        return await SetPinAsync(messageId, actorUserId, pin: false, ct).ConfigureAwait(false);
     }
 
     private async Task<ChatOpResult> SetPinAsync(long messageId, long actorUserId, bool pin, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == messageId, ct).ConfigureAwait(false);
         if (msg is null) return ChatOpResult.NotFoundInstance;
         if (msg.DeletedAt is not null) return new ChatOpResult.Forbidden("Can't pin a deleted message.");
         if (msg.IsPinned == pin) return ChatOpResult.OkInstance;
 
         msg.IsPinned = pin;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,msg.ChannelId, pin ? ChatEventKind.Pin : ChatEventKind.Unpin,
-            new ChatPinDto(msg.Id, msg.ChannelId, pin), ct);
+            new ChatPinDto(msg.Id, msg.ChannelId, pin), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
@@ -190,14 +190,14 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     // things worth keeping," not an unbounded backlog. Ordered newest-pinned-first.
     public async Task<IReadOnlyList<ChatMessage>> ListPinsAsync(long channelId, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         return await db.ChatMessages
             .AsNoTracking()
             .Where(m => m.ChannelId == channelId && m.IsPinned && m.DeletedAt == null)
             .OrderByDescending(m => m.CreatedAt)
             .Take(50)
             .Include(m => m.User)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
     }
 
     // Set the channel topic. Only the channel creator may change the topic; a public channel
@@ -208,8 +208,8 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         if (topic is not null && topic.Length > 200) return new ChatOpResult.Invalid("Topic must be 200 chars or fewer.");
         var trimmed = string.IsNullOrWhiteSpace(topic) ? null : topic.Trim();
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct).ConfigureAwait(false);
         if (channel is null) return ChatOpResult.NotFoundInstance;
         if (!ChatAuthorization.CanSetChannelTopic(channel, actorUserId, actorIsSysop))
         {
@@ -218,10 +218,10 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         if (channel.Topic == trimmed) return ChatOpResult.OkInstance;
 
         channel.Topic = trimmed;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await PublishEnvelopeAsync(bus,channelId, ChatEventKind.Topic,
-            new ChatTopicDto(channelId, trimmed, actorUserId, actorHandle), ct);
+            new ChatTopicDto(channelId, trimmed, actorUserId, actorHandle), ct).ConfigureAwait(false);
         return ChatOpResult.OkInstance;
     }
 
@@ -237,7 +237,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     public async Task<IReadOnlyList<ChatMessage>> SearchAsync(long channelId, string term, int limit, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(term)) return Array.Empty<ChatMessage>();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var trimmed = term.Trim();
         var clamped = Math.Clamp(limit, 1, 100);
 
@@ -253,7 +253,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
                    LIMIT {clamped}")
             .AsNoTracking()
             .Include(m => m.User)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 
         if (ftsHits.Count > 0) return ftsHits;
 
@@ -270,7 +270,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
             .OrderByDescending(m => m.CreatedAt)
             .Take(clamped)
             .Include(m => m.User)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
     }
 
     // Pull a single thread: the root message + all its (non-deleted) replies, ordered by
@@ -280,11 +280,11 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     // orphaned reply set (today: not surfaced — ThreadScreen only opens from a known root).
     public async Task<ThreadView> ListThreadAsync(long rootMessageId, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var root = await db.ChatMessages
             .AsNoTracking()
             .Include(m => m.User)
-            .FirstOrDefaultAsync(m => m.Id == rootMessageId, ct);
+            .FirstOrDefaultAsync(m => m.Id == rootMessageId, ct).ConfigureAwait(false);
         if (root is null) return new ThreadView(null, Array.Empty<ChatMessage>());
 
         var replies = await db.ChatMessages
@@ -293,7 +293,7 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
             .OrderBy(m => m.CreatedAt)
             .Take(500)
             .Include(m => m.User)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         return new ThreadView(root, replies);
     }
 
@@ -305,13 +305,13 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         IReadOnlyCollection<long> parentIds, CancellationToken ct)
     {
         if (parentIds.Count == 0) return new Dictionary<long, int>();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var rows = await db.ChatMessages
             .AsNoTracking()
             .Where(m => m.ParentMessageId != null && parentIds.Contains(m.ParentMessageId.Value) && m.DeletedAt == null)
             .GroupBy(m => m.ParentMessageId!.Value)
             .Select(g => new { ParentId = g.Key, Count = g.Count() })
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         return rows.ToDictionary(r => r.ParentId, r => r.Count);
     }
 
@@ -321,10 +321,10 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
         IReadOnlyCollection<long> messageIds, CancellationToken ct)
     {
         if (messageIds.Count == 0) return new Dictionary<long, List<MessageReaction>>();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var rows = await db.MessageReactions
             .Where(r => messageIds.Contains(r.MessageId))
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         return rows.GroupBy(r => r.MessageId).ToDictionary(g => g.Key, g => g.ToList());
     }
 
@@ -332,6 +332,6 @@ public sealed class ChatMutationService(IDbContextFactory<AppDbContext> dbFactor
     {
         var envelope = new ChatEnvelope(kind, JsonSerializer.SerializeToElement(payload));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope);
-        await bus.PublishAsync(ChatTopics.Channel(channelId), bytes, ct);
+        await bus.PublishAsync(ChatTopics.Channel(channelId), bytes, ct).ConfigureAwait(false);
     }
 }

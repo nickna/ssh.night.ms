@@ -60,6 +60,20 @@ internal static class BbsSessionRunner
         Channel? lobbyChannel = await db.Channels
             .FirstOrDefaultAsync(c => c.Name == "lobby", cancellationToken);
 
+        // Pre-warm the adopt-key dismissal lookup: kick the Redis RTT off in parallel with
+        // Terminal.Gui init below so MaybeRunKeyAdoptionPrompt rarely has to actually wait.
+        // Gated on the same cheap pre-checks that method makes, plus user.SuppressKeyAdoptionPrompts,
+        // so we don't issue a Redis call for sessions that wouldn't need it.
+        Task<bool>? dismissalCheck = null;
+        if (user is not null
+            && !user.SuppressKeyAdoptionPrompts
+            && session is SshSessionAdapter prewarmAdapter
+            && !string.IsNullOrEmpty(prewarmAdapter.Inner.OfferedFingerprint))
+        {
+            var dismissals = services.GetRequiredService<Auth.IDismissedKeyStore>();
+            dismissalCheck = dismissals.IsDismissedAsync(user.Id, prewarmAdapter.Inner.OfferedFingerprint, default);
+        }
+
         await Task.Run(() =>
         {
             using var contextScope = SshChannelDriverContext.Push(new SshChannelDriverContext
@@ -123,7 +137,7 @@ internal static class BbsSessionRunner
                 // user, or if they previously chose "Never for this key".
                 if (!justRegistered && session is SshSessionAdapter adopter)
                 {
-                    MaybeRunKeyAdoptionPrompt(services, app, user, adopter, db, logger);
+                    MaybeRunKeyAdoptionPrompt(services, app, user, adopter, db, logger, dismissalCheck);
                 }
 
                 RunLobbyLoop(services, app, user, justRegistered, lobbyChannel, art, session);
@@ -136,8 +150,9 @@ internal static class BbsSessionRunner
     }
 
     // Synchronous wrapper around the adopt-key flow. Runs on the Terminal.Gui UI thread —
-    // db queries here block, but they're small and uncontended at session-start time.
-    private static void MaybeRunKeyAdoptionPrompt(IServiceProvider services, IApplication app, User user, SshSessionAdapter adapter, AppDbContext db, ILogger logger)
+    // db queries here block, but they're small and uncontended at session-start time. The
+    // Redis dismissal check is pre-warmed by RunAsync so its RTT overlaps with TG init.
+    private static void MaybeRunKeyAdoptionPrompt(IServiceProvider services, IApplication app, User user, SshSessionAdapter adapter, AppDbContext db, ILogger logger, Task<bool>? dismissalCheck)
     {
         var fingerprint = adapter.Inner.OfferedFingerprint;
         var algorithm = adapter.Inner.OfferedAlgorithm;
@@ -158,9 +173,12 @@ internal static class BbsSessionRunner
             if (alreadyOnAccount) return;
 
             var dismissals = services.GetRequiredService<Auth.IDismissedKeyStore>();
-            // Dismissals stored in Redis — synchronous wait here is intentional. Block size
-            // is one tiny key roundtrip; the UI thread is already idle at lobby entry.
-            if (dismissals.IsDismissedAsync(user.Id, fingerprint, default).GetAwaiter().GetResult()) return;
+            // Pre-warmed at session start so the Redis RTT runs in parallel with TG init.
+            // By the time we get here the task is almost always already complete, so the
+            // GetResult() rarely blocks. Falls back to a fresh lookup only if RunAsync
+            // skipped the pre-warm (shouldn't happen given matching gate conditions).
+            var dismissalTask = dismissalCheck ?? dismissals.IsDismissedAsync(user.Id, fingerprint, default);
+            if (dismissalTask.GetAwaiter().GetResult()) return;
 
             var prompt = new KeyAdoptionPrompt(app, services, user, fingerprint, algorithm, blob, db, dismissals);
             app.Run(prompt);

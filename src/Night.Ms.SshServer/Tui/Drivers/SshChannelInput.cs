@@ -93,16 +93,23 @@ internal sealed class SshChannelInput : InputImpl<char>
         try
         {
             _pumpCts.Cancel();
-            _pumpTask.Wait(TimeSpan.FromMilliseconds(200));
         }
         catch
         {
             // best-effort
         }
-        finally
-        {
-            _pumpCts.Dispose();
-        }
+
+        // Don't block the caller waiting for the pump to unwind from its in-flight
+        // ReadAsync — on session teardown that costs up to 200ms of UI-thread stall.
+        // Hand the CTS off to a continuation that fires once the pump actually exits,
+        // so the token stays alive for the pump's lifetime and Dispose() returns now.
+        _ = _pumpTask.ContinueWith(
+            static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+            _pumpCts,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
         base.Dispose();
     }
 }

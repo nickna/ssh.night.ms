@@ -75,14 +75,14 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
         IReadOnlyCollection<string> handles, CancellationToken ct)
     {
         if (handles.Count == 0) return new Dictionary<string, bool>();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         // citext column makes the comparison case-insensitive; we still return the row's
         // canonical Handle so the caller's dict keys match what they sent (the caller uses
         // OrdinalIgnoreCase, so case differences fold there too).
         var rows = await db.Users.AsNoTracking()
             .Where(u => handles.Contains(u.Handle))
             .Select(u => new { u.Handle, HasPfp = u.ProfilePictureUpdatedAt != null })
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
         var result = new Dictionary<string, bool>(rows.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var r in rows) result[r.Handle] = r.HasPfp;
         return result;
@@ -92,14 +92,14 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
     // doesn't exist (the caller decides how to render that — /finger prints "no such user").
     public async Task<ProfileSnapshot?> GetByHandleAsync(string handle, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Handle == handle, ct);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Handle == handle, ct).ConfigureAwait(false);
         if (user is null) return null;
 
-        var chatCount = await db.ChatMessages.CountAsync(m => m.UserId == user.Id, ct);
-        var topicCount = await db.Topics.CountAsync(t => t.CreatedById == user.Id, ct);
-        var postCount = await db.Posts.CountAsync(p => p.CreatedById == user.Id, ct);
+        var chatCount = await db.ChatMessages.CountAsync(m => m.UserId == user.Id, ct).ConfigureAwait(false);
+        var topicCount = await db.Topics.CountAsync(t => t.CreatedById == user.Id, ct).ConfigureAwait(false);
+        var postCount = await db.Posts.CountAsync(p => p.CreatedById == user.Id, ct).ConfigureAwait(false);
 
         return new ProfileSnapshot(
             UserId: user.Id,
@@ -138,8 +138,8 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
         catch (TimeZoneNotFoundException) { return new(false, $"Unknown time zone '{timeZoneId}'."); }
         catch (InvalidTimeZoneException) { return new(false, $"Invalid time zone '{timeZoneId}'."); }
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false);
         if (user is null)
             return new(false, "User not found.");
 
@@ -165,7 +165,7 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
             }
             else
             {
-                var matches = await geocoder.SearchAsync(location, ct);
+                var matches = await geocoder.SearchAsync(location, ct).ConfigureAwait(false);
                 if (matches is null)
                     return new(false, "Couldn't reach the geocoding service — try again in a moment.", ProfileUpdateFailure.LocationServiceUnavailable);
                 if (matches.Count == 0)
@@ -186,7 +186,7 @@ public sealed class ProfileService(IDbContextFactory<AppDbContext> dbFactory, IG
         user.TemperatureUnit = update.TemperatureUnit;
         user.ClockFormat = update.ClockFormat;
         user.DateFormat = update.DateFormat;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return new ProfileUpdateResult(
             Ok: true,
             Error: null,

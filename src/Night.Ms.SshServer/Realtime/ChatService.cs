@@ -28,9 +28,9 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
             return new JoinResult.InvalidName(nameError);
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var existing = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct);
+        var existing = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct).ConfigureAwait(false);
         if (existing is not null)
         {
             if (existing.IsPrivate)
@@ -51,7 +51,7 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
         db.Channels.Add(channel);
         try
         {
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
             return new JoinResult.Created(channel);
         }
         catch (DbUpdateException)
@@ -59,7 +59,7 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
             // Two clients typed /join #foo at the same time — the unique index on Channel.Name
             // will reject the second insert. Re-look up the now-existing row.
             db.ChangeTracker.Clear();
-            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct);
+            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == name, ct).ConfigureAwait(false);
             if (winner is null) throw;
             return winner.IsPrivate
                 ? new JoinResult.Denied($"#{name} is a private channel.")
@@ -82,9 +82,9 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
             return new JoinResult.Denied("You can't DM yourself.");
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var other = await db.Users.FirstOrDefaultAsync(u => u.Handle == otherHandle, ct);
+        var other = await db.Users.FirstOrDefaultAsync(u => u.Handle == otherHandle, ct).ConfigureAwait(false);
         if (other is null)
         {
             return new JoinResult.UserNotFound(otherHandle);
@@ -95,7 +95,7 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
         }
 
         var dmName = DmChannelName(actor.Handle, other.Handle);
-        var existing = await db.Channels.FirstOrDefaultAsync(c => c.Name == dmName, ct);
+        var existing = await db.Channels.FirstOrDefaultAsync(c => c.Name == dmName, ct).ConfigureAwait(false);
         if (existing is not null)
         {
             return new JoinResult.Joined(existing);
@@ -112,7 +112,7 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
         db.Channels.Add(channel);
         try
         {
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateException)
         {
@@ -120,7 +120,7 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
             // rejected the second insert. Defer to the winner; their members are being added
             // on the other path.
             db.ChangeTracker.Clear();
-            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == dmName, ct);
+            var winner = await db.Channels.FirstOrDefaultAsync(c => c.Name == dmName, ct).ConfigureAwait(false);
             if (winner is null) throw;
             return new JoinResult.Joined(winner);
         }
@@ -128,18 +128,18 @@ public sealed class ChatService(IDbContextFactory<AppDbContext> dbFactory)
         var now = DateTimeOffset.UtcNow;
         db.ChannelMembers.Add(new ChannelMember { ChannelId = channel.Id, UserId = actor.Id, JoinedAt = now, Role = "member" });
         db.ChannelMembers.Add(new ChannelMember { ChannelId = channel.Id, UserId = other.Id, JoinedAt = now, Role = "member" });
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new JoinResult.Created(channel);
     }
 
     public async Task<bool> CanAccessAsync(long channelId, long userId, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct).ConfigureAwait(false);
         if (channel is null) return false;
         if (!channel.IsPrivate) return true;
-        return await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserId == userId, ct);
+        return await db.ChannelMembers.AnyAsync(m => m.ChannelId == channelId && m.UserId == userId, ct).ConfigureAwait(false);
     }
 
     // Deterministic DM name: lowercase + alphabetical ordering of the two handles.

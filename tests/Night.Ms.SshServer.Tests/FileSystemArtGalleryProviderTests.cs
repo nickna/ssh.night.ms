@@ -123,6 +123,43 @@ public class FileSystemArtGalleryProviderTests : IDisposable
     }
 
     [Fact]
+    public void Load_reflects_file_edits_via_cache_invalidation()
+    {
+        // Provider caches parsed pieces by (mtime, length). Editing the file (here, by
+        // changing its length) must invalidate the cache so a subsequent Load sees the new
+        // content, not the stale parse.
+        var path = Path.Combine(_dir, "010-art.ans");
+        File.WriteAllText(path, "ab\ncd"); // 2x2
+
+        var sut = Build();
+        var first = sut.Load(sut.List().Single().Id);
+        Assert.NotNull(first);
+        Assert.Equal(2, first!.Width);
+
+        File.WriteAllText(path, "abcd\nefgh\nijkl"); // 4x3 — different length forces re-parse
+
+        var second = sut.Load(sut.List().Single().Id);
+        Assert.NotNull(second);
+        Assert.Equal(4, second!.Width);
+        Assert.Equal(3, second.Height);
+    }
+
+    [Fact]
+    public void List_drops_deleted_files_from_cache()
+    {
+        var path = Path.Combine(_dir, "010-art.ans");
+        File.WriteAllText(path, "ab\ncd");
+
+        var sut = Build();
+        Assert.Single(sut.List());
+
+        File.Delete(path);
+        Assert.Empty(sut.List());
+        // After the eviction pass, Load on the stale id must not resurrect the entry.
+        Assert.Null(sut.Load(path));
+    }
+
+    [Fact]
     public void ArtGallery_Path_config_key_is_an_alternative_to_the_env_var()
     {
         File.WriteAllText(Path.Combine(_dir, "010-art.ans"), "x");

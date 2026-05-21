@@ -16,10 +16,10 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
     // which keeps the channel sticky at the top of the sidebar.
     public async Task MarkReadAsync(long userId, long channelId, long lastReadMessageId, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
         var row = await db.ChannelReads
-            .FirstOrDefaultAsync(r => r.UserId == userId && r.ChannelId == channelId, ct);
+            .FirstOrDefaultAsync(r => r.UserId == userId && r.ChannelId == channelId, ct).ConfigureAwait(false);
         if (row is null)
         {
             db.ChannelReads.Add(new ChannelRead
@@ -41,7 +41,7 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
             }
             row.UpdatedAt = now;
         }
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     // Returns the channels this user has read state for, plus #lobby (the BBS-wide default
@@ -57,7 +57,7 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
     // efficiently, so the planner does the heavy lifting in-DB.
     public async Task<IReadOnlyList<ChannelEntry>> ListForUserAsync(long userId, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
         // Channels this user has touched, plus #lobby (the BBS-wide default every session
         // sees even before they've sent a message). #lobby's id is cached after first hit —
@@ -66,9 +66,9 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
             .AsNoTracking()
             .Where(r => r.UserId == userId)
             .Select(r => r.ChannelId)
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 
-        var lobbyId = await GetLobbyChannelIdAsync(db, ct);
+        var lobbyId = await GetLobbyChannelIdAsync(db, ct).ConfigureAwait(false);
         var idSet = new HashSet<long>(subscribedIds);
         if (lobbyId is long lid) idSet.Add(lid);
         if (idSet.Count == 0) return Array.Empty<ChannelEntry>();
@@ -103,7 +103,7 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
                         .Select(r => (long?)r.LastReadMessageId)
                         .FirstOrDefault() ?? 0L)),
             })
-            .ToListAsync(ct);
+            .ToListAsync(ct).ConfigureAwait(false);
 
         // Sort: channels with unread first (newest activity first within that group), then
         // caught-up channels (also newest first). #lobby sticks to the top if it has zero
@@ -133,7 +133,7 @@ public sealed class ReadStateService(IDbContextFactory<AppDbContext> dbFactory)
         var id = await db.Channels.AsNoTracking()
             .Where(c => c.Name == "lobby")
             .Select(c => (long?)c.Id)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
         if (id is long resolved)
         {
             Volatile.Write(ref _cachedLobbyChannelId, resolved);

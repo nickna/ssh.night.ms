@@ -19,21 +19,21 @@ public sealed class PresenceService(IConnectionMultiplexer redis, IRealtimeBus b
 
     public async Task JoinAsync(long channelId, long userId, string handle, CancellationToken ct)
     {
-        await HeartbeatInternalAsync(channelId, handle, ct);
-        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Join, ct);
+        await HeartbeatInternalAsync(channelId, handle, ct).ConfigureAwait(false);
+        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Join, ct).ConfigureAwait(false);
     }
 
     public async Task LeaveAsync(long channelId, long userId, string handle, CancellationToken ct)
     {
         var db = redis.GetDatabase();
         var key = Key(channelId);
-        await db.SortedSetRemoveAsync(key, handle);
-        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Leave, ct);
+        await db.SortedSetRemoveAsync(key, handle).ConfigureAwait(false);
+        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Leave, ct).ConfigureAwait(false);
     }
 
     public async Task HeartbeatAsync(long channelId, long userId, string handle, CancellationToken ct)
     {
-        await HeartbeatInternalAsync(channelId, handle, ct);
+        await HeartbeatInternalAsync(channelId, handle, ct).ConfigureAwait(false);
         // Heartbeats don't broadcast — they just keep the sorted-set entry alive. Other
         // sessions infer "still here" implicitly through ListAsync, not via fanout (which
         // would be noisy: N sessions × 6 heartbeats/min = N×6 envelopes/min/channel of pure
@@ -46,7 +46,7 @@ public sealed class PresenceService(IConnectionMultiplexer redis, IRealtimeBus b
     // fan out 600 events per minute.
     public async Task PublishTypingAsync(long channelId, long userId, string handle, CancellationToken ct)
     {
-        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Typing, ct);
+        await PublishPresenceAsync(channelId, userId, handle, PresenceEventKind.Typing, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<string>> ListAsync(long channelId, CancellationToken ct)
@@ -57,8 +57,8 @@ public sealed class PresenceService(IConnectionMultiplexer redis, IRealtimeBus b
         // ZREMRANGEBYSCORE evicts stale entries inline. Doing it here (on read) means the
         // last reader of a half-empty channel cleans up after departed sessions; doing it
         // on heartbeat would be redundant work N times per minute per session.
-        await db.SortedSetRemoveRangeByScoreAsync(key, double.NegativeInfinity, cutoff);
-        var values = await db.SortedSetRangeByRankAsync(key, 0, -1);
+        await db.SortedSetRemoveRangeByScoreAsync(key, double.NegativeInfinity, cutoff).ConfigureAwait(false);
+        var values = await db.SortedSetRangeByRankAsync(key, 0, -1).ConfigureAwait(false);
         return values.Select(v => v.ToString()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
     }
 
@@ -69,14 +69,14 @@ public sealed class PresenceService(IConnectionMultiplexer redis, IRealtimeBus b
         // ZADD with current unix time as score. CommandFlags.FireAndForget would be cheaper
         // but we want the await to surface Redis transport errors at the call site instead
         // of swallowing them silently.
-        await db.SortedSetAddAsync(key, handle, NowUnix());
+        await db.SortedSetAddAsync(key, handle, NowUnix()).ConfigureAwait(false);
     }
 
     private async Task PublishPresenceAsync(long channelId, long userId, string handle, string kind, CancellationToken ct)
     {
         var dto = new PresenceEventDto(channelId, userId, handle, kind, DateTimeOffset.UtcNow);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(dto);
-        await bus.PublishAsync(ChatTopics.Presence(channelId), bytes, ct);
+        await bus.PublishAsync(ChatTopics.Presence(channelId), bytes, ct).ConfigureAwait(false);
     }
 
     private static double NowUnix() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
