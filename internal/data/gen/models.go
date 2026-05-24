@@ -147,6 +147,14 @@ type SecurityIpBan struct {
 	CreatedBy string
 }
 
+type SystemSetting struct {
+	Key       string
+	Value     string
+	Type      string
+	UpdatedAt pgtype.Timestamptz
+	UpdatedBy *int64
+}
+
 type Topic struct {
 	ID          int64
 	ForumID     int64

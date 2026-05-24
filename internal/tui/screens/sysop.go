@@ -29,6 +29,7 @@ const (
 	tabEvents sysopTab = iota
 	tabUsers
 	tabBans
+	tabSettings
 )
 
 // Sysop is the moderation console. Three tabs: Events (unified audit/security
@@ -75,6 +76,12 @@ type Sysop struct {
 	// Bans tab
 	bans        []gen.SecurityIpBan
 	bansLoading bool
+
+	// Settings tab (catalog rendered from settings.Catalog; the cache itself
+	// lives on sess.Settings). The cursor is purely for which row is
+	// highlighted — edits go through the bottom-prompt `set` / `reset`
+	// commands the same way Users and Bans tabs work.
+	settingsCursor int
 }
 
 // sysopFilterCarrier is a tiny shim so the sysop.go struct doesn't have to
@@ -228,6 +235,11 @@ func (m *Sysop) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadEventsCmd()
 		case tabBans:
 			return m, m.loadBansCmd()
+		case tabSettings:
+			// Settings tab reads from the in-process Cache — nothing to load
+			// asynchronously since Set already refreshed the snapshot. Keep
+			// the cursor stable.
+			return m, nil
 		}
 		return m, nil
 
@@ -312,6 +324,12 @@ func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.applyTabFocus()
 			return m, m.onTabChange()
 		}
+	case "4":
+		if m.cmd.Value() == "" {
+			m.tab = tabSettings
+			m.applyTabFocus()
+			return m, m.onTabChange()
+		}
 	}
 
 	// Events tab: navigation keys + filter focus management.
@@ -321,8 +339,17 @@ func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Settings tab: only cursor up/down navigation. Editing flows through
+	// the bottom prompt (`set <key> <value>` / `reset <key>`) for consistency
+	// with the other command tabs.
+	if m.tab == tabSettings {
+		if handled, model, cmd := m.handleSettingsKey(msg); handled {
+			return model, cmd
+		}
+	}
+
 	// Enter on a command-tab dispatches the typed command.
-	if msg.String() == "enter" && (m.tab == tabUsers || m.tab == tabBans) {
+	if msg.String() == "enter" && (m.tab == tabUsers || m.tab == tabBans || m.tab == tabSettings) {
 		line := strings.TrimSpace(m.cmd.Value())
 		if line == "" {
 			return m, nil
@@ -358,10 +385,10 @@ func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // cycleTab moves the active tab by delta (positive = right). Wraps around
-// the 3-tab cycle. Resets the wall-confirm state so a half-typed command
+// the 4-tab cycle. Resets the wall-confirm state so a half-typed command
 // on one tab doesn't leak into the next.
 func (m *Sysop) cycleTab(delta int) {
-	const n = 3
+	const n = 4
 	m.tab = sysopTab((int(m.tab) + delta + n) % n)
 	m.pendingWall = ""
 	m.applyTabFocus()
@@ -380,6 +407,8 @@ func (m *Sysop) applyTabFocus() {
 		m.cmd.Placeholder = "ban <handle> | sysop <handle> | wall <msg> | clear-passwordless <handle>"
 	case tabBans:
 		m.cmd.Placeholder = "ban-ip <ip> [duration] [reason] | unban-ip <ip> | refresh"
+	case tabSettings:
+		m.cmd.Placeholder = "set <key> <value> | reset <key> | refresh"
 	}
 }
 
@@ -422,6 +451,10 @@ func (m *Sysop) dispatch(line string) tea.Cmd {
 		return m.banIPCmd(target)
 	case "unban-ip":
 		return m.unbanIPCmd(target)
+	case "set":
+		return m.setSettingCmd(target)
+	case "reset":
+		return m.resetSettingCmd(target)
 	}
 	return done("[!] unknown command: "+verb+" — type help", false)
 }
@@ -518,6 +551,9 @@ func (m *Sysop) clearPasswordlessCmd(handle string) tea.Cmd {
 // audit row. Length-capped at 500 chars to keep an accidental paste from
 // nuking 200 connected terminals.
 func (m *Sysop) wallCmd(message string) tea.Cmd {
+	if m.sess.Settings != nil && !m.sess.Settings.Get().WallEnabled {
+		return done("[!] wall broadcasts are disabled in settings (set wall_enabled true to re-enable).", false)
+	}
 	if message == "" {
 		return done("[!] wall requires a message. Usage: wall <message>", false)
 	}
@@ -621,6 +657,8 @@ func (m *Sysop) View() string {
 		b.WriteString(m.renderUsers(bodyW, bodyH))
 	case tabBans:
 		b.WriteString(m.renderBans(bodyW, bodyH))
+	case tabSettings:
+		b.WriteString(m.renderSettings(bodyW, bodyH))
 	}
 	b.WriteString("\n\n")
 
@@ -675,7 +713,8 @@ func (m *Sysop) renderTabBar() string {
 	return sysopTabBar.Render(
 		label("Events", tabEvents) + " · " +
 			label("Users", tabUsers) + " · " +
-			label("Bans", tabBans),
+			label("Bans", tabBans) + " · " +
+			label("Settings", tabSettings),
 	)
 }
 

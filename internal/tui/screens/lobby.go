@@ -177,6 +177,14 @@ func (m *Lobby) View() string {
 	if alert := m.renderAlertStrip(w); alert != "" {
 		parts = append(parts, alert)
 	}
+	// MOTD — sysop-tunable via settings.MOTD. Rendered between the welcome /
+	// alert strip and the carousel so it sits in the user's main reading
+	// path. Empty MOTD (the default) skips the row entirely.
+	if m.sess.Settings != nil {
+		if motd := strings.TrimSpace(m.sess.Settings.Get().MOTD); motd != "" {
+			parts = append(parts, theme.Notice.Render(motd))
+		}
+	}
 	parts = append(parts, strings.Repeat("\n", 2))
 	carouselIdx := len(parts)
 	parts = append(parts, carousel)

@@ -55,8 +55,22 @@ const (
 type RejectCallback func(addr net.Addr, reason RejectReason)
 
 // Tracker holds the per-IP state and global counter. One per server.
+//
+// cfg is stored as atomic.Pointer[Config] so the sysop console (via
+// settings.Cache) can rotate the active config without restarting the
+// listener. Hot-path reads do `t.cfg.Load()` once at the top of each
+// AcquireConn / AcquireHandshake call — single atomic load, no locks.
+//
+// Caveat: per-IP rate.Limiter instances are constructed once when a source
+// IP first appears, bound to the rate/burst snapshot at that moment.
+// Subsequent config rotations don't update existing buckets — they only
+// affect newly-created ones (or buckets the idle-evict GC has reaped and
+// the next conn re-creates). For a true hot-rotate of the per-IP rate we'd
+// need to walk perIP and call SetLimit/SetBurst, but that's a rare-op
+// foot­gun the current sysop UI doesn't expose; idle eviction (default
+// 5min) catches up on its own.
 type Tracker struct {
-	cfg      Config
+	cfg      atomic.Pointer[Config]
 	logger   *slog.Logger
 	onReject RejectCallback
 
@@ -79,12 +93,28 @@ func NewTracker(cfg Config, logger *slog.Logger, onReject RejectCallback) *Track
 	if cfg.IdleEvict <= 0 {
 		cfg.IdleEvict = 5 * time.Minute
 	}
-	return &Tracker{
-		cfg:      cfg,
+	t := &Tracker{
 		logger:   logger,
 		onReject: onReject,
 		perIP:    make(map[string]*ipState),
 	}
+	t.cfg.Store(&cfg)
+	return t
+}
+
+// UpdateConfig swaps the active Config. Called by the sysop settings hook
+// (see cmd/nightms/main.go) when an operator changes max_conn_per_ip /
+// max_unauth_handshakes etc. IdleEvict is preserved from the existing config
+// if the new one passes zero — we never want to disable GC by accident.
+func (t *Tracker) UpdateConfig(next Config) {
+	if next.IdleEvict <= 0 {
+		if cur := t.cfg.Load(); cur != nil {
+			next.IdleEvict = cur.IdleEvict
+		} else {
+			next.IdleEvict = 5 * time.Minute
+		}
+	}
+	t.cfg.Store(&next)
 }
 
 // Run drives the periodic GC loop that removes idle per-IP entries. Exits
@@ -92,7 +122,10 @@ func NewTracker(cfg Config, logger *slog.Logger, onReject RejectCallback) *Track
 func (t *Tracker) Run(ctx interface {
 	Done() <-chan struct{}
 }) {
-	tick := time.NewTicker(t.cfg.IdleEvict / 2)
+	// IdleEvict cadence is read once at start — operators don't change it at
+	// runtime (it's not in the settings catalog), and re-reading per tick
+	// would make a future change to IdleEvict racy with the ticker.
+	tick := time.NewTicker(t.cfg.Load().IdleEvict / 2)
 	defer tick.Stop()
 	for {
 		select {
@@ -108,7 +141,7 @@ func (t *Tracker) Run(ctx interface {
 // touched in IdleEvict. Holds the map lock for the iteration — fine because
 // GC runs every IdleEvict/2 and the map is small in any realistic deployment.
 func (t *Tracker) gc() {
-	cutoff := time.Now().Add(-t.cfg.IdleEvict).UnixNano()
+	cutoff := time.Now().Add(-t.cfg.Load().IdleEvict).UnixNano()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for k, st := range t.perIP {
@@ -135,7 +168,8 @@ func (t *Tracker) AcquireConn(addr net.Addr) (release func(), reason RejectReaso
 		return func() {}, "", true
 	}
 
-	st := t.getOrCreate(key)
+	cfg := t.cfg.Load()
+	st := t.getOrCreate(key, cfg)
 
 	// Token bucket first — a flood from one IP shouldn't even pay the
 	// concurrent-cap check cost.
@@ -145,11 +179,12 @@ func (t *Tracker) AcquireConn(addr net.Addr) (release func(), reason RejectReaso
 	}
 
 	// Concurrent cap.
-	if t.cfg.MaxConnPerIP > 0 {
+	maxPerIP := cfg.MaxConnPerIP
+	if maxPerIP > 0 {
 		// CAS-style: optimistically increment, decrement on overflow.
 		// Cheaper than holding a lock around the compare.
 		n := st.concurrent.Add(1)
-		if n > int64(t.cfg.MaxConnPerIP) {
+		if n > int64(maxPerIP) {
 			st.concurrent.Add(-1)
 			t.reject(addr, RejectIPConcurrent)
 			return nil, RejectIPConcurrent, false
@@ -162,7 +197,7 @@ func (t *Tracker) AcquireConn(addr net.Addr) (release func(), reason RejectReaso
 		if !released.CompareAndSwap(false, true) {
 			return
 		}
-		if t.cfg.MaxConnPerIP > 0 {
+		if maxPerIP > 0 {
 			st.concurrent.Add(-1)
 		}
 		st.lastSeenNs.Store(time.Now().UnixNano())
@@ -174,11 +209,12 @@ func (t *Tracker) AcquireConn(addr net.Addr) (release func(), reason RejectReaso
 // (success or failure) or the conn closes — whichever happens first. The
 // release function is single-shot; subsequent calls are no-ops.
 func (t *Tracker) AcquireHandshake(addr net.Addr) (release func(), reason RejectReason, ok bool) {
-	if t.cfg.MaxUnauthHandshakes <= 0 {
+	maxUnauth := t.cfg.Load().MaxUnauthHandshakes
+	if maxUnauth <= 0 {
 		return func() {}, "", true
 	}
 	n := t.global.Add(1)
-	if n > int64(t.cfg.MaxUnauthHandshakes) {
+	if n > int64(maxUnauth) {
 		t.global.Add(-1)
 		t.reject(addr, RejectGlobalUnauth)
 		return nil, RejectGlobalUnauth, false
@@ -202,15 +238,15 @@ func (t *Tracker) reject(addr net.Addr, reason RejectReason) {
 	}
 }
 
-func (t *Tracker) getOrCreate(key string) *ipState {
+func (t *Tracker) getOrCreate(key string, cfg *Config) *ipState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if st, ok := t.perIP[key]; ok {
 		return st
 	}
 	st := &ipState{}
-	if t.cfg.PerIPRate > 0 && t.cfg.PerIPBurst > 0 {
-		st.bucket = rate.NewLimiter(t.cfg.PerIPRate, t.cfg.PerIPBurst)
+	if cfg.PerIPRate > 0 && cfg.PerIPBurst > 0 {
+		st.bucket = rate.NewLimiter(cfg.PerIPRate, cfg.PerIPBurst)
 	}
 	t.perIP[key] = st
 	return st

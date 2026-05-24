@@ -133,6 +133,20 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 	bridgeCtx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Global session cap mirrors the SSH path — settings.MaxTotalSessions
+	// covers both surfaces so a sysop tightening it during an incident closes
+	// new logins everywhere at once.
+	var maxTotal int
+	if h.deps.Session.Security.Settings != nil {
+		maxTotal = h.deps.Session.Security.Settings.Get().MaxTotalSessions
+	}
+	if !session.AcquireForContext(bridgeCtx, maxTotal) {
+		h.deps.Logger.Warn("wsbridge session rejected: total session cap reached",
+			"handle", identity.Handle, "cap", maxTotal, "active", session.ActiveCount())
+		_ = conn.Close(websocket.StatusTryAgainLater, "server at capacity")
+		return
+	}
+
 	st := session.State{
 		Identity: known,
 		Width:    cols,

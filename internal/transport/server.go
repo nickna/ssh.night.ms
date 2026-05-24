@@ -317,6 +317,20 @@ func dispatchAuth(
 	gfx graphics.Protocol,
 	width, height int,
 ) (tea.Model, []tea.ProgramOption) {
+	// Global session cap — applied to both Known and SignupRequired branches
+	// (a user on the signup screen still occupies a session-shaped resource).
+	// Limit == 0 means unlimited; the runtime-tunable cap is read fresh from
+	// the settings cache here so a sysop tightening it during an incident
+	// takes effect immediately for new connections.
+	var maxTotal int
+	if sdeps.Security.Settings != nil {
+		maxTotal = sdeps.Security.Settings.Get().MaxTotalSessions
+	}
+	if !session.AcquireForContext(sshCtx, maxTotal) {
+		logger.Warn("session rejected: total session cap reached",
+			"handle", handle, "cap", maxTotal, "active", session.ActiveCount())
+		return screens.NewMessage("Server is at capacity — please try again shortly."), nil
+	}
 	switch d := decision.(type) {
 	case auth.Known:
 		st := session.State{
@@ -389,6 +403,7 @@ func dispatchAuth(
 			Hasher:               sdeps.Core.Hasher,
 			BootstrapSysopHandle: sdeps.Policy.BootstrapSysopHandle,
 			MinPasswordLength:    sdeps.Policy.MinPasswordLength,
+			Settings:             sdeps.Security.Settings,
 		}, sdeps.Realtime.Presence), []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
 	}
 	logger.Error("program handler reached with unexpected decision",

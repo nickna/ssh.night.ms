@@ -13,6 +13,7 @@ import (
 
 	"github.com/nickna/ssh.night.ms/internal/security/audit"
 	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
+	"github.com/nickna/ssh.night.ms/internal/settings"
 )
 
 // RateLimitParams matches the .NET PasswordHashingOptions / lockout env keys
@@ -77,12 +78,42 @@ type RedisRateLimiter struct {
 	Params RateLimitParams
 	Logger *slog.Logger
 
+	// Settings is the runtime-tunable settings cache. When non-nil, the
+	// thresholds HandleThreshold / IPThreshold / WindowDuration are read from
+	// the current snapshot on every check, falling back to Params for any
+	// snapshot value that's zero. The other Params fields (LockDuration,
+	// BackoffMax, PersistentBanThreshold, LockcountWindow) aren't exposed in
+	// the catalog — they remain env-driven via Params.
+	Settings *settings.Cache
+
 	OnPersistentBanEligible func(ip string, lockcount int64)
 	Audit                   audit.Recorder
 }
 
 func NewRedisRateLimiter(client *redis.Client, params RateLimitParams, logger *slog.Logger) *RedisRateLimiter {
 	return &RedisRateLimiter{Client: client, Params: params, Logger: logger}
+}
+
+// effective returns the params struct to use for the current check, layering
+// Settings-cache overrides over the base Params. Called on every Check /
+// RecordFailure so live tuning takes effect without restart. Cheap: one
+// atomic.Pointer load + a value copy.
+func (r *RedisRateLimiter) effective() RateLimitParams {
+	p := r.Params
+	if r.Settings == nil {
+		return p
+	}
+	snap := r.Settings.Get()
+	if snap.LockoutHandleThreshold > 0 {
+		p.HandleThreshold = snap.LockoutHandleThreshold
+	}
+	if snap.LockoutIPThreshold > 0 {
+		p.IPThreshold = snap.LockoutIPThreshold
+	}
+	if snap.LockoutWindowSeconds > 0 {
+		p.WindowDuration = time.Duration(snap.LockoutWindowSeconds) * time.Second
+	}
+	return p
 }
 
 func failHandleKey(handle string) string      { return "auth:fail:handle:" + strings.ToLower(handle) }
@@ -168,12 +199,13 @@ func (r *RedisRateLimiter) lockTTL(ctx context.Context, key string) (time.Durati
 // OnPersistentBanEligible hook fires so persistban.go can write a
 // security_ip_bans row and broadcast pub/sub invalidation.
 func (r *RedisRateLimiter) RecordFailure(ctx context.Context, handle string, sourceIP net.Addr) error {
+	eff := r.effective()
 	if handle != "" {
-		n, err := r.incrWithExpire(ctx, failHandleKey(handle), r.Params.WindowDuration)
+		n, err := r.incrWithExpire(ctx, failHandleKey(handle), eff.WindowDuration)
 		if err != nil {
 			return err
 		}
-		if n >= int64(r.Params.HandleThreshold) {
+		if n >= int64(eff.HandleThreshold) {
 			lockcount, err := r.incrWithExpire(ctx, lockcountHandleKey(handle), r.lockcountWindow())
 			if err != nil {
 				return err
@@ -197,11 +229,11 @@ func (r *RedisRateLimiter) RecordFailure(ctx context.Context, handle string, sou
 		}
 	}
 	if ip := normalizeIP(sourceIP); ip != "" {
-		n, err := r.incrWithExpire(ctx, failIPKey(ip), r.Params.WindowDuration)
+		n, err := r.incrWithExpire(ctx, failIPKey(ip), eff.WindowDuration)
 		if err != nil {
 			return err
 		}
-		if n >= int64(r.Params.IPThreshold) {
+		if n >= int64(eff.IPThreshold) {
 			lockcount, err := r.incrWithExpire(ctx, lockcountIPKey(ip), r.lockcountWindow())
 			if err != nil {
 				return err

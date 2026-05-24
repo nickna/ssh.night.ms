@@ -133,7 +133,7 @@ func (m *Register) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submitMsg:
 		m.working = false
 		if msg.err != nil {
-			m.status = registrationErrorMessage(msg.err, m.regDeps.MinPasswordLength)
+			m.status = registrationErrorMessage(msg.err, m.regDeps.MinPasswordLength, m.signupsDisabledMessage())
 			return m, nil
 		}
 		return m, func() tea.Msg { return RegisterCompletedMsg{Known: msg.known} }
@@ -195,7 +195,19 @@ func (m *Register) advanceFocus(delta int) {
 	}
 }
 
-func registrationErrorMessage(err error, minLen int) string {
+// signupsDisabledMessage returns the operator-configured message for the
+// closed-signups gate, falling back to a generic line when the settings cache
+// isn't wired (tests, stripped harness).
+func (m *Register) signupsDisabledMessage() string {
+	if m.sess != nil && m.sess.Settings != nil {
+		if msg := m.sess.Settings.Get().SignupsDisabledMessage; msg != "" {
+			return msg
+		}
+	}
+	return "New account signups are temporarily paused."
+}
+
+func registrationErrorMessage(err error, minLen int, signupsDisabledMessage string) string {
 	var rerr *auth.RegistrationErr
 	if !errors.As(err, &rerr) {
 		return "[!] " + err.Error()
@@ -212,6 +224,12 @@ func registrationErrorMessage(err error, minLen int) string {
 		return "[!] That handle is already taken. Try another."
 	case auth.RegErrKeyAlreadyUsed:
 		return "[!] That SSH key is already registered to another account. Uncheck 'Adopt the SSH key' to sign up password-only."
+	case auth.RegErrSignupsDisabled:
+		// Sysop-configured message via the settings.Cache. Passed through the
+		// Register model so the user sees the operator's words verbatim
+		// (e.g. "signups paused while we investigate spam"). Falls through
+		// to a generic line if the cache wasn't wired.
+		return "[!] " + signupsDisabledMessage
 	}
 	return "[!] Registration failed: " + rerr.Error()
 }

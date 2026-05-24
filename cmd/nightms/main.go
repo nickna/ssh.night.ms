@@ -36,6 +36,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/realtime"
 	"github.com/nickna/ssh.night.ms/internal/security/audit"
 	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
+	"github.com/nickna/ssh.night.ms/internal/settings"
 	"github.com/nickna/ssh.night.ms/internal/transport"
 	"github.com/nickna/ssh.night.ms/internal/tui/art"
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
@@ -102,6 +103,18 @@ func main() {
 	auditRecorder := audit.NewPostgresRecorder(queries, logger.With("component", "audit"), 2048)
 	go auditRecorder.Run(ctx)
 
+	// Sysop-tunable runtime settings (signups on/off, MOTD, connection caps,
+	// lockout thresholds). KV table in Postgres, in-process Snapshot, Redis
+	// pub/sub push-invalidation across replicas. Defaults are sourced from
+	// config.Options so a brand-new install behaves identically to the
+	// pre-settings build.
+	settingsCache := settings.NewCache(queries, redisClient, logger.With("component", "settings"), defaultsFromOptions(opts), 30*time.Second)
+	if err := settingsCache.Load(ctx); err != nil {
+		logger.Error("settings initial load", "err", err)
+		os.Exit(1)
+	}
+	go settingsCache.Run(ctx)
+
 	sessionDeps, holdemReg := buildSessionDeps(ctx, pool, queries, hasher, redisClient, opts, logger)
 
 	// Persistent-ban cache (Phase B): in-process map of active security_ip_bans
@@ -119,6 +132,7 @@ func main() {
 
 	rateLimiter := auth.NewRedisRateLimiter(redisClient, opts.RateLimit, logger.With("component", "rate-limit"))
 	rateLimiter.Audit = auditRecorder
+	rateLimiter.Settings = settingsCache
 	// When the per-IP lockcount crosses the persistent-ban threshold, write
 	// a security_ip_bans row and broadcast pub/sub so every replica's
 	// BanCache picks it up. Uses context.Background — the auth ctx that
@@ -146,7 +160,7 @@ func main() {
 		Audit:   auditRecorder,
 	}
 
-	attachSecurity(&sessionDeps, banCache)
+	attachSecurity(&sessionDeps, banCache, settingsCache)
 
 	// SSH-listener netlimit tracker — bounds per-IP concurrent conns + new-conn
 	// rate, plus the global in-flight unauth-handshake cap. The per-IP gates
@@ -169,6 +183,21 @@ func main() {
 		})
 	})
 	go sshTracker.Run(ctx)
+
+	// Push settings.Snapshot changes into the netlimit tracker on every
+	// refresh. OnChange fires synchronously once with the current snapshot
+	// (sync the env-derived initial state) and again on every later refresh.
+	// The per-IP rate/burst keep their env-driven values — the catalog only
+	// exposes max_conn_per_ip + max_unauth_handshakes, which are the two an
+	// operator might want to tighten during an active incident.
+	settingsCache.OnChange(func(snap settings.Snapshot) {
+		sshTracker.UpdateConfig(netlimit.Config{
+			MaxConnPerIP:        snap.MaxConnPerIP,
+			PerIPRate:           rate.Limit(opts.SSHSecurity.PerIPConnRate),
+			PerIPBurst:          opts.SSHSecurity.PerIPConnBurst,
+			MaxUnauthHandshakes: snap.MaxUnauthHandshakes,
+		})
+	})
 
 	srv, err := transport.NewServer(transport.Config{
 		Addr:             opts.SSHAddr,
@@ -389,12 +418,32 @@ func buildSessionDeps(
 	return deps, holdemReg
 }
 
-// attachSecurity bolts the BanCache onto an already-built sessionDeps. Kept
-// separate from buildSessionDeps because the BanCache is constructed AFTER
-// buildSessionDeps (it depends on the audit recorder, which depends on
-// queries, which buildSessionDeps populates). Mutates in place.
-func attachSecurity(deps *session.Deps, banCache *auth.BanCache) {
-	deps.Security = session.SecurityDeps{Bans: banCache}
+// attachSecurity bolts the BanCache + settings.Cache onto an already-built
+// sessionDeps. Kept separate from buildSessionDeps because both are
+// constructed AFTER buildSessionDeps (the BanCache depends on the audit
+// recorder; the settings cache depends on Redis being already pinged).
+// Mutates in place.
+func attachSecurity(deps *session.Deps, banCache *auth.BanCache, settingsCache *settings.Cache) {
+	deps.Security = session.SecurityDeps{Bans: banCache, Settings: settingsCache}
+}
+
+// defaultsFromOptions translates the env-driven config.Options into the
+// settings.Defaults the Cache layers under unset rows. Centralized here so
+// the settings package stays free of a config import (which would cycle:
+// settings → config → auth → settings via auth.CreateAccount).
+func defaultsFromOptions(o config.Options) settings.Defaults {
+	return settings.Defaults{
+		SignupsEnabled:         true,
+		SignupsDisabledMessage: "New account signups are temporarily paused. Please try again later.",
+		MOTD:                   "",
+		WallEnabled:            true,
+		MaxTotalSessions:       0,
+		MaxConnPerIP:           o.SSHSecurity.MaxConnPerIP,
+		MaxUnauthHandshakes:    o.SSHSecurity.MaxUnauthHandshakes,
+		LockoutHandleThreshold: o.RateLimit.HandleThreshold,
+		LockoutIPThreshold:     o.RateLimit.IPThreshold,
+		LockoutWindowSeconds:   int(o.RateLimit.WindowDuration / time.Second),
+	}
 }
 
 // buildProviders constructs the outbound HTTP-cached integrations. One Cache

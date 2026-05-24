@@ -19,6 +19,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
+	"github.com/nickna/ssh.night.ms/internal/settings"
 	"github.com/nickna/ssh.night.ms/internal/tui/art"
 )
 
@@ -108,10 +109,13 @@ type PolicyDeps struct {
 	MinPasswordLength    int
 }
 
-// SecurityDeps surfaces the BanCache to the sysop screen so the security
-// tab can list active bans and process ban-ip / unban-ip commands without
-// going through a Postgres query on every render. Nil-safe — screens
-// check before dereferencing so a stripped-down test harness can omit it.
+// SecurityDeps surfaces the BanCache + the runtime-settings Cache to screens.
+// The sysop screen consumes both — Bans for the IP-ban tab, Settings for the
+// new Settings tab and for the wall-broadcast gate. Other screens read
+// Settings for MOTD (lobby) and the signup gate (register). Nil-safe —
+// screens check before dereferencing so a stripped-down test harness can
+// omit either.
 type SecurityDeps struct {
-	Bans *auth.BanCache
+	Bans     *auth.BanCache
+	Settings *settings.Cache
 }

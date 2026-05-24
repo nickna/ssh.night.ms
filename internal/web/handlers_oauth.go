@@ -275,6 +275,13 @@ func (h *handlers) oauthFinishPost(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	// Signups kill switch — matches the SSH-side gate in auth.CreateAccount.
+	// Settings.Cache is shared between transport + web so toggling
+	// signups_enabled from the sysop console closes both surfaces in lockstep.
+	if sc := h.deps.Session.Security.Settings; sc != nil && !sc.Get().SignupsEnabled {
+		h.renderFinishError(w, r, finish, sc.Get().SignupsDisabledMessage)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return

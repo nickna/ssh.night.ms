@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/nickna/ssh.night.ms/internal/settings"
 )
 
 // RegistrationErr is the typed error returned from CreateAccount. The screen
@@ -37,6 +39,7 @@ const (
 	RegErrPasswordTooShort RegistrationErrKind = "password-too-short"
 	RegErrHandleTaken      RegistrationErrKind = "handle-taken"
 	RegErrKeyAlreadyUsed   RegistrationErrKind = "key-already-used"
+	RegErrSignupsDisabled  RegistrationErrKind = "signups-disabled"
 	RegErrInternal         RegistrationErrKind = "internal"
 )
 
@@ -62,6 +65,10 @@ type RegisterDeps struct {
 	Hasher               *Hasher
 	BootstrapSysopHandle string // matched case-insensitively; empty disables auto-promotion
 	MinPasswordLength    int
+
+	// Settings is the runtime-tunable cache consulted for the signups-enabled
+	// kill switch. Nil-safe: when omitted (tests), signups are always allowed.
+	Settings *settings.Cache
 }
 
 // CreateAccount inserts a users row + optional identity_credentials row in one
@@ -70,6 +77,12 @@ type RegisterDeps struct {
 // straight to session.Session.Identity and pick up where SignupRequired left
 // off.
 func CreateAccount(ctx context.Context, deps RegisterDeps, in RegisterInput) (Known, error) {
+	// Signups kill switch — checked before any validation work so a closed
+	// gate short-circuits cheaply. The screen translates this to the sysop-
+	// configured signups_disabled_message.
+	if deps.Settings != nil && !deps.Settings.Get().SignupsEnabled {
+		return Known{}, &RegistrationErr{Kind: RegErrSignupsDisabled}
+	}
 	handle := strings.TrimSpace(in.Handle)
 	if !isValidHandle(handle) {
 		return Known{}, &RegistrationErr{Kind: RegErrHandleInvalid}
