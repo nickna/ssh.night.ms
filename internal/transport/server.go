@@ -216,12 +216,33 @@ func dispatchAuth(
 		// the status-bar clock + every other render-time formatter can
 		// stay synchronous. A load failure leaves the zero value, which
 		// renders as UTC + ISO + 24-hour — same as a brand-new row.
+		// The same row carries the .NET-era location_* fallback that
+		// WeatherCoords() consults when the user has no saved location.
 		if sdeps.Core.Queries != nil {
 			loadCtx, cancel := context.WithTimeout(sshCtx, 2*time.Second)
 			if user, err := sdeps.Core.Queries.GetUserByID(loadCtx, d.UserID); err != nil {
 				logger.Warn("display prefs load", "handle", d.Handle, "err", err)
 			} else {
 				st.DisplayPrefs = session.DisplayPrefsFromUser(user)
+				st.ProfileLocation = session.ProfileLocationFromUser(user)
+			}
+			cancel()
+		}
+		// One-shot backfill: when the user has nothing in
+		// user_saved_locations but the legacy users.location_* columns
+		// are populated (carry-over from the .NET stack), seed a single
+		// row so the Profile screen's saved-locations list and
+		// WeatherCoords() converge on the same source of truth. After
+		// this point the read-through fallback in WeatherCoords() is a
+		// safety net rather than the active path.
+		if st.PrimaryLocation == nil && st.ProfileLocation != nil && sdeps.Realtime.Locations != nil {
+			seedCtx, cancel := context.WithTimeout(sshCtx, 2*time.Second)
+			if seeded, err := sdeps.Realtime.Locations.SeedFromProfile(seedCtx, d.UserID,
+				st.ProfileLocation.Label, st.ProfileLocation.Canonical,
+				st.ProfileLocation.Lat, st.ProfileLocation.Lon); err != nil {
+				logger.Warn("profile-location backfill", "handle", d.Handle, "err", err)
+			} else if seeded != nil {
+				st.PrimaryLocation = seeded
 			}
 			cancel()
 		}

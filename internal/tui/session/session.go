@@ -25,6 +25,20 @@ type WeatherDefaults struct {
 	Label string
 }
 
+// ProfileLocation is the user's .NET-era profile city, sourced from the
+// users.location / location_canonical / location_latitude / location_longitude
+// columns the .NET stack wrote to. Used as a fallback between
+// PrimaryLocation and WeatherDefaults so users carrying data over from
+// .NET don't see the default city until they've added an entry to
+// user_saved_locations. Also fed into LocationService.SeedFromProfile
+// at login to backfill an explicit saved-location row.
+type ProfileLocation struct {
+	Label     string
+	Canonical string
+	Lat       float64
+	Lon       float64
+}
+
 // GalleryProvider is the contract the Gallery screen depends on. Implemented
 // by art.FileSystemGallery; defined here so screens don't import the art
 // package's loader directly.
@@ -52,6 +66,13 @@ type State struct {
 	// defaults via WeatherDefaults". Loaded once at login by the transport
 	// layer; refreshed by the Profile screen after mutating the list.
 	PrimaryLocation *realtime.SavedLocation
+
+	// ProfileLocation is the legacy users.location_* fallback, loaded
+	// from the user row at login. Consulted by WeatherCoords() between
+	// PrimaryLocation and WeatherDefaults so .NET-era profile data still
+	// drives the weather/map screens for users who haven't yet added a
+	// saved location.
+	ProfileLocation *ProfileLocation
 
 	// DisplayPrefs is the cached time / date / clock format slice of the
 	// user row. Loaded once at session-attach so render hot paths (status
@@ -142,12 +163,16 @@ func (s *Session) CtxWithTimeout(timeout time.Duration) (context.Context, contex
 }
 
 // WeatherCoords returns the lat/lon/label the Weather screen should query.
-// Consults the user's cached primary saved location (if any), falling back
-// to the env-var defaults. The cache is loaded at login and refreshed
-// whenever the Profile screen mutates the location list.
+// Resolution order: user's primary saved location → legacy profile city
+// (users.location_*) → env-var defaults. The first two are cached at login;
+// the saved-location cache is refreshed whenever the Profile screen mutates
+// the list.
 func (s *Session) WeatherCoords() (lat, lon float64, label string) {
 	if s.PrimaryLocation != nil {
 		return s.PrimaryLocation.Latitude, s.PrimaryLocation.Longitude, s.PrimaryLocation.Label
+	}
+	if s.ProfileLocation != nil {
+		return s.ProfileLocation.Lat, s.ProfileLocation.Lon, s.ProfileLocation.Label
 	}
 	return s.WeatherDefaults.Lat, s.WeatherDefaults.Lon, s.WeatherDefaults.Label
 }

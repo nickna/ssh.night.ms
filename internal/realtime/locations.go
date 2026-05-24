@@ -141,6 +141,27 @@ func (s *LocationService) Add(ctx context.Context, userID int64, label, canonica
 	return locationFromRow(row), nil
 }
 
+// SeedFromProfile inserts a single saved-location row representing the
+// user's legacy .NET profile city (users.location_*). One-shot login-time
+// backfill: a fresh List() check inside makes the call a no-op when the
+// user already has any saved rows, so a racing concurrent login won't
+// double-seed and an explicit user choice is never overwritten. Returns
+// (nil, nil) when the list is already non-empty.
+func (s *LocationService) SeedFromProfile(ctx context.Context, userID int64, label, canonical string, lat, lon float64) (*SavedLocation, error) {
+	existing, err := s.Queries.ListUserSavedLocations(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("locations: seed precheck: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil, nil
+	}
+	row, err := s.Add(ctx, userID, label, canonical, lat, lon)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 // Delete removes the row by id. The (id, user_id) match in SQL guards
 // against one user deleting another's row. Returns nil even when no row
 // matched — the desired end-state is reached either way.

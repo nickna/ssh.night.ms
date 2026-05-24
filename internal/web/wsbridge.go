@@ -156,8 +156,25 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 			h.deps.Logger.Warn("wsbridge: display prefs load", "handle", known.Handle, "err", err)
 		} else {
 			st.DisplayPrefs = session.DisplayPrefsFromUser(user)
+			st.ProfileLocation = session.ProfileLocationFromUser(user)
 		}
 		loadCancel()
+	}
+	// One-shot backfill of user_saved_locations from the .NET-era
+	// users.location_* columns. Mirrors the same block in transport so
+	// both surfaces converge on a single saved-location row after first
+	// login. SeedFromProfile is internally idempotent (re-checks the list)
+	// so a racing SSH + web login won't double-insert.
+	if st.PrimaryLocation == nil && st.ProfileLocation != nil && h.deps.Locations != nil {
+		seedCtx, seedCancel := context.WithTimeout(r.Context(), 2*time.Second)
+		if seeded, err := h.deps.Locations.SeedFromProfile(seedCtx, known.UserID,
+			st.ProfileLocation.Label, st.ProfileLocation.Canonical,
+			st.ProfileLocation.Lat, st.ProfileLocation.Lon); err != nil {
+			h.deps.Logger.Warn("wsbridge: profile-location backfill", "handle", known.Handle, "err", err)
+		} else if seeded != nil {
+			st.PrimaryLocation = seeded
+		}
+		seedCancel()
 	}
 	// Web clients can't negotiate kitty/iTerm/sixel — xterm.js renders the
 	// half-block fallback every time.

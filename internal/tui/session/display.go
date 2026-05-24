@@ -46,6 +46,39 @@ func DisplayPrefsFromUser(u gen.User) DisplayPrefs {
 	}
 }
 
+// ProfileLocationFromUser pulls the legacy .NET location_* columns off a
+// users row into a *ProfileLocation. Returns nil when lat/lon are NULL —
+// callers should treat that as "no profile city set" and fall through to
+// the next fallback. Label preference: users.location (typed city name) →
+// users.location_canonical (geocoder-disambiguated form). Both empty +
+// non-null coords yields a coordinate string so the carry-over still
+// renders a label rather than blanking.
+func ProfileLocationFromUser(u gen.User) *ProfileLocation {
+	if u.LocationLatitude == nil || u.LocationLongitude == nil {
+		return nil
+	}
+	label := ""
+	if u.Location != nil {
+		label = *u.Location
+	}
+	canonical := ""
+	if u.LocationCanonical != nil {
+		canonical = *u.LocationCanonical
+	}
+	if label == "" {
+		label = canonical
+	}
+	if label == "" {
+		label = fmt.Sprintf("%.4f, %.4f", *u.LocationLatitude, *u.LocationLongitude)
+	}
+	return &ProfileLocation{
+		Label:     label,
+		Canonical: canonical,
+		Lat:       *u.LocationLatitude,
+		Lon:       *u.LocationLongitude,
+	}
+}
+
 // resolveLocation maps the stored IANA id to a *time.Location. Stale ids
 // (zone retired after the row was written) silently fall back to UTC
 // rather than throwing — a broken tz id should never break a render path.
