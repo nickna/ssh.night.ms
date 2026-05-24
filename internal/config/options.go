@@ -56,6 +56,19 @@ type Options struct {
 	Argon2Params auth.Argon2Params
 	RateLimit    auth.RateLimitParams
 
+	// PersistentBanDuration is the TTL applied to security_ip_bans rows
+	// written by the auto-promotion path (when an IP's lockcount crosses
+	// RateLimit.PersistentBanThreshold). Sysop-issued bans take an explicit
+	// duration via the ban-ip command. Default 24h.
+	PersistentBanDuration time.Duration
+
+	// SSHSecurity bundles the connection-level controls applied to the SSH
+	// listener: protocol-layer caps (MaxAuthTries, LoginGrace) and the
+	// netlimit gates (per-IP concurrent + token bucket, global
+	// unauthenticated-handshake cap). See the Security section of CLAUDE.md
+	// for the full env-var contract.
+	SSHSecurity SSHSecurityOptions
+
 	// OAuth — each pair is independent. Empty client_id disables the
 	// provider; the login page hides its button accordingly. OAuthRedirectBase
 	// is the externally-reachable scheme + host (+ port) the provider
@@ -69,6 +82,34 @@ type Options struct {
 	// ORSAPIKey enables the Map screen's directions affordance when set.
 	// Empty disables routing — the map still works for browsing.
 	ORSAPIKey string
+}
+
+// SSHSecurityOptions holds the SSH listener's protocol- and network-layer
+// hardening knobs. Defaults are picked to be safe out of the box for a
+// small public BBS; production deployments can tighten them via the
+// NIGHTMS_SSH_* env vars.
+type SSHSecurityOptions struct {
+	// MaxAuthTries → gossh.ServerConfig.MaxAuthTries. Default 3.
+	MaxAuthTries int
+
+	// LoginGrace caps the wall-clock time the handshake + auth has to
+	// complete; zero disables. Default 30s.
+	LoginGrace time.Duration
+
+	// MaxConnPerIP caps concurrent TCP conns from one source (IPv6 /64-
+	// collapsed). Zero disables. Default 10.
+	MaxConnPerIP int
+
+	// PerIPConnRate is the new-conn token-bucket rate (conns/sec) per source.
+	// Zero disables the rate-limit. Default 5.
+	PerIPConnRate float64
+
+	// PerIPConnBurst is the bucket depth. Zero disables. Default 20.
+	PerIPConnBurst int
+
+	// MaxUnauthHandshakes caps in-flight unauthenticated handshakes process-
+	// wide (the in-process MaxStartups). Zero disables. Default 100.
+	MaxUnauthHandshakes int
 }
 
 // Load reads environment variables and falls back to sensible defaults that
@@ -108,10 +149,22 @@ func Load() Options {
 		WeatherLon:       floatEnv("NIGHTMS_WEATHER_LON", -74.0060),
 		WeatherLabel:     envOr("NIGHTMS_WEATHER_LABEL", "New York"),
 		RateLimit: auth.RateLimitParams{
-			HandleThreshold: int(uintEnv("NIGHTMS_LOCKOUT_HANDLE_THRESHOLD", 5)),
-			IPThreshold:     int(uintEnv("NIGHTMS_LOCKOUT_IP_THRESHOLD", 20)),
-			WindowDuration:  time.Duration(uintEnv("NIGHTMS_LOCKOUT_WINDOW_SECONDS", 900)) * time.Second,
-			LockDuration:    time.Duration(uintEnv("NIGHTMS_LOCKOUT_SECONDS", 900)) * time.Second,
+			HandleThreshold:        int(uintEnv("NIGHTMS_LOCKOUT_HANDLE_THRESHOLD", 5)),
+			IPThreshold:            int(uintEnv("NIGHTMS_LOCKOUT_IP_THRESHOLD", 20)),
+			WindowDuration:         time.Duration(uintEnv("NIGHTMS_LOCKOUT_WINDOW_SECONDS", 900)) * time.Second,
+			LockDuration:           time.Duration(uintEnv("NIGHTMS_LOCKOUT_SECONDS", 900)) * time.Second,
+			BackoffMax:             int(uintEnv("NIGHTMS_LOCKOUT_BACKOFF_MAX", 5)),
+			PersistentBanThreshold: int(uintEnv("NIGHTMS_PERSISTENT_BAN_THRESHOLD", 3)),
+			LockcountWindow:        time.Duration(uintEnv("NIGHTMS_LOCKCOUNT_WINDOW_SECONDS", 86400)) * time.Second,
+		},
+		PersistentBanDuration: time.Duration(uintEnv("NIGHTMS_PERSISTENT_BAN_DURATION_SECONDS", 86400)) * time.Second,
+		SSHSecurity: SSHSecurityOptions{
+			MaxAuthTries:        int(uintEnv("NIGHTMS_SSH_MAX_AUTH_TRIES", 3)),
+			LoginGrace:          time.Duration(uintEnv("NIGHTMS_SSH_LOGIN_GRACE_SECONDS", 30)) * time.Second,
+			MaxConnPerIP:        int(uintEnv("NIGHTMS_SSH_MAX_CONN_PER_IP", 10)),
+			PerIPConnRate:       floatEnv("NIGHTMS_SSH_CONN_RATE_PER_IP", 5),
+			PerIPConnBurst:      int(uintEnv("NIGHTMS_SSH_CONN_BURST_PER_IP", 20)),
+			MaxUnauthHandshakes: int(uintEnv("NIGHTMS_SSH_MAX_UNAUTH_HANDSHAKES", 100)),
 		},
 		GoogleClientID:        os.Getenv("NIGHTMS_GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:    os.Getenv("NIGHTMS_GOOGLE_CLIENT_SECRET"),

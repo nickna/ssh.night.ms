@@ -36,6 +36,7 @@ type Deps struct {
 	Art       ArtDeps
 	Games     GameDeps
 	Policy    PolicyDeps
+	Security  SecurityDeps
 }
 
 // CoreDeps is the irreducible base every layer needs.
@@ -105,4 +106,12 @@ type PolicyDeps struct {
 	WeatherDefaults      WeatherDefaults
 	BootstrapSysopHandle string
 	MinPasswordLength    int
+}
+
+// SecurityDeps surfaces the BanCache to the sysop screen so the security
+// tab can list active bans and process ban-ip / unban-ip commands without
+// going through a Postgres query on every render. Nil-safe — screens
+// check before dereferencing so a stripped-down test harness can omit it.
+type SecurityDeps struct {
+	Bans *auth.BanCache
 }

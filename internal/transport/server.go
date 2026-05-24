@@ -19,6 +19,8 @@ import (
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
 	"github.com/nickna/ssh.night.ms/internal/imaging/graphics"
+	"github.com/nickna/ssh.night.ms/internal/security/audit"
+	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
 	"github.com/nickna/ssh.night.ms/internal/tui"
 	"github.com/nickna/ssh.night.ms/internal/tui/screens"
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
@@ -28,6 +30,32 @@ type Config struct {
 	Addr        string
 	HostKeyDir  string
 	IdleTimeout time.Duration
+
+	// MaxAuthTries caps password/pubkey attempts per TCP connection. Mapped
+	// to gossh.ServerConfig.MaxAuthTries via the ServerConfigCallback set on
+	// the returned *ssh.Server. Zero defers to gossh's default of 6.
+	MaxAuthTries int
+
+	// LoginGrace is the wall-clock deadline that fires if the SSH handshake
+	// and auth don't complete in time — the in-process equivalent of
+	// OpenSSH's LoginGraceTime, defending against slowloris-style handshake
+	// stalls. Zero disables. Enforced by wrapping the conn in
+	// netlimit.DeadlineConn from the ConnCallback; the deadline is cleared
+	// by the auth callback on a successful Known / SignupRequired decision.
+	LoginGrace time.Duration
+
+	// HandshakeTracker, when non-nil, enforces a process-wide cap on
+	// in-flight unauthenticated handshakes (MaxStartups equivalent). The
+	// per-IP gates live on the wrapped net.Listener, not here, because they
+	// can reject before any ssh.Context exists.
+	HandshakeTracker *netlimit.Tracker
+
+	// Audit, when non-nil, receives HandshakeFailed events from the SSH
+	// server's ConnectionFailedCallback and ConnRejectedOverlimit when the
+	// HandshakeTracker rejects a connection mid-callback. Both surfaces are
+	// invisible to the auth pipeline so without this hook scanners and
+	// slowloris-killed conns wouldn't show up anywhere structured.
+	Audit audit.Recorder
 }
 
 type Server struct {
@@ -53,6 +81,11 @@ type authResultKey struct{}
 // password handler reads this to attach the offered triplet to a SignupRequired
 // so the register screen can show the key-adoption checkbox.
 type offeredKeyKey struct{}
+
+// deadlineConnKey holds the *netlimit.DeadlineConn that wraps the per-conn
+// TCP socket so the auth callbacks can clear the handshake deadline and
+// release the global unauth-handshake slot on a successful decision.
+type deadlineConnKey struct{}
 
 type offeredKey struct {
 	Fingerprint string
@@ -85,11 +118,99 @@ func NewServer(cfg Config, deps Deps, logger *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// MaxAuthTries lives on gossh.ServerConfig, not on ssh.Server — wish has
+	// no helper so we install a ServerConfigCallback that returns a minimal
+	// config with the cap set. gliderlabs/ssh merges the returned config with
+	// its own (pubkey/password callbacks etc.) so it's safe to leave the
+	// other fields zero here.
+	if cfg.MaxAuthTries > 0 {
+		s.ServerConfigCallback = func(ctx ssh.Context) *gossh.ServerConfig {
+			return &gossh.ServerConfig{MaxAuthTries: cfg.MaxAuthTries}
+		}
+	}
+
+	// ConnCallback runs before the SSH handshake. We use it for two things:
+	//   1. Acquire a global unauthenticated-handshake slot (MaxStartups
+	//      equivalent). If the cap is exceeded, close the conn — the
+	//      handshake reader will then error and ConnectionFailedCallback
+	//      fires with the reject already attributed.
+	//   2. Wrap the conn in a deadline (LoginGraceTime). The auth callback
+	//      clears the deadline on a successful Known / SignupRequired
+	//      decision; otherwise the deadline fires and the handshake aborts.
+	//
+	// The wrapper (*netlimit.DeadlineConn) carries an onClose hook that
+	// releases the global handshake slot, so a slowloris-killed conn frees
+	// its slot at close time even though auth never ran.
+	if cfg.HandshakeTracker != nil || cfg.LoginGrace > 0 {
+		s.ConnCallback = func(ctx ssh.Context, conn net.Conn) net.Conn {
+			var release func()
+			if cfg.HandshakeTracker != nil {
+				rel, reason, ok := cfg.HandshakeTracker.AcquireHandshake(conn.RemoteAddr())
+				if !ok {
+					logger.Warn("ssh: handshake rejected by netlimit",
+						"remote", conn.RemoteAddr().String(),
+						"reason", string(reason))
+					if cfg.Audit != nil {
+						cfg.Audit.Record(ctx, audit.ConnRejectedOverlimit{
+							IP:     netlimit.CollapseIP(conn.RemoteAddr()),
+							Reason: string(reason),
+						})
+					}
+					_ = conn.Close()
+					return conn
+				}
+				release = rel
+			}
+			dc := netlimit.WrapWithDeadline(conn, cfg.LoginGrace, release)
+			ctx.SetValue(deadlineConnKey{}, dc)
+			return dc
+		}
+	}
+
+	// ConnectionFailedCallback fires for handshake errors — bad MAC, version-
+	// string scanners, protocol downgrade probes, slowloris-killed conns.
+	// None of these reach the auth callbacks, so without this hook they're
+	// invisible to operators. Routes into both slog (always) and the
+	// structured audit recorder (when wired).
+	s.ConnectionFailedCallback = func(conn net.Conn, err error) {
+		remote := ""
+		if conn != nil && conn.RemoteAddr() != nil {
+			remote = conn.RemoteAddr().String()
+		}
+		logger.Warn("ssh: handshake failed", "remote", remote, "err", err.Error())
+		if cfg.Audit != nil && conn != nil {
+			cfg.Audit.Record(context.Background(), audit.HandshakeFailed{
+				IP:  netlimit.CollapseIP(conn.RemoteAddr()),
+				Err: err.Error(),
+			})
+		}
+	}
+
 	return &Server{inner: s, logger: logger}, nil
 }
 
 func (s *Server) ListenAndServe() error              { return s.inner.ListenAndServe() }
 func (s *Server) Shutdown(ctx context.Context) error { return s.inner.Shutdown(ctx) }
+
+// ServeWithListener runs the SSH server against a caller-provided listener
+// instead of opening one from cfg.Addr. main wraps the raw TCP listener in
+// netlimit.Listener to enforce per-IP gates before the SSH handshake starts,
+// and routes through this method so the wrap actually takes effect.
+func (s *Server) ServeWithListener(l net.Listener) error { return s.inner.Serve(l) }
+
+// clearHandshakeState removes the LoginGraceTime deadline and releases the
+// global unauthenticated-handshake slot. Called by the auth callbacks on a
+// successful Known / SignupRequired decision. Idempotent thanks to the
+// underlying onClose / cleared guards on *netlimit.DeadlineConn.
+func clearHandshakeState(ctx ssh.Context) {
+	if v := ctx.Value(deadlineConnKey{}); v != nil {
+		if dc, ok := v.(*netlimit.DeadlineConn); ok {
+			dc.ClearDeadline()
+			dc.FireOnClose()
+		}
+	}
+}
 
 func pubKeyHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PublicKeyHandler {
 	return func(ctx ssh.Context, key ssh.PublicKey) bool {
@@ -97,6 +218,7 @@ func pubKeyHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PublicKeyHandle
 		fingerprint := gossh.FingerprintSHA256(key)
 		algorithm := key.Type()
 		blob := key.Marshal()
+		ip := ctx.RemoteAddr()
 
 		// Remember the offered key for this session regardless of how the
 		// decision goes — used by the password handler if the user falls
@@ -107,10 +229,11 @@ func pubKeyHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PublicKeyHandle
 			Blob:        blob,
 		})
 
-		decision := lookup.ByPublicKey(ctx, handle, fingerprint, algorithm, blob)
+		decision := lookup.ByPublicKey(ctx, handle, fingerprint, algorithm, blob, ip)
 		ctx.SetValue(authResultKey{}, decision)
 
 		if _, ok := decision.(auth.Known); ok {
+			clearHandshakeState(ctx)
 			logger.Info("publickey auth ok", "handle", handle, "fp", fingerprint)
 			return true
 		}
@@ -133,6 +256,7 @@ func passwordHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PasswordHandl
 		switch d := decision.(type) {
 		case auth.Known:
 			ctx.SetValue(authResultKey{}, decision)
+			clearHandshakeState(ctx)
 			logger.Info("password auth ok", "handle", handle)
 			return true
 		case auth.SignupRequired:
@@ -141,6 +265,7 @@ func passwordHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PasswordHandl
 			offered, _ := ctx.Value(offeredKeyKey{}).(offeredKey)
 			d = mergeOfferedKey(d, offered)
 			ctx.SetValue(authResultKey{}, d)
+			clearHandshakeState(ctx)
 			logger.Info("password auth → signup", "handle", handle, "has_offered_key", d.OfferedFingerprint != "")
 			return true
 		}

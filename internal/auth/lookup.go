@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
+	"github.com/nickna/ssh.night.ms/internal/security/audit"
+	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
 )
 
 // CredentialProviderSSH is the value of the identity_credentials.provider column
@@ -24,20 +26,44 @@ const CredentialProviderSSH = "Ssh"
 // and (later) the web /login/password endpoint. Mirrors src/Night.Ms.SshServer/
 // Auth/AuthLookupService.cs from the .NET project.
 //
-// Lifetime: process-singleton. Stateless; holds a pgxpool + hasher + rate limiter.
+// Lifetime: process-singleton. Stateless; holds a pgxpool + hasher + rate
+// limiter + (optional) persistent-ban cache.
 type Lookup struct {
 	Pool    *pgxpool.Pool
 	Queries *gen.Queries
 	Hasher  *Hasher
 	Limiter RateLimiter
 	Logger  *slog.Logger
+
+	// Bans, when non-nil, is consulted first on every auth attempt. A
+	// matching active ban short-circuits to Banned regardless of credential
+	// validity — once an IP is on the persistent list, even a valid pubkey
+	// can't get in until the ban expires or a sysop revokes it.
+	Bans *BanCache
+
+	// Audit, when non-nil, receives an AuthSuccess / AuthFailure event for
+	// every terminal decision out of ByPublicKey / ByPassword. Nil here is
+	// the default for unit tests; production wires audit.NewPostgresRecorder.
+	Audit audit.Recorder
 }
 
 // ByPublicKey is the publickey auth path. Handle comes from the SSH username,
 // fingerprint is SHA256:base64(sha256(blob)) — the format produced by
 // golang.org/x/crypto/ssh.FingerprintSHA256, which matches what the .NET
 // OpenSshPublicKeyParser computes.
-func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm string, blob []byte) Decision {
+//
+// sourceIP is consulted by the optional BanCache to short-circuit known-bad
+// IPs even when they present a valid key. Pass nil to skip the ban check
+// (e.g., from tests that don't simulate a network address).
+//
+// The named return `decision` lets the deferred audit emit see whatever the
+// body returns without rewriting every `return` site — the audit wiring is
+// purely additive.
+func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm string, blob []byte, sourceIP net.Addr) (decision Decision) {
+	defer func() { l.emitAuthAudit(ctx, "publickey", handle, sourceIP, decision) }()
+	if d := l.checkPersistentBan(sourceIP); d != nil {
+		return d
+	}
 	if handle == "" {
 		return Refused{Reason: "empty handle"}
 	}
@@ -102,10 +128,23 @@ func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm
 // wall time on the failure paths (unknown user, no-password, banned, rate-
 // limited, wrong password) so wall-clock timing leaks no information about
 // account state.
-func (l *Lookup) ByPassword(ctx context.Context, handle, secret string, sourceIP net.Addr) Decision {
-	if handle == "" {
-		// Even empty handles get the dummy work so timing matches the populated path.
+func (l *Lookup) ByPassword(ctx context.Context, handle, secret string, sourceIP net.Addr) (decision Decision) {
+	defer func() { l.emitAuthAudit(ctx, "password", handle, sourceIP, decision) }()
+	if d := l.checkPersistentBan(sourceIP); d != nil {
+		// Burn the dummy so wall-time on the banned path matches the
+		// normal-failure path. An attacker who knows their IP is banned
+		// can't probe whether the cache caught it by timing.
 		l.Hasher.VerifyDummy(secret)
+		return d
+	}
+	if handle == "" {
+		// Empty handles still pay the dummy Argon2id so wall-time matches
+		// the populated path, AND still bump the per-IP failure counter so
+		// a spray of empty-handle attempts trips the IP lockout rather than
+		// free-rolling against the limiter (RecordFailure with handle=""
+		// is a no-op for the handle counter but increments the IP one).
+		l.Hasher.VerifyDummy(secret)
+		_ = l.Limiter.RecordFailure(ctx, "", sourceIP)
 		return Refused{Reason: "empty handle"}
 	}
 
@@ -178,6 +217,58 @@ func (l *Lookup) ByPassword(ctx context.Context, handle, secret string, sourceIP
 		Handle:  user.Handle,
 		IsSysop: user.IsSysop,
 	}
+}
+
+// emitAuthAudit translates a terminal Decision into the matching audit Event
+// and forwards it to the recorder. The handle argument is the caller-
+// supplied SSH username (may be empty); for Known we prefer the canonical
+// handle on the decision so the audit row matches the users table.
+// SignupRequired is intentionally not emitted — it's an onboarding signal,
+// not a security event, and emitting it would clutter the feed.
+func (l *Lookup) emitAuthAudit(ctx context.Context, method, handle string, sourceIP net.Addr, decision Decision) {
+	if l.Audit == nil || decision == nil {
+		return
+	}
+	ip := ""
+	if sourceIP != nil {
+		ip = netlimit.CollapseIP(sourceIP)
+	}
+	switch d := decision.(type) {
+	case Known:
+		l.Audit.Record(ctx, audit.AuthSuccess{Handle: d.Handle, IP: ip, Method: method})
+	case SignupRequired:
+		// no-op
+	case Banned:
+		l.Audit.Record(ctx, audit.AuthFailure{
+			Handle: handle, IP: ip, Method: method, Reason: "banned: " + d.Reason,
+		})
+	case RateLimited:
+		l.Audit.Record(ctx, audit.AuthFailure{
+			Handle: handle, IP: ip, Method: method, Reason: "rate-limited",
+		})
+	case Refused:
+		l.Audit.Record(ctx, audit.AuthFailure{
+			Handle: handle, IP: ip, Method: method, Reason: d.Reason,
+		})
+	}
+}
+
+// checkPersistentBan consults the BanCache (if wired) and returns a Banned
+// decision when sourceIP — collapsed to its canonical key — has an active
+// row in security_ip_bans. Returns nil to mean "no ban; proceed". Centralized
+// here so both ByPublicKey and ByPassword share the same gate.
+func (l *Lookup) checkPersistentBan(sourceIP net.Addr) Decision {
+	if l.Bans == nil || sourceIP == nil {
+		return nil
+	}
+	key := netlimit.CollapseIP(sourceIP)
+	if key == "" {
+		return nil
+	}
+	if banned, _ := l.Bans.IsBanned(key); banned {
+		return Banned{Reason: "ip persistently banned"}
+	}
+	return nil
 }
 
 // rehashAsync re-hashes a password with current params and writes it back. Runs

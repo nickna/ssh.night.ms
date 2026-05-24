@@ -112,6 +112,7 @@ type Session struct {
 	ProviderDeps
 	ArtDeps
 	GameDeps
+	SecurityDeps
 
 	// Embedded mutable state: same flat-access convenience (sess.Identity,
 	// sess.Width, sess.DisplayPrefs, ...).
@@ -138,6 +139,7 @@ func New(deps Deps, st State, sshCtx context.Context, gfx graphics.Protocol) *Se
 		ProviderDeps:    deps.Providers,
 		ArtDeps:         deps.Art,
 		GameDeps:        deps.Games,
+		SecurityDeps:    deps.Security,
 		State:           st,
 	}
 }

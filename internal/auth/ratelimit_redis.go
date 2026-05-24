@@ -10,46 +10,87 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/nickna/ssh.night.ms/internal/security/audit"
+	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
 )
 
 // RateLimitParams matches the .NET PasswordHashingOptions / lockout env keys
-// (NIGHTMS_LOCKOUT_*). Defaults: 5 per-handle fails / 20 per-IP fails inside a
-// 15-minute window trigger a 15-minute lockout.
+// (NIGHTMS_LOCKOUT_*) plus the exponential-backoff + persistent-ban additions
+// from the Phase B hardening pass. Defaults: 5 per-handle fails / 20 per-IP
+// fails inside a 15-minute window trigger a 15-minute lockout. Each
+// successive lockout within 24h doubles the lock duration up to BackoffMax.
+// After PersistentBanThreshold lockouts within 24h the IP becomes eligible
+// for a sysop-visible persistent ban (handled by the OnPersistentBanEligible
+// callback wired in main).
 type RateLimitParams struct {
 	HandleThreshold int
 	IPThreshold     int
-	WindowDuration  time.Duration // how long failures stay counted
-	LockDuration    time.Duration // how long a lockout persists once tripped
+	WindowDuration  time.Duration // how long failures stay counted (sliding)
+	LockDuration    time.Duration // base lock duration; multiplied by 1<<min(n-1, BackoffMax)
+
+	// BackoffMax caps the exponential multiplier shift: 0 = flat, 5 = up
+	// to ×32. With LockDuration=15m, BackoffMax=5 caps the longest
+	// auto-lock at 8h.
+	BackoffMax int
+
+	// PersistentBanThreshold is the per-IP lockcount within LockcountWindow
+	// at which the limiter flags the IP for persistent ban (typically 3).
+	// Zero disables the persistent-ban escalation entirely; the limiter
+	// still applies exponential lockouts.
+	PersistentBanThreshold int
+
+	// LockcountWindow is the sliding TTL on the lockcount counter (typically
+	// 24h). Refreshed on every INCR so a patient attacker doesn't drop out
+	// of the window by spacing their attempts just-so.
+	LockcountWindow time.Duration
 }
 
 // DefaultRateLimitParams returns the same numbers the .NET stack defaults to,
 // so two stacks pointed at the same Redis would lock the same accounts at
-// the same thresholds during cutover.
+// the same thresholds during cutover. Adds the Phase B defaults.
 func DefaultRateLimitParams() RateLimitParams {
 	return RateLimitParams{
-		HandleThreshold: 5,
-		IPThreshold:     20,
-		WindowDuration:  15 * time.Minute,
-		LockDuration:    15 * time.Minute,
+		HandleThreshold:        5,
+		IPThreshold:            20,
+		WindowDuration:         15 * time.Minute,
+		LockDuration:           15 * time.Minute,
+		BackoffMax:             5,
+		PersistentBanThreshold: 3,
+		LockcountWindow:        24 * time.Hour,
 	}
 }
 
 // RedisRateLimiter is the production limiter, backed by Redis INCR/EXPIRE
 // counters and TTL'd lock keys. Implements the RateLimiter interface.
+//
+// OnPersistentBanEligible is an optional hook fired when a per-IP lockcount
+// crosses PersistentBanThreshold. The implementation in
+// internal/auth/persistban.go upserts a row into security_ip_bans and
+// broadcasts a Redis pub/sub invalidation so the BanCache picks up the new
+// ban on every replica.
+//
+// Audit, when non-nil, receives LockoutHandle / LockoutIP events at the
+// moment a lock is set. Nil-safe — tests can skip it.
 type RedisRateLimiter struct {
 	Client *redis.Client
 	Params RateLimitParams
 	Logger *slog.Logger
+
+	OnPersistentBanEligible func(ip string, lockcount int64)
+	Audit                   audit.Recorder
 }
 
 func NewRedisRateLimiter(client *redis.Client, params RateLimitParams, logger *slog.Logger) *RedisRateLimiter {
 	return &RedisRateLimiter{Client: client, Params: params, Logger: logger}
 }
 
-func failHandleKey(handle string) string { return "auth:fail:handle:" + strings.ToLower(handle) }
-func failIPKey(ip string) string         { return "auth:fail:ip:" + ip }
-func lockHandleKey(handle string) string { return "auth:lock:handle:" + strings.ToLower(handle) }
-func lockIPKey(ip string) string         { return "auth:lock:ip:" + ip }
+func failHandleKey(handle string) string      { return "auth:fail:handle:" + strings.ToLower(handle) }
+func failIPKey(ip string) string              { return "auth:fail:ip:" + ip }
+func lockHandleKey(handle string) string      { return "auth:lock:handle:" + strings.ToLower(handle) }
+func lockIPKey(ip string) string              { return "auth:lock:ip:" + ip }
+func lockcountHandleKey(handle string) string { return "auth:lockcount:handle:" + strings.ToLower(handle) }
+func lockcountIPKey(ip string) string         { return "auth:lockcount:ip:" + ip }
 
 // normalizeIP strips the port from a net.Addr.String() so the lockout key is
 // stable across multiple connection attempts from the same address.
@@ -117,6 +158,15 @@ func (r *RedisRateLimiter) lockTTL(ctx context.Context, key string) (time.Durati
 // RecordFailure bumps the failure counters and may flip a lock on. The
 // counters' TTLs are reset to the window each time we INCR so the window is
 // effectively sliding (which matches the .NET behavior).
+//
+// Phase B: when a threshold trips, the lock duration is computed by INCRing
+// a sliding-TTL lockcount counter and applying the exponential backoff
+// 1 << min(lockcount-1, BackoffMax). The fail counter is cleared after the
+// lock is set so the NEXT lockout starts a fresh fail-count window — the
+// escalation lives entirely in the lockcount key (24h sliding TTL). On the
+// IP path, if the lockcount crosses PersistentBanThreshold, the
+// OnPersistentBanEligible hook fires so persistban.go can write a
+// security_ip_bans row and broadcast pub/sub invalidation.
 func (r *RedisRateLimiter) RecordFailure(ctx context.Context, handle string, sourceIP net.Addr) error {
 	if handle != "" {
 		n, err := r.incrWithExpire(ctx, failHandleKey(handle), r.Params.WindowDuration)
@@ -124,10 +174,26 @@ func (r *RedisRateLimiter) RecordFailure(ctx context.Context, handle string, sou
 			return err
 		}
 		if n >= int64(r.Params.HandleThreshold) {
-			if err := r.Client.Set(ctx, lockHandleKey(handle), "1", r.Params.LockDuration).Err(); err != nil {
+			lockcount, err := r.incrWithExpire(ctx, lockcountHandleKey(handle), r.lockcountWindow())
+			if err != nil {
+				return err
+			}
+			dur := r.computeLockDuration(lockcount)
+			if err := r.Client.Set(ctx, lockHandleKey(handle), "1", dur).Err(); err != nil {
 				return fmt.Errorf("rate: set handle lock: %w", err)
 			}
-			r.Logger.Info("rate limit: handle locked", "handle", handle, "fails", n)
+			r.Logger.Info("rate limit: handle locked",
+				"handle", handle, "fails", n, "lockcount", lockcount, "duration", dur)
+			if r.Audit != nil {
+				r.Audit.Record(ctx, audit.LockoutHandle{
+					Handle: handle, IP: netlimit.CollapseIP(sourceIP),
+					Fails: int(n), Lockcount: lockcount, Duration: dur,
+				})
+			}
+			// Reset fail counter so the next lockout window is independent.
+			// The escalation state lives in lockcount; failHandleKey is just
+			// the per-window threshold trigger.
+			_ = r.Client.Del(ctx, failHandleKey(handle)).Err()
 		}
 	}
 	if ip := normalizeIP(sourceIP); ip != "" {
@@ -136,13 +202,52 @@ func (r *RedisRateLimiter) RecordFailure(ctx context.Context, handle string, sou
 			return err
 		}
 		if n >= int64(r.Params.IPThreshold) {
-			if err := r.Client.Set(ctx, lockIPKey(ip), "1", r.Params.LockDuration).Err(); err != nil {
+			lockcount, err := r.incrWithExpire(ctx, lockcountIPKey(ip), r.lockcountWindow())
+			if err != nil {
+				return err
+			}
+			dur := r.computeLockDuration(lockcount)
+			if err := r.Client.Set(ctx, lockIPKey(ip), "1", dur).Err(); err != nil {
 				return fmt.Errorf("rate: set ip lock: %w", err)
 			}
-			r.Logger.Info("rate limit: ip locked", "ip", ip, "fails", n)
+			r.Logger.Info("rate limit: ip locked",
+				"ip", ip, "fails", n, "lockcount", lockcount, "duration", dur)
+			if r.Audit != nil {
+				r.Audit.Record(ctx, audit.LockoutIP{
+					IP: ip, Fails: int(n), Lockcount: lockcount, Duration: dur,
+				})
+			}
+			_ = r.Client.Del(ctx, failIPKey(ip)).Err()
+
+			if r.Params.PersistentBanThreshold > 0 &&
+				lockcount >= int64(r.Params.PersistentBanThreshold) &&
+				r.OnPersistentBanEligible != nil {
+				r.OnPersistentBanEligible(ip, lockcount)
+			}
 		}
 	}
 	return nil
+}
+
+// computeLockDuration applies the exponential-backoff multiplier 1 << min(n-1, BackoffMax)
+// to the base LockDuration. lockcount=1 → ×1 (base); =2 → ×2; =6+ → ×32 (when
+// BackoffMax=5). Returns LockDuration as-is when lockcount < 1 (defensive).
+func (r *RedisRateLimiter) computeLockDuration(lockcount int64) time.Duration {
+	if lockcount < 1 {
+		return r.Params.LockDuration
+	}
+	shift := int(lockcount) - 1
+	if shift > r.Params.BackoffMax {
+		shift = r.Params.BackoffMax
+	}
+	return r.Params.LockDuration * time.Duration(int64(1)<<shift)
+}
+
+func (r *RedisRateLimiter) lockcountWindow() time.Duration {
+	if r.Params.LockcountWindow > 0 {
+		return r.Params.LockcountWindow
+	}
+	return 24 * time.Hour
 }
 
 // incrWithExpire INCRs the counter and (re)applies the window TTL. Returns

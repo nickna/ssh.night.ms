@@ -20,26 +20,70 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Sysop is the moderation console — left pane users, right pane recent
-// audit, bottom command line. Port of src/Night.Ms.SshServer/Tui/Screens/
-// AdminScreen.cs.
+// sysopTab selects which body the sysop screen renders. The default landing
+// tab is tabEvents — operators came here to investigate "what's happening
+// right now," and the unified feed is the answer to that.
+type sysopTab int
+
+const (
+	tabEvents sysopTab = iota
+	tabUsers
+	tabBans
+)
+
+// Sysop is the moderation console. Three tabs: Events (unified audit/security
+// feed with filtering + detail modal), Users (alphabetical user list with
+// ban/unban/sysop/wall commands), Bans (active IP bans list with ban-ip /
+// unban-ip commands). Tab cycles with the Tab key or 1/2/3 jumps.
+//
+// All tab state lives flat on this struct rather than in nested per-tab
+// substructs so the Update method can route messages without an extra layer
+// of dereferencing — there are only a handful of fields per tab.
 type Sysop struct {
 	sess    *session.Session
-	users   []gen.ListUsersAlphabeticalRow
-	audit   []gen.RecentAuditWithActorRow
+	tab     sysopTab
+	loading bool // initial users load only — per-tab loads use per-tab flags
 	status  string
-	loading bool
-
-	cmd textinput.Model
-
-	// metrics is the cached system-metrics sample re-read every 2s via a
-	// tea.Tick. Mirrors src/Night.Ms.SshServer/Diagnostics/SystemMetricsCollector.
-	metrics sysopMetrics
+	cmd     textinput.Model
 
 	// pendingWall is set when the user typed "wall <msg>" — we render a
-	// confirm prompt and wait for Y/N before firing. Mirrors the .NET
-	// AdminScreen.WallAsync MessageBox.Query gate.
+	// confirm prompt and wait for Y/N before firing.
 	pendingWall string
+
+	// metrics samples runtime stats every 2s via a tea.Tick.
+	metrics sysopMetrics
+
+	// Users tab
+	users []gen.ListUsersAlphabeticalRow
+
+	// Events tab (state in sysop_events.go; types here to keep the struct
+	// fields grouped).
+	events                []gen.ListUnifiedEventsRow
+	eventsCursor          int
+	eventsScroll          int
+	eventsFiltersRaw      string
+	eventsFilters         []sysopFilterCarrier // local alias to avoid importing data here
+	eventsLoading         bool
+	eventsHasMore         bool
+	eventsCount           int32
+	eventsDetail          *gen.ListUnifiedEventsRow
+	eventsRelated         []gen.ListUnifiedEventsRelatedRow
+	eventsRelatedLoading  bool
+	eventsPendingFilterAt time.Time
+	eventsFocusFilter     bool // true = textinput owns input on Events tab; false = list owns navigation keys
+
+	// Bans tab
+	bans        []gen.SecurityIpBan
+	bansLoading bool
+}
+
+// sysopFilterCarrier is a tiny shim so the sysop.go struct doesn't have to
+// import internal/data just for the filter type. sysop_events.go defines a
+// helper to convert between this and data.Filter.
+type sysopFilterCarrier struct {
+	Dim  string
+	Text string
+	Time time.Time
 }
 
 type sysopMetrics struct {
@@ -50,25 +94,20 @@ type sysopMetrics struct {
 }
 
 // sysopTickMsg fires every 2 seconds while the sysop screen is mounted so
-// the footer line keeps refreshing without user input.
+// the footer metrics line keeps refreshing without user input.
 type sysopTickMsg struct{}
 
-// NewSysop is registered as the DestSysop screen. The lobby only routes
-// sysops here (the carousel hides the slot otherwise), so we don't
-// re-check Identity.IsSysop — defense-in-depth would belong in the
-// nav layer.
-func NewSysop(sess *session.Session) tea.Model {
-	t := textinput.New()
-	t.Placeholder = "ban <handle> | sysop <handle> | wall <msg> | refresh | help"
-	t.CharLimit = 200
-	t.Focus()
-	return &Sysop{sess: sess, cmd: t, loading: true}
+// sysopUsersLoadedMsg / sysopBansLoadedMsg / sysopEventsLoadedMsg are the
+// per-tab load completions. The events-tab message is defined in
+// sysop_events.go to keep its companion code colocated.
+type sysopUsersLoadedMsg struct {
+	users []gen.ListUsersAlphabeticalRow
+	err   error
 }
 
-type sysopLoadedMsg struct {
-	users []gen.ListUsersAlphabeticalRow
-	audit []gen.RecentAuditWithActorRow
-	err   error
+type sysopBansLoadedMsg struct {
+	bans []gen.SecurityIpBan
+	err  error
 }
 
 type sysopCmdDoneMsg struct {
@@ -76,12 +115,33 @@ type sysopCmdDoneMsg struct {
 	reload bool
 }
 
-func (m *Sysop) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), m.sampleMetricsCmd(), m.scheduleMetricsTick())
+// NewSysop is registered as the DestSysop screen. The lobby only routes
+// sysops here (the carousel hides the slot otherwise), so we don't re-check
+// Identity.IsSysop — defense-in-depth would belong in the nav layer.
+//
+// Lands on the Events tab by default (per user choice during planning). The
+// textinput placeholder switches per tab inside applyTabFocus.
+func NewSysop(sess *session.Session) tea.Model {
+	t := textinput.New()
+	t.CharLimit = 200
+	t.Focus()
+	m := &Sysop{sess: sess, tab: tabEvents, cmd: t, loading: true}
+	m.applyTabFocus()
+	return m
 }
 
-// sampleMetricsCmd snapshots runtime.MemStats + goroutine count off the
-// main loop so the Update doesn't pay for a forced GC scan.
+// Init parallel-loads users + events + bans so any tab switch is instant.
+// Metrics polling and the periodic tick are also kicked off here.
+func (m *Sysop) Init() tea.Cmd {
+	return tea.Batch(
+		m.loadUsersCmd(),
+		m.loadEventsCmd(),
+		m.loadBansCmd(),
+		m.sampleMetricsCmd(),
+		m.scheduleMetricsTick(),
+	)
+}
+
 func (m *Sysop) sampleMetricsCmd() tea.Cmd {
 	return func() tea.Msg {
 		var stats runtime.MemStats
@@ -99,39 +159,75 @@ func (m *Sysop) scheduleMetricsTick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return sysopTickMsg{} })
 }
 
-func (m *Sysop) loadCmd() tea.Cmd {
+// loadUsersCmd fetches the alphabetical user list for the Users tab.
+func (m *Sysop) loadUsersCmd() tea.Cmd {
 	q := m.sess.Queries
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
-		users, uErr := q.ListUsersAlphabetical(ctx)
-		audit, aErr := q.RecentAuditWithActor(ctx)
-		if uErr != nil {
-			return sysopLoadedMsg{err: uErr}
-		}
-		if aErr != nil {
-			return sysopLoadedMsg{err: aErr}
-		}
-		return sysopLoadedMsg{users: users, audit: audit}
+		users, err := q.ListUsersAlphabetical(ctx)
+		return sysopUsersLoadedMsg{users: users, err: err}
+	}
+}
+
+// loadBansCmd fetches the active IP bans for the Bans tab.
+func (m *Sysop) loadBansCmd() tea.Cmd {
+	q := m.sess.Queries
+	m.bansLoading = true
+	return func() tea.Msg {
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
+		defer cancel()
+		bans, err := q.ListActiveIPBans(ctx)
+		return sysopBansLoadedMsg{bans: bans, err: err}
 	}
 }
 
 func (m *Sysop) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case sysopLoadedMsg:
+	case sysopUsersLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.status = "[!] load: " + msg.err.Error()
+			m.status = "[!] users: " + msg.err.Error()
 			return m, nil
 		}
 		m.users = msg.users
-		m.audit = msg.audit
 		return m, nil
+
+	case sysopBansLoadedMsg:
+		m.bansLoading = false
+		if msg.err != nil {
+			m.status = "[!] bans: " + msg.err.Error()
+			return m, nil
+		}
+		m.bans = msg.bans
+		return m, nil
+
+	case sysopEventsLoadedMsg:
+		return m, m.handleEventsLoaded(msg)
+
+	case sysopEventsRelatedLoadedMsg:
+		m.eventsRelatedLoading = false
+		if msg.err == nil {
+			m.eventsRelated = msg.rows
+		}
+		return m, nil
+
+	case sysopEventsFilterTickMsg:
+		return m, m.maybeFireFilterReload()
 
 	case sysopCmdDoneMsg:
 		m.status = msg.status
-		if msg.reload {
-			return m, m.loadCmd()
+		if !msg.reload {
+			return m, nil
+		}
+		// Reload the active tab's data. Each tab knows its own refresh path.
+		switch m.tab {
+		case tabUsers:
+			return m, m.loadUsersCmd()
+		case tabEvents:
+			return m, m.loadEventsCmd()
+		case tabBans:
+			return m, m.loadBansCmd()
 		}
 		return m, nil
 
@@ -143,56 +239,172 @@ func (m *Sysop) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.sampleMetricsCmd(), m.scheduleMetricsTick())
 
 	case tea.KeyMsg:
-		// Wall confirmation has its own one-shot key handling.
-		if m.pendingWall != "" {
-			switch strings.ToLower(msg.String()) {
-			case "y", "enter":
-				body := m.pendingWall
-				m.pendingWall = ""
-				return m, m.wallCmd(body)
-			case "n", "esc":
-				m.pendingWall = ""
-				m.status = "wall broadcast cancelled."
-				return m, nil
-			}
-			return m, nil
-		}
-		switch msg.String() {
-		case "esc":
-			return m, nav.Navigate(nav.DestLobby)
-		case "enter":
-			line := strings.TrimSpace(m.cmd.Value())
-			if line == "" {
-				return m, nil
-			}
-			m.cmd.SetValue("")
-			// Special-case: wall asks for confirmation BEFORE firing.
-			if v, target := splitVerb(line); v == "wall" && target != "" {
-				if len(target) > 500 {
-					m.status = "[!] wall message too long (max 500 chars)."
-					return m, nil
-				}
-				m.pendingWall = target
-				return m, nil
-			}
-			return m, m.dispatch(line)
-		}
+		return m.handleKey(msg)
 	}
 
+	// Fall through to the textinput. Events tab with focusFilter=false
+	// shouldn't forward to the textinput (it'd capture letter keys into
+	// the filter while the user is trying to navigate); the handleKey
+	// above already short-circuits printable-char passthrough in that
+	// case, so reaching here means the message is non-key.
 	var cmd tea.Cmd
 	m.cmd, cmd = m.cmd.Update(msg)
 	return m, cmd
 }
 
+// handleKey is the per-tab key router. Page-level keys (esc, tab, 1/2/3,
+// wall confirmation) handle first; then per-tab navigation; then the
+// textinput consumes the remainder.
+func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Wall confirmation is modal — intercepts everything.
+	if m.pendingWall != "" {
+		switch strings.ToLower(msg.String()) {
+		case "y", "enter":
+			body := m.pendingWall
+			m.pendingWall = ""
+			return m, m.wallCmd(body)
+		case "n", "esc":
+			m.pendingWall = ""
+			m.status = "wall broadcast cancelled."
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Events-tab detail modal — intercepts Esc to close.
+	if m.tab == tabEvents && m.eventsDetail != nil {
+		if msg.String() == "esc" {
+			m.eventsDetail = nil
+			m.eventsRelated = nil
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Page-level keys.
+	switch msg.String() {
+	case "esc":
+		return m, nav.Navigate(nav.DestLobby)
+	case "tab":
+		m.cycleTab(+1)
+		return m, m.onTabChange()
+	case "shift+tab":
+		m.cycleTab(-1)
+		return m, m.onTabChange()
+	case "1":
+		// Only intercept digit-jumps when the textinput is empty — otherwise
+		// they'd swallow the digit the user is typing into the filter or
+		// command line.
+		if m.cmd.Value() == "" {
+			m.tab = tabEvents
+			m.applyTabFocus()
+			return m, m.onTabChange()
+		}
+	case "2":
+		if m.cmd.Value() == "" {
+			m.tab = tabUsers
+			m.applyTabFocus()
+			return m, m.onTabChange()
+		}
+	case "3":
+		if m.cmd.Value() == "" {
+			m.tab = tabBans
+			m.applyTabFocus()
+			return m, m.onTabChange()
+		}
+	}
+
+	// Events tab: navigation keys + filter focus management.
+	if m.tab == tabEvents {
+		if handled, model, cmd := m.handleEventsKey(msg); handled {
+			return model, cmd
+		}
+	}
+
+	// Enter on a command-tab dispatches the typed command.
+	if msg.String() == "enter" && (m.tab == tabUsers || m.tab == tabBans) {
+		line := strings.TrimSpace(m.cmd.Value())
+		if line == "" {
+			return m, nil
+		}
+		m.cmd.SetValue("")
+		// Special-case: wall asks for confirmation BEFORE firing.
+		if v, target := splitVerb(line); v == "wall" && target != "" {
+			if len(target) > 500 {
+				m.status = "[!] wall message too long (max 500 chars)."
+				return m, nil
+			}
+			m.pendingWall = target
+			return m, nil
+		}
+		return m, m.dispatch(line)
+	}
+
+	// Fall through to the textinput. On the Events tab in list-focus mode,
+	// we already returned above for nav keys — only printable chars reach
+	// here, and they should re-grab filter focus.
+	if m.tab == tabEvents && !m.eventsFocusFilter {
+		m.eventsFocusFilter = true
+	}
+	var cmd tea.Cmd
+	prev := m.cmd.Value()
+	m.cmd, cmd = m.cmd.Update(msg)
+	// Events tab debounce: any textinput value change schedules a refilter.
+	if m.tab == tabEvents && m.cmd.Value() != prev {
+		m.eventsPendingFilterAt = time.Now().Add(150 * time.Millisecond)
+		return m, tea.Batch(cmd, m.scheduleFilterTick())
+	}
+	return m, cmd
+}
+
+// cycleTab moves the active tab by delta (positive = right). Wraps around
+// the 3-tab cycle. Resets the wall-confirm state so a half-typed command
+// on one tab doesn't leak into the next.
+func (m *Sysop) cycleTab(delta int) {
+	const n = 3
+	m.tab = sysopTab((int(m.tab) + delta + n) % n)
+	m.pendingWall = ""
+	m.applyTabFocus()
+}
+
+// applyTabFocus updates the textinput's placeholder + clears its value so
+// each tab's input box reads cleanly. Called whenever the active tab
+// changes.
+func (m *Sysop) applyTabFocus() {
+	m.cmd.SetValue("")
+	switch m.tab {
+	case tabEvents:
+		m.cmd.Placeholder = "filter: severity:warn handle:alice ip:1.2.3.4 since:1h text:foo"
+		m.eventsFocusFilter = true
+	case tabUsers:
+		m.cmd.Placeholder = "ban <handle> | sysop <handle> | wall <msg> | clear-passwordless <handle>"
+	case tabBans:
+		m.cmd.Placeholder = "ban-ip <ip> [duration] [reason] | unban-ip <ip> | refresh"
+	}
+}
+
+// onTabChange fires any tab-specific load that hasn't already happened.
+// Init() already kicks off all three loads in parallel, so this is just a
+// safety net for the refresh case.
+func (m *Sysop) onTabChange() tea.Cmd {
+	return nil
+}
+
 // dispatch parses one command line + dispatches the matching async tea.Cmd.
-// All mutating commands return sysopCmdDoneMsg{reload: true} so the user
-// sees the new state without manually typing 'refresh'.
+// Routed only from the Users and Bans tabs; the Events tab's text input is
+// the filter and doesn't dispatch verbs.
 func (m *Sysop) dispatch(line string) tea.Cmd {
 	verb, target := splitVerb(line)
 	switch verb {
 	case "help", "?":
-		return done("ban | unban | sysop | unsysop | clear-passwordless | wall <msg> | refresh | help", false)
+		return done(
+			"Users tab: ban | unban | sysop | unsysop | clear-passwordless | wall <msg>  ·  "+
+				"Bans tab: ban-ip <ip> [duration] [reason] | unban-ip <ip>  ·  "+
+				"refresh | help  ·  Tab/1/2/3 to switch tabs · Esc back to lobby",
+			false,
+		)
 	case "refresh":
+		// reload=true → Update routes to the active tab's load func.
 		return func() tea.Msg { return sysopCmdDoneMsg{status: "refreshed.", reload: true} }
 	case "wall":
 		return m.wallCmd(target)
@@ -206,6 +418,10 @@ func (m *Sysop) dispatch(line string) tea.Cmd {
 		return m.toggleCmd(target, "unsysop", false)
 	case "clear-passwordless":
 		return m.clearPasswordlessCmd(target)
+	case "ban-ip":
+		return m.banIPCmd(target)
+	case "unban-ip":
+		return m.unbanIPCmd(target)
 	}
 	return done("[!] unknown command: "+verb+" — type help", false)
 }
@@ -214,13 +430,14 @@ func (m *Sysop) dispatch(line string) tea.Cmd {
 // used to derive the audit_log.action string and the status confirmation,
 // so it stays as a string rather than a bool pair.
 func (m *Sysop) toggleCmd(handle, verb string, want bool) tea.Cmd {
+	_ = want // verb encodes both directions; the param keeps callers explicit
 	if handle == "" {
 		return done("[!] "+verb+" requires a handle.", false)
 	}
 	queries := m.sess.Queries
 	actor := m.sess.Identity
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 
 		target, err := queries.GetUserByHandle(ctx, handle)
@@ -272,7 +489,7 @@ func (m *Sysop) clearPasswordlessCmd(handle string) tea.Cmd {
 	queries := m.sess.Queries
 	actor := m.sess.Identity
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		target, err := queries.GetUserByHandle(ctx, handle)
 		if err != nil {
@@ -315,7 +532,7 @@ func (m *Sysop) wallCmd(message string) tea.Cmd {
 	queries := m.sess.Queries
 	actorID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if err := wall.Publish(ctx, from, message); err != nil {
 			return sysopCmdDoneMsg{status: "[!] wall publish: " + err.Error()}
@@ -330,17 +547,15 @@ func done(status string, reload bool) tea.Cmd {
 	return func() tea.Msg { return sysopCmdDoneMsg{status: status, reload: reload} }
 }
 
-// splitVerb splits "verb arg…" into (verb-lower, trimmed-rest). The .NET
-// version uses a 2-element split with TrimEntries; this matches.
+// splitVerb splits "verb arg…" into (verb-lower, trimmed-rest).
 func splitVerb(line string) (string, string) {
 	verb, rest, _ := strings.Cut(line, " ")
 	return strings.ToLower(strings.TrimSpace(verb)), strings.TrimSpace(rest)
 }
 
 // writeAudit is a small helper around InsertAuditLogSimple. Failure is
-// logged but never blocks the user — the mutating change is already
-// committed at this point. Pass targetID = 0 for system-scoped actions
-// (wall broadcast etc.) so the column lands NULL.
+// logged but never blocks the user. Pass targetID = 0 for system-scoped
+// actions so the column lands NULL.
 func writeAudit(ctx context.Context, q *gen.Queries, actorID int64, action, targetType string, targetID int64) error {
 	aid := actorID
 	var tidPtr *int64
@@ -357,14 +572,19 @@ func writeAudit(ctx context.Context, q *gen.Queries, actorID int64, action, targ
 	})
 }
 
+// Styles shared across tabs. Severity/source colorization for the Events
+// tab lives in sysop_events.go since only that tab uses it.
 var (
-	sysopTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
-	sysopHint   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
-	sysopHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
-	sysopBan    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
-	sysopFlag   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
-	sysopMuted  = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
-	sysopErr    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
+	sysopTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
+	sysopHint     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
+	sysopHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
+	sysopBan      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
+	sysopFlag     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
+	sysopMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
+	sysopErr      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
+	sysopTabBar   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
+	sysopTabOn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent)).Underline(true)
+	sysopTabOff   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 )
 
 func (m *Sysop) View() string {
@@ -373,39 +593,50 @@ func (m *Sysop) View() string {
 	}
 	var b strings.Builder
 	b.WriteString(sysopTitle.Render("sysop console — " + m.sess.Identity.Handle))
-	b.WriteString("  " + sysopHint.Render("type 'help' + Enter · Esc back to lobby"))
+	b.WriteString("  " + sysopHint.Render("Tab / 1·2·3 switch · Esc back to lobby"))
+	b.WriteString("\n")
+	b.WriteString(m.renderTabBar())
 	b.WriteString("\n\n")
-	if m.loading {
+
+	if m.loading && m.tab == tabUsers {
 		b.WriteString(sysopHint.Render("loading…"))
 		return b.String()
 	}
 
-	// Two-pane layout — left = users, right = audit. Width-budgeted at half
-	// each minus a 2-col gutter.
-	paneW := (m.sess.Width - 2) / 2
-	if paneW < 30 {
-		paneW = 30
+	// Each tab gets the full remaining width; height budgets for header
+	// (3 rows so far), tab bar (1), input (1), status (1), metrics (1).
+	bodyH := m.sess.Height - 8
+	if bodyH < 8 {
+		bodyH = 8
 	}
-	listH := m.sess.Height - 8 // leave room for header + cmd + status
-	if listH < 6 {
-		listH = 6
+	bodyW := m.sess.Width
+	if bodyW < 40 {
+		bodyW = 40
 	}
 
-	left := m.renderUsers(paneW, listH)
-	right := m.renderAudit(paneW, listH)
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right))
+	switch m.tab {
+	case tabEvents:
+		b.WriteString(m.renderEvents(bodyW, bodyH))
+	case tabUsers:
+		b.WriteString(m.renderUsers(bodyW, bodyH))
+	case tabBans:
+		b.WriteString(m.renderBans(bodyW, bodyH))
+	}
 	b.WriteString("\n\n")
 
 	if m.pendingWall != "" {
-		// Confirm prompt — replaces the input until resolved.
-		b.WriteString(sysopErr.Render(fmt.Sprintf("Wall broadcast to ALL sessions:")))
+		b.WriteString(sysopErr.Render("Wall broadcast to ALL sessions:"))
 		b.WriteString("\n  ")
 		b.WriteString(sysopFlag.Render(`"` + m.pendingWall + `"`))
 		b.WriteString("\n")
 		b.WriteString(sysopHint.Render("[Y] send  ·  [N] cancel"))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(sysopHint.Render("> ") + m.cmd.View())
+		prompt := "> "
+		if m.tab == tabEvents {
+			prompt = "/ "
+		}
+		b.WriteString(sysopHint.Render(prompt) + m.cmd.View())
 		b.WriteString("\n")
 	}
 	if m.status != "" {
@@ -416,7 +647,6 @@ func (m *Sysop) View() string {
 		}
 		b.WriteString("\n")
 	}
-	// Live metrics footer — mirrors .NET SystemMetricsSnapshot.FormatCompact.
 	if !m.metrics.at.IsZero() {
 		b.WriteString(sysopMuted.Render(fmt.Sprintf(
 			"heap %.1f MB · sys %.1f MB · goroutines %d  (refreshed %s)",
@@ -424,9 +654,33 @@ func (m *Sysop) View() string {
 			m.metrics.at.Format("15:04:05"),
 		)))
 	}
+
+	// Events-tab detail modal — overlaid on top of everything via the
+	// components.Overlay helper. The modal renderer lives in sysop_events.go.
+	if m.tab == tabEvents && m.eventsDetail != nil {
+		return m.composeEventsDetailOverlay(b.String())
+	}
 	return b.String()
 }
 
+// renderTabBar produces the "[Events] · [Users] · [Bans]" header line. The
+// active tab is bold + underlined; others are dim.
+func (m *Sysop) renderTabBar() string {
+	label := func(name string, t sysopTab) string {
+		if m.tab == t {
+			return sysopTabOn.Render("[" + name + "]")
+		}
+		return sysopTabOff.Render("[" + name + "]")
+	}
+	return sysopTabBar.Render(
+		label("Events", tabEvents) + " · " +
+			label("Users", tabUsers) + " · " +
+			label("Bans", tabBans),
+	)
+}
+
+// renderUsers draws the Users tab body — single-pane alphabetical user
+// list with flag column (S=sysop, B=banned, K=key-only).
 func (m *Sysop) renderUsers(w, h int) string {
 	var b strings.Builder
 	b.WriteString(sysopHeader.Render("users (S=sysop, B=banned, K=ssh-key-only):"))
@@ -456,50 +710,15 @@ func (m *Sysop) renderUsers(w, h int) string {
 		if u.LastSeenAt.Valid {
 			seen = m.sess.DisplayPrefs.FormatDateTime(u.LastSeenAt.Time)
 		}
-		line := fmt.Sprintf("%s %-20s %s", flagStr, truncateRow(u.Handle, 20), sysopMuted.Render(seen))
+		line := fmt.Sprintf("%s %-24s %s", flagStr, truncateRow(u.Handle, 24), sysopMuted.Render(seen))
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
 	return lipgloss.NewStyle().Width(w).Render(b.String())
 }
 
-func (m *Sysop) renderAudit(w, h int) string {
-	var b strings.Builder
-	b.WriteString(sysopHeader.Render("audit log (recent 50):"))
-	b.WriteString("\n")
-	rows := m.audit
-	if len(rows) > h-1 {
-		rows = rows[:h-1]
-	}
-	for _, a := range rows {
-		ts := "             "
-		if a.CreatedAt.Valid {
-			ts = a.CreatedAt.Time.UTC().Format("01-02 15:04")
-		}
-		actor := a.ActorHandle
-		if actor == "" {
-			actor = "<system>"
-		}
-		var target string
-		if a.TargetID != nil {
-			target = fmt.Sprintf("%s#%d", a.TargetType, *a.TargetID)
-		} else {
-			target = a.TargetType
-		}
-		line := fmt.Sprintf("%s %-12s %-22s %s",
-			sysopMuted.Render(ts),
-			truncateRow(actor, 12),
-			truncateRow(a.Action, 22),
-			truncateRow(target, 20),
-		)
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	return lipgloss.NewStyle().Width(w).Render(b.String())
-}
-
-// truncateRow keeps row text inside the two-pane budget; finance.go has its
-// own truncate() helper, hence the differentiated name.
+// truncateRow keeps row text inside the per-column budget. finance.go has
+// its own truncate(), hence the differentiated name.
 func truncateRow(s string, n int) string {
 	if len(s) <= n {
 		return s

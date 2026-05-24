@@ -6,6 +6,7 @@ sql:
       - "internal/data/migrations/000002_holdem_tables.up.sql"
       - "internal/data/migrations/000003_forum_activity_reads.up.sql"
       - "internal/data/migrations/000004_browser_bookmarks.up.sql"
+      - "internal/data/migrations/000005_security_events_and_bans.up.sql"
     queries: "internal/data/queries"
     gen:
       go:

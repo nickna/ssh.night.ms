@@ -129,6 +129,24 @@ type PostRead struct {
 	LastReadPostID *int64
 }
 
+type SecurityEvent struct {
+	ID        int64
+	At        pgtype.Timestamptz
+	EventType string
+	Severity  string
+	Handle    *string
+	IpAddr    *string
+	Details   []byte
+}
+
+type SecurityIpBan struct {
+	IpAddr    string
+	BannedAt  pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+	Reason    string
+	CreatedBy string
+}
+
 type Topic struct {
 	ID          int64
 	ForumID     int64

@@ -34,10 +34,14 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
+	"github.com/nickna/ssh.night.ms/internal/security/audit"
+	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
 	"github.com/nickna/ssh.night.ms/internal/transport"
 	"github.com/nickna/ssh.night.ms/internal/tui/art"
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
 	"github.com/nickna/ssh.night.ms/internal/web"
+
+	"golang.org/x/time/rate"
 )
 
 // Startup ordering is load-bearing and mirrors the .NET DatabaseInitializer:
@@ -91,19 +95,89 @@ func main() {
 	redisClient := mustOpenRedis(ctx, opts, logger)
 	defer redisClient.Close()
 
+	// Security audit recorder (Phase C): writes structured events to both
+	// stderr (slog JSON, always synchronous) and Postgres (security_events,
+	// best-effort via a buffered channel). Constructed before everything
+	// that emits events so the wiring is purely additive.
+	auditRecorder := audit.NewPostgresRecorder(queries, logger.With("component", "audit"), 2048)
+	go auditRecorder.Run(ctx)
+
 	sessionDeps, holdemReg := buildSessionDeps(ctx, pool, queries, hasher, redisClient, opts, logger)
+
+	// Persistent-ban cache (Phase B): in-process map of active security_ip_bans
+	// rows, refreshed every 30s and push-invalidated via Redis pub/sub. Load
+	// synchronously before the listener starts so the first auth attempt
+	// sees the persisted bans. Run() drives the refresh + listen loops; it
+	// exits cleanly when ctx cancels.
+	banCache := auth.NewBanCache(queries, redisClient, logger.With("component", "ban-cache"), 30*time.Second)
+	banCache.Audit = auditRecorder
+	if err := banCache.Load(ctx); err != nil {
+		logger.Error("ban cache initial load", "err", err)
+		os.Exit(1)
+	}
+	go banCache.Run(ctx)
+
+	rateLimiter := auth.NewRedisRateLimiter(redisClient, opts.RateLimit, logger.With("component", "rate-limit"))
+	rateLimiter.Audit = auditRecorder
+	// When the per-IP lockcount crosses the persistent-ban threshold, write
+	// a security_ip_bans row and broadcast pub/sub so every replica's
+	// BanCache picks it up. Uses context.Background — the auth ctx that
+	// triggered the lockout may cancel as soon as the conn closes, but the
+	// ban write must persist regardless.
+	rateLimiter.OnPersistentBanEligible = func(ip string, lockcount int64) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		reason := fmt.Sprintf("auto: %d lockouts within window", lockcount)
+		if err := banCache.AddBan(bgCtx, ip, opts.PersistentBanDuration, reason, "auto"); err != nil {
+			logger.Warn("persistent ban auto-promote", "ip", ip, "lockcount", lockcount, "err", err)
+		} else {
+			logger.Info("persistent ban auto-promote",
+				"ip", ip, "lockcount", lockcount, "duration", opts.PersistentBanDuration)
+		}
+	}
+
 	lookup := &auth.Lookup{
 		Pool:    pool,
 		Queries: queries,
 		Hasher:  hasher,
-		Limiter: auth.NewRedisRateLimiter(redisClient, opts.RateLimit, logger.With("component", "rate-limit")),
+		Limiter: rateLimiter,
 		Logger:  logger.With("component", "auth"),
+		Bans:    banCache,
+		Audit:   auditRecorder,
 	}
 
+	attachSecurity(&sessionDeps, banCache)
+
+	// SSH-listener netlimit tracker — bounds per-IP concurrent conns + new-conn
+	// rate, plus the global in-flight unauth-handshake cap. The per-IP gates
+	// are enforced by wrapping the net.Listener; the global cap is enforced
+	// inside the transport's ConnCallback (because it needs ssh.Context to
+	// release on auth-success). Run() drives the idle-entry GC loop.
+	//
+	// OnReject is wired to the audit recorder so per-IP cap / token-bucket
+	// rejections surface in the structured events feed alongside the
+	// matching slog line.
+	sshTracker := netlimit.NewTracker(netlimit.Config{
+		MaxConnPerIP:        opts.SSHSecurity.MaxConnPerIP,
+		PerIPRate:           rate.Limit(opts.SSHSecurity.PerIPConnRate),
+		PerIPBurst:          opts.SSHSecurity.PerIPConnBurst,
+		MaxUnauthHandshakes: opts.SSHSecurity.MaxUnauthHandshakes,
+	}, logger.With("component", "netlimit"), func(addr net.Addr, reason netlimit.RejectReason) {
+		auditRecorder.Record(context.Background(), audit.ConnRejectedOverlimit{
+			IP:     netlimit.CollapseIP(addr),
+			Reason: string(reason),
+		})
+	})
+	go sshTracker.Run(ctx)
+
 	srv, err := transport.NewServer(transport.Config{
-		Addr:        opts.SSHAddr,
-		HostKeyDir:  opts.HostKeyDir,
-		IdleTimeout: opts.IdleTimeout,
+		Addr:             opts.SSHAddr,
+		HostKeyDir:       opts.HostKeyDir,
+		IdleTimeout:      opts.IdleTimeout,
+		MaxAuthTries:     opts.SSHSecurity.MaxAuthTries,
+		LoginGrace:       opts.SSHSecurity.LoginGrace,
+		HandshakeTracker: sshTracker,
+		Audit:            auditRecorder,
 	}, transport.Deps{
 		Session: sessionDeps,
 		Lookup:  lookup,
@@ -112,6 +186,16 @@ func main() {
 		logger.Error("transport init", "err", err)
 		os.Exit(1)
 	}
+
+	// Open the SSH socket here (rather than letting wish's ListenAndServe do
+	// it) so we can wrap it in the netlimit.Listener. The per-IP cap +
+	// token bucket reject conns before any handshake bytes are read.
+	sshListener, err := net.Listen("tcp", opts.SSHAddr)
+	if err != nil {
+		logger.Error("ssh listen", "addr", opts.SSHAddr, "err", err)
+		os.Exit(1)
+	}
+	sshListener = netlimit.NewListener(sshListener, sshTracker)
 
 	webSrv, err := web.NewServer(web.Config{
 		Addr:           opts.HTTPAddr,
@@ -130,9 +214,12 @@ func main() {
 		"ssh_addr", opts.SSHAddr,
 		"http_addr", opts.HTTPAddr,
 		"host_key_dir", opts.HostKeyDir,
-		"redis", opts.RedisConnStr)
+		"redis", opts.RedisConnStr,
+		"ssh_max_auth_tries", opts.SSHSecurity.MaxAuthTries,
+		"ssh_login_grace", opts.SSHSecurity.LoginGrace,
+		"ssh_max_conn_per_ip", opts.SSHSecurity.MaxConnPerIP)
 
-	runListeners(ctx, srv, webSrv, holdemReg, logger)
+	runListeners(ctx, srv, sshListener, webSrv, holdemReg, logger)
 }
 
 // runHealthcheck backs the Docker HEALTHCHECK in deploy/compose.yml. The
@@ -302,6 +389,14 @@ func buildSessionDeps(
 	return deps, holdemReg
 }
 
+// attachSecurity bolts the BanCache onto an already-built sessionDeps. Kept
+// separate from buildSessionDeps because the BanCache is constructed AFTER
+// buildSessionDeps (it depends on the audit recorder, which depends on
+// queries, which buildSessionDeps populates). Mutates in place.
+func attachSecurity(deps *session.Deps, banCache *auth.BanCache) {
+	deps.Security = session.SecurityDeps{Bans: banCache}
+}
+
 // buildProviders constructs the outbound HTTP-cached integrations. One Cache
 // per finance asset class so a Yahoo outage doesn't poison CoinGecko results
 // (and vice versa). All providers share one *http.Transport so the
@@ -390,9 +485,12 @@ func buildArt(opts config.Options, logger *slog.Logger) session.ArtDeps {
 // runListeners launches the SSH + HTTP servers and blocks until either
 // returns an error or ctx is cancelled by SIGINT/SIGTERM. On shutdown it
 // persists any in-flight Hold'em tables before draining the listeners.
-func runListeners(ctx context.Context, srv *transport.Server, webSrv *web.Server, holdemReg *multiplayer.Registry, logger *slog.Logger) {
+// sshListener is the netlimit-wrapped TCP listener already bound to the SSH
+// address; transport serves on it via ServeWithListener so the per-IP gates
+// run before the SSH handshake.
+func runListeners(ctx context.Context, srv *transport.Server, sshListener net.Listener, webSrv *web.Server, holdemReg *multiplayer.Registry, logger *slog.Logger) {
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	go func() { errCh <- srv.ServeWithListener(sshListener) }()
 	go func() {
 		if err := webSrv.ListenAndServe(); err != nil {
 			errCh <- err
