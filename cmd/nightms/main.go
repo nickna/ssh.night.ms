@@ -13,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/muesli/termenv"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
@@ -52,6 +54,13 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--healthcheck" {
 		os.Exit(runHealthcheck())
+	}
+	// In a scratch container TERM is unset, so lipgloss's package-level
+	// renderer falls to the Ascii profile and strips all color. Force
+	// ANSI256 when there's no TTY so SSH clients see the BBS in color;
+	// dev runs (with a real $TERM) keep autodetection.
+	if os.Getenv("TERM") == "" {
+		lipgloss.SetColorProfile(termenv.ANSI256)
 	}
 	opts := config.Load()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: opts.LogLevel}))
