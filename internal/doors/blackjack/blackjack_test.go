@@ -12,12 +12,12 @@ func TestHandValue(t *testing.T) {
 		h    []cards.Card
 		want int
 	}{
-		{"A+K → 21 (BJ)", []cards.Card{{cards.Ace, cards.Spades}, {cards.King, cards.Clubs}}, 21},
-		{"A+A → 12", []cards.Card{{cards.Ace, cards.Spades}, {cards.Ace, cards.Clubs}}, 12},
-		{"A+5 → 16 soft", []cards.Card{{cards.Ace, cards.Spades}, {cards.Five, cards.Clubs}}, 16},
-		{"A+5+10 → 16 hard", []cards.Card{{cards.Ace, cards.Spades}, {cards.Five, cards.Clubs}, {cards.Ten, cards.Hearts}}, 16},
-		{"face cards count 10", []cards.Card{{cards.Jack, cards.Spades}, {cards.Queen, cards.Clubs}}, 20},
-		{"bust", []cards.Card{{cards.King, cards.Spades}, {cards.Queen, cards.Clubs}, {cards.Two, cards.Hearts}}, 22},
+		{"A+K → 21 (BJ)", []cards.Card{{Rank: cards.Ace, Suit: cards.Spades}, {Rank: cards.King, Suit: cards.Clubs}}, 21},
+		{"A+A → 12", []cards.Card{{Rank: cards.Ace, Suit: cards.Spades}, {Rank: cards.Ace, Suit: cards.Clubs}}, 12},
+		{"A+5 → 16 soft", []cards.Card{{Rank: cards.Ace, Suit: cards.Spades}, {Rank: cards.Five, Suit: cards.Clubs}}, 16},
+		{"A+5+10 → 16 hard", []cards.Card{{Rank: cards.Ace, Suit: cards.Spades}, {Rank: cards.Five, Suit: cards.Clubs}, {Rank: cards.Ten, Suit: cards.Hearts}}, 16},
+		{"face cards count 10", []cards.Card{{Rank: cards.Jack, Suit: cards.Spades}, {Rank: cards.Queen, Suit: cards.Clubs}}, 20},
+		{"bust", []cards.Card{{Rank: cards.King, Suit: cards.Spades}, {Rank: cards.Queen, Suit: cards.Clubs}, {Rank: cards.Two, Suit: cards.Hearts}}, 22},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
