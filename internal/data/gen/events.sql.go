@@ -50,7 +50,11 @@ WITH unified AS (
         s.at,
         s.event_type AS kind,
         s.severity,
-        NULL::text AS actor,
+        -- Security events have no actor (they're system-emitted); empty
+        -- string rather than NULL so the UNION's actor column types as
+        -- non-null and sqlc generates ` + "`" + `Actor string` + "`" + `. Render code already
+        -- skips empty actors via ` + "`" + `if row.Actor != ""` + "`" + `.
+        ''::text AS actor,
         s.handle AS subject_handle,
         s.ip_addr AS subject_ip,
         NULL::text AS target,
@@ -147,7 +151,7 @@ WITH unified AS (
         s.at,
         s.event_type AS kind,
         s.severity,
-        NULL::text AS actor,
+        ''::text AS actor,
         s.handle AS subject_handle,
         s.ip_addr AS subject_ip,
         NULL::text AS target,

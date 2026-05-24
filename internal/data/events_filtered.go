@@ -68,7 +68,7 @@ WITH unified AS (
         s.at,
         s.event_type AS kind,
         s.severity,
-        NULL::text AS actor,
+        ''::text AS actor,
         s.handle AS subject_handle,
         s.ip_addr AS subject_ip,
         NULL::text AS target,
