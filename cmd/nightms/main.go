@@ -30,6 +30,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
 	"github.com/nickna/ssh.night.ms/internal/providers/news"
+	"github.com/nickna/ssh.night.ms/internal/providers/routing"
 	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
@@ -282,7 +283,7 @@ func buildSessionDeps(
 			Locations:    &realtime.LocationService{Queries: queries},
 			Leaderboards: &realtime.LeaderboardService{Queries: queries},
 		},
-		Providers: buildProviders(queries),
+		Providers: buildProviders(queries, opts),
 		Art:       buildArt(opts, logger),
 		Games: session.GameDeps{
 			HoldemRegistry: holdemReg,
@@ -307,7 +308,7 @@ func buildSessionDeps(
 // per-host TCP+TLS connection pool is amortized across CoinGecko, Yahoo,
 // Frankfurter, NWS, OpenMeteo, and HackerNews — each previously stood up
 // its own Transport and paid handshake cost on every fetch.
-func buildProviders(queries *gen.Queries) session.ProviderDeps {
+func buildProviders(queries *gen.Queries, opts config.Options) session.ProviderDeps {
 	sharedTransport := &http.Transport{
 		Proxy:               http.ProxyFromEnvironment,
 		MaxIdleConns:        100,
@@ -346,6 +347,15 @@ func buildProviders(queries *gen.Queries) session.ProviderDeps {
 	geo := geocoding.NewOpenMeteo()
 	geo.HTTPClient = newClient(5 * time.Second)
 
+	// Routing is opt-in via NIGHTMS_ORS_API_KEY. An empty key leaves the
+	// provider nil; the map screen handles nil by toasting "routing disabled".
+	var routingProv routing.Provider
+	if opts.ORSAPIKey != "" {
+		ors := routing.NewOpenRouteService(opts.ORSAPIKey)
+		ors.HTTPClient = newClient(10 * time.Second)
+		routingProv = ors
+	}
+
 	return session.ProviderDeps{
 		News:    news.NewCache(hn, 5*time.Minute),
 		Weather: om,
@@ -360,6 +370,7 @@ func buildProviders(queries *gen.Queries) session.ProviderDeps {
 		Search:      search.NewDuckDuckGo(newClient(8 * time.Second)),
 		Bookmarks:   bookmarks.New(queries),
 		Geocoder:    geo,
+		Routing:     routingProv,
 	}
 }
 

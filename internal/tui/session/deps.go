@@ -15,6 +15,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
 	"github.com/nickna/ssh.night.ms/internal/providers/news"
+	"github.com/nickna/ssh.night.ms/internal/providers/routing"
 	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
@@ -72,6 +73,10 @@ type ProviderDeps struct {
 	Search      search.Provider
 	Bookmarks   *bookmarks.Service
 	Geocoder    geocoding.Provider
+
+	// Routing is nil when NIGHTMS_ORS_API_KEY isn't set. The Map screen
+	// handles nil by surfacing a "routing disabled" toast on the `d` key.
+	Routing routing.Provider
 }
 
 // ArtDeps groups the filesystem-backed visual asset providers.

@@ -65,6 +65,10 @@ type Options struct {
 	MicrosoftClientID     string
 	MicrosoftClientSecret string
 	OAuthRedirectBase     string
+
+	// ORSAPIKey enables the Map screen's directions affordance when set.
+	// Empty disables routing — the map still works for browsing.
+	ORSAPIKey string
 }
 
 // Load reads environment variables and falls back to sensible defaults that
@@ -114,6 +118,7 @@ func Load() Options {
 		MicrosoftClientID:     os.Getenv("NIGHTMS_MICROSOFT_CLIENT_ID"),
 		MicrosoftClientSecret: os.Getenv("NIGHTMS_MICROSOFT_CLIENT_SECRET"),
 		OAuthRedirectBase:     os.Getenv("NIGHTMS_OAUTH_REDIRECT_BASE"),
+		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
 	}
 	o.WebCookieSecret = loadCookieSecret(o.HostKeyDir)
 	return o
