@@ -211,6 +211,13 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	// the Origin check in coder/websocket cover the CSRF angle.
 	r.Get("/ws/bbs", h.handleBBSWebSocket)
 
+	// /healthz backs the Docker HEALTHCHECK. Plain 200/"ok" — checking DB
+	// or Redis here would couple container liveness to dependencies and
+	// flap the status on transient hiccups.
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
 	srv := &http.Server{
