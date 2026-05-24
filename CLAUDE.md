@@ -2,116 +2,97 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Build / run / test
+## What this is
 
-This is a .NET 10 solution (SDK pinned in `global.json`). All commands assume the repo root.
+`ssh.night.ms` is a Go BBS, originally ported from the .NET `Night.Ms.SshServer` (the predecessor lives in this repo's pre-cutover git history). The Go and .NET stacks target the **same Postgres schema** — `internal/data/initializer.go` detects a `.NET`-bootstrapped schema and force-marks golang-migrate at version 1 to adopt it in place, which is how the cutover preserved the prod data volume. When changing migrations, keep this cross-stack compatibility in mind in case rollback is needed (`deploy/CUTOVER.md` is the runbook).
 
+The single `nightms` binary serves both:
+- An SSH listener (charmbracelet/wish + bubbletea) that drops authenticated users into a TUI lobby.
+- An HTTP listener (chi) for landing/login/profile pages plus a WebSocket bridge (`/ws/bbs`) that runs the **same** bubbletea root model in-browser.
+
+Both surfaces share auth (`internal/auth`), session services, providers, and the Postgres pool.
+
+## Commands
+
+Dev loop (Windows / PowerShell — the primary supported workflow):
+```powershell
+.\run.ps1                          # boots Postgres + Redis in Docker, builds, runs
+.\run.ps1 -SysopHandle alice -Reset # wipe DB + reseed; user `alice` auto-promoted to sysop on boot
+.\run.ps1 -Stop                    # tear down containers
+.\run.ps1 -NoBuild                 # skip `go build`, use bin/nightms.exe as-is
+```
+Defaults: Postgres `:55432`, Redis `:56379`, SSH `:2222`, HTTP `:5080`.
+
+Cross-platform equivalents:
 ```sh
-dotnet build                                                 # full solution
-dotnet test                                                  # all tests
-dotnet test tests/Night.Ms.SshServer.Tests                   # one project
-dotnet test --filter "FullyQualifiedName~ChatServiceTests"   # one class
-dotnet test --filter "FullyQualifiedName~ChatServiceTests.JoinPublicChannelAsync_CreatesChannel"  # one test
+go build -o bin/nightms ./cmd/nightms
+go run ./cmd/nightms
 ```
 
-Run the server via **`run.ps1`** — starts bare Postgres + Redis containers (`nightms-pg` / `nightms-redis`), builds, and runs SshServer on `:2222`. Use `-Reset` to drop+recreate the `bbs` database; `-Stop` to tear containers down; `-SshPort` to override the listener port (also honored as `BBS_SSH_PORT` env var).
-
-Requires Docker Desktop running. Server connections: `ssh -p 2222 <handle>@localhost`. First connection from an unknown key lands on the TOFU `RegisterScreen`.
-
-EF Core migrations target `AppDbContext`. The project uses `AppDbContextDesignFactory` (hardcoded localhost:5432), so design-time commands need a local Postgres reachable there:
-
+Tests (no special harness — plain `go test`):
 ```sh
-dotnet ef migrations add <Name> --project src/Night.Ms.SshServer
-dotnet ef database update --project src/Night.Ms.SshServer
+go test ./...                                       # full suite
+go test ./internal/tui/components/...               # one package
+go test -run TestCarousel ./internal/tui/components # single test
 ```
 
-At runtime, `DatabaseInitializer` (hosted service) applies pending migrations and seeds `#lobby` + the `General` forum on startup — you do not need to run `database update` for the app itself, only for design-time scaffolding.
+Code generation — sqlc reads `internal/data/queries/*.sql` and writes `internal/data/gen/`. After editing SQL or migrations, regenerate:
+```sh
+sqlc generate
+```
+
+Helper binaries under `cmd/`:
+- `seeduser -handle X -password Y [-sysop]` — insert a dev user. `run.ps1` shows the exact invocation on startup.
+- `loadtest seed|run|clean` — synthetic SSH load harness. Phase-7 gate is "200 sessions × 10 min × 0 failures" (see `deploy/CUTOVER.md`).
+- `smoketest -host h:p -user X -password Y -expect "..."` — one-shot SSH client that asserts a sentinel string in the rendered output. Useful for non-interactive screen checks.
+- `wsprobe` — exercises the `/ws/bbs` WebSocket bridge.
+- `ansiconvert` — tooling for the `data/art/*.ans` files.
 
 ## Architecture
 
-The system is one SSH server process whose only "API" is an interactive Terminal.Gui TUI rendered over the SSH channel. There's no HTTP surface.
+`cmd/nightms/main.go` is the composition root — there is no DI container. `main()` reads as a table of contents; each numbered phase is its own function. The startup order is load-bearing and matches the .NET app's:
 
-### Process boundary: `Program.cs` wires three hosted services in order
+1. `mustMigrate` — `data.RunMigrations` synchronously
+2. `mustOpenPool` — `*pgxpool.Pool` + `gen.Queries`
+3. `mustSeed` — `data.SeedDefaults` (creates `#lobby` etc.)
+4. `mustBootstrapSysop` — `auth.BootstrapSysop`
+5. `mustOpenRedis` — Redis client
+6. `buildSessionDeps` — realtime services, providers (via `buildProviders`), art (via `buildArt`), policy. Returns the `session.Deps` shared by both surfaces plus the Hold'em registry.
+7. `transport.NewServer` — SSH
+8. `web.NewServer` — HTTP
+9. `runListeners` — spawn the two listeners + wait for ctx cancel or error
 
-1. `DatabaseInitializer` — applies migrations, seeds defaults.
-2. `SysopBootstrap` — promotes the handle in `NIGHTMS_BOOTSTRAP_SYSOP_HANDLE` if the user row already exists. Re-runs on every boot.
-3. `SshHost` — instantiates `BbsSshServer` and starts listening.
+Don't reorder without checking that downstream invariants still hold (sysop bootstrap needs `#lobby`; transport needs every provider).
 
-Order matters — schema must exist before bootstrap, and bootstrap must complete before the first login can land.
+### Layered packages
 
-### SSH transport — `Night.Ms.SshTransport`
+- `internal/config` — env-var binding (`NIGHTMS_*` and `BBS_*`). The same env vars work for both Go and .NET stacks, by design. Notable Go-only knobs: `NIGHTMS_LOG_LEVEL` (`debug|info|warn|error`, default `info`) and `NIGHTMS_DEBUG_ADDR` (optional `host:port` to mount `/debug/pprof` + `/debug/vars` — bind to localhost only).
+- `internal/data` — migrations (`migrations/*.sql` embedded via `go:embed`), seed, and the sqlc-generated `gen` package. Use `Queries` for typed access; reach for `pgxpool.Pool` directly only when sqlc can't express the query.
+- `internal/auth` — argon2id hashing, lookup pipeline, Redis-backed rate limiter, OAuth (Google + Microsoft), sysop bootstrap. `Decision` is a closed union (`Known | SignupRequired | Banned | RateLimited | Refused`) — consumers type-switch on it rather than reading a Kind field.
+- `internal/realtime` — Redis pub/sub fabric. One goroutine per topic per subscriber; lifetimes are bound to the SSH session context. Named services: `ChatService`, `PresenceService`, `ProfileService`, `WallDispatcher`, `ForumService`, `LocationService`, `LeaderboardService`. The `WallDispatcher` runs as a background goroutine started in `buildSessionDeps`.
+- `internal/transport` — the SSH server. `transport.Deps` is just `{Session session.Deps; Lookup *auth.Lookup}` — the per-session bag lives in `session.Deps`, transport adds only the auth lookup needed by the SSH handshake callbacks.
+- `internal/web` — the HTTP server. Templates + static assets are `go:embed`-ed so the binary stays drop-anywhere. `wsbridge.go` adapts a websocket to `io.ReadWriter` so the same `tui.Root` model runs in the browser. `web.Deps` embeds `session.CoreDeps` and `session.RealtimeDeps` so handlers stay on flat field names (`h.deps.Pool`, `h.deps.Queries`). Construct with `web.NewDeps`. The WebSocket upgrade has an explicit Origin allowlist (PublicHost + localhost-on-HTTP-port).
+- `internal/tui` — the bubbletea program.
+  - `tui.Root` (`app.go`) is the per-session root model. It owns the wall-banner overlay, global Ctrl+C, and routes `nav.NavigateMsg` to the right screen via `route()`. When adding a screen, plumb a new `nav.Dest*` constant and a case in `route()`.
+  - `tui/session` — `Deps` is the grouped process-singleton bag (`Core`, `Realtime`, `Providers`, `Art`, `Games`, `Policy` sub-structs). `Session` embeds those + a mutable `State` (Identity, Width/Height, PrimaryLocation, DisplayPrefs) so screens access fields flat (`sess.Pool`, `sess.Chat`, `sess.News`). `session.New` is the one factory used by SSH (transport) and web (wsbridge) entry points. Helpers: `sess.Ctx()` / `sess.CtxWithTimeout(d)` — prefer these over `context.Background()` in screen Cmds so goroutines cancel on disconnect.
+  - `tui/screens` — one screen per logical area; large ones split into siblings: `chat.go` + `chat_{images,typing,presence,commands}.go`; `profile.go` + `profile_{password,keys,settings,locations,finger}.go`. Other screens (lobby, boards, news, browser, weather, gallery, finance, map, doors, slots, videopoker, blackjack, holdem, holdem_mp, alerts, register, sysop, leaderboards, timezones) are single-file. Unknown destinations and a non-sysop hitting `DestSysop` fall back to the lobby.
+  - `tui/components` — reusable widgets (carousel, modal, sparkline, card art, slots cabinet, channel list, …).
+  - `tui/art` — `.ans` loader + SGR parser. The lobby renders carousel cards from `data/art/lobby-icons/`; boards use `data/art/board-icons/`; gallery serves `data/art/gallery/`. All directories are filesystem-backed, not embedded, so operators can drop new art without a rebuild.
+- `internal/providers` — outbound integrations: `news` (HackerNews), `weather` (OpenMeteo + NWS alerts), `finance` (Yahoo stocks + CoinGecko crypto + Frankfurter FX, plus Yahoo RSS news), `maptile`, `search` (DuckDuckGo), `bookmarks` (DB-backed), `geocoding` (OpenMeteo). All HTTP-backed providers share one `*http.Transport` (connection-pooled, HTTP/2) built in `buildProviders`. Each asset class in finance has its own `Cache` so a Yahoo outage doesn't poison CoinGecko results.
+- `internal/providers/ttlcache` — generic `Cache[K,V]` with TTL + `singleflight` coalescing of concurrent fetches + optional `StaleOnError`. Used by news, weather/NWS, finance (3 sub-caches), maptile (TTL=0 = forever), and the chat/browser per-URL image render caches.
+- `internal/doors` — game logic (`blackjack`, `cards`, `holdem`, `slots`, `videopoker`) plus `WalletService` (shared process-wide via `session.Games.Wallet`). `holdem/multiplayer` keeps live tables in a `Registry` that persists to Postgres on shutdown and `Restore`s on boot.
+- `internal/imaging` — image fetch + half-block / quarter-block rendering. `imaging.Fetcher` is the raw HTTP+decode primitive; `imaging/asyncfetch.Pool` adds bounded concurrency + per-fetch timeout and is shared across all screens that paint inline images (chat, browser) via `session.Core.Images`.
+- `internal/reader` — readability extraction for the browser's reader-mode view.
+- `internal/browser` — URL parsing, history, and cache used by the browser screen.
 
-Built on `Microsoft.DevTunnels.Ssh` (NuGet). Two notable extensions live here:
+### Cross-stack rules to remember
 
-- `Crypto/Ed25519.cs` — adds ed25519 user-auth (DevTunnels ships RSA/ECDSA only). Built on `BouncyCastle.Cryptography`.
-- `Crypto/Curve25519KeyExchange.cs` — implemented but gated behind `BbsSshServerOptions.EnableCurve25519KeyExchange` (off by default). DevTunnels' `KeyExchangeService.ComputeExchangeHash` wraps `Q_C`/`Q_S` as bigints, which breaks RFC 8731 for X25519 keys with the high bit set. Clients fall back to `ecdh-sha2-nistp256` cleanly. Re-enabling needs an upstream patch — don't flip the flag on without one.
+- Schema changes must keep the .NET stack readable (or be coordinated with a .NET-side migration). The Go side uses `schema_migrations` (golang-migrate); the .NET side uses `__EFMigrationsHistory`. Both tables coexist.
+- Connection-string format on the Go side is the URL form (`postgres://user:pw@host:port/db?sslmode=...`), **not** the libpq `Host=...;` form used by the .NET stack's env var.
+- `cookies`, host keys, profile pictures, and the local art gallery live under `/data` (or `data/` in dev). Re-using the .NET stack's volume preserves clients' `known_hosts` entries after cutover.
 
-`BbsSshServer` exposes a `SessionStarted` event raised after `shell` is requested on a `session` channel. Other channel types and port forwarding are rejected (`OnChannelOpening`). Public-key auth flows through `_options.AuthLookup` (a delegate — `AuthLookupService.LookupAsync` provides the implementation).
+## Deployment
 
-The transport project deliberately knows nothing about the BBS, the database, or the TUI — it only hands you an authenticated `BbsSession` (channel stream + claims + `PtyInfo`) and an `AuthDecision` (`Known` / `Unknown` / `Banned`).
+`Dockerfile` produces a static scratch image (~5 MB + ca-certs). `deploy/compose.yml` is the prod stack (app + Postgres + Redis on a private network). Host `:22 → :2222` and `:80 → :5080`; TLS terminates at Cloudflare (Flexible mode), so `NIGHTMS_WEB_SECURE_COOKIES=0` behind that proxy. The compose project name is `nightms`, matching the volume names inherited from the .NET stack so cutover was a drop-in replacement (see `deploy/CUTOVER.md`).
 
-### TUI driver — `Tui/Drivers/`
-
-Terminal.Gui v2 ships built-in drivers for tty/Win32 consoles. To render to an SSH channel stream we plug in a custom `IComponentFactory<char>` (`SshChannelComponentFactory`). Two gotchas:
-
-- `ApplicationImpl(IComponentFactory, ITimeProvider)` is **internal** in Terminal.Gui v2 — the only public path (`Application.Create`) hardcodes the built-in driver names. `BbsSessionRunner.ApplicationImplCtor` reflects to call the internal constructor. If TG internals shift, that reflection is where you'll see it break first.
-- `SshChannelComponentFactory()` (parameterless, required by `DriverRegistry`) reads from `SshChannelDriverContext.CurrentOrThrow`, an `AsyncLocal`. The session runner **must** `Push` the context before calling `app.Init()`.
-
-PTY resize (`window-change`) updates `session.Pty` in `BbsSshServer.HandleChannelRequest`; the driver's `GetSize` delegate reads the latest value each tick.
-
-### Per-session flow — `Tui/BbsSessionRunner.cs`
-
-Each SSH session runs `Task.Run` → push driver context → init Terminal.Gui → either `RegisterScreen` (unknown key, TOFU) or `LobbyScreen`. The lobby returns a `LobbyNavigation` enum that drives a loop through `ChatScreen` / forum loop / `ProfileEditScreen` / `NewsScreen` / `AdminScreen`. Each navigation creates a fresh DI scope to avoid sharing `AppDbContext` instances across screens.
-
-### Data layer
-
-EF Core 10 + `EFCore.NamingConventions` (snake_case) against Postgres. The `citext` extension is enabled in `OnModelCreating` and used for `User.Handle` + `Channel.Name`, so handle/channel comparisons are case-insensitive in the database. Sysop actions write to `audit_log` (jsonb `Details` column).
-
-`DatabaseInitializer.SeedAsync` ensures `#lobby` and the `General` forum exist. Tests use `PostgresFixture` (Testcontainers + `postgres:17-alpine`) — one container per test class, fresh database per test via `CreateFreshDatabaseAsync`.
-
-### Realtime — `Realtime/`
-
-`IRealtimeBus` + `RedisRealtimeBus` wrap Redis pub/sub for chat fan-out. `ChatService` handles channel discovery and DM resolution: DM channels use a deterministic name `dm-{lo}-{hi}` (alphabetical) so the same pair always lands on the same channel regardless of who initiated. Public channels are auto-created on first join (BBS-style).
-
-### External-data providers — `Providers/`
-
-`INewsProvider` (Hacker News) and `IWeatherProvider` (Open-Meteo) are pluggable behind interfaces. Implementations are no-key public APIs; both ship with in-process caches (per-instance, no Redis). Swap them by re-binding the interface in `Program.cs`.
-
-### Login art — `Tui/Art/`, `Tui/Views/AnsiArtView.cs`, `Tui/ArtProvider.cs`
-
-`ArtProvider` resolves the banner shown at the top of `LobbyScreen` + `RegisterScreen`. Path comes from `NIGHTMS_LOGIN_ART_PATH` (or the `LoginArt:Path` config key).
-
-- Files ending in `.ans` parse via `SgrParser` (16-color, 256, and truecolor SGR escapes plus bold) into a `CellGrid` of RGB cells, rendered by `AnsiArtView` — a custom Terminal.Gui v2 `View` that paints per-cell attributes.
-- Anything else loads as a monochrome string and renders via a plain `Label`.
-- A malformed or unreadable file falls back to the in-code `ArtProvider.DefaultArt` (also monochrome), so the lobby never fails to render.
-
-The art types (`Cell`, `CellGrid`, `ArtColor`, `ArtStyle`) deliberately do **not** reference Terminal.Gui — TG's `ConfigurationManager` module initializer crashes inside the xUnit process, and `SgrParserTests` would not run otherwise. `AnsiArtView` is the one place that bridges `ArtColor` → `Terminal.Gui.Drawing.Color`.
-
-### Gallery — `Tui/Screens/GalleryScreen.cs`, `Tui/Art/*ArtGalleryProvider.cs`
-
-The lobby's `_Gallery` button (or `G`) opens a curated browser over `.ans` files in `NIGHTMS_ART_DIR` (or the `ArtGallery:Path` config key; default `{AppContext.BaseDirectory}/art/gallery/`). Sysop-curated — drop files in, no user upload flow.
-
-- **Filename = title.** A numeric ordering prefix is stripped: `010-welcome.ans` shows as "welcome". Separator after the prefix can be `-`, `_`, or space.
-- **Discovery is filesystem-each-time.** `List()` re-enumerates on construction and on the user pressing Enter, so a sysop can drop a file in mid-session without restarting the server.
-- **Malformed files are skipped silently** (logged once each) at list time so the screen never sees a piece it can't render.
-- **Navigation**: arrows / `h`-`l` for prev/next (wraps), digit `1`-`9` for direct jump, `Enter` to re-list, `Q`/`Esc` back to lobby.
-- **Sizing**: pieces render anchored at `(0, 2)` and clip if larger than the viewport — no scroll in v1. Target 80×24 or smaller when authoring.
-- Behind `IArtGalleryProvider` so the screen is decoupled from storage; a DB-backed gallery can swap in later without touching `GalleryScreen`.
-
-### Adding new art — `Night.Ms.Tools.AnsiConvert/`
-
-Offline CLI that converts PNG/JPEG to a `.ans` file using half-block rendering (`▀` U+2580, foreground = top source pixel, background = bottom). Each output cell covers two source pixels vertically, so the effective resolution is `(cols × 2*rows)` source pixels.
-
-```sh
-dotnet run --project src/Night.Ms.Tools.AnsiConvert -- <input.png> \
-  [--width 80] [--depth truecolor|256|16] [--dither none|floyd] [--out path]
-```
-
-Depth defaults to `truecolor`; dither defaults to `none` for truecolor and `floyd` (Floyd–Steinberg) for the quantized depths. Without `--out`, output goes to stdout — so `... > art/welcome.ans` is the normal write pattern. Convert offline, commit the `.ans`, point `NIGHTMS_LOGIN_ART_PATH` at it; the server never converts raster at runtime.
-
-We pin ImageSharp to the latest 3.1.x patch (Apache 2.0). The 4.x line switches to the Six Labors Split License, which is why we don't take it.
-
-## Project-specific conventions worth knowing
-
-- `MouseClick` is wired but not exercised in interactive testing.
-- DM channels and `/join #private` are designed-for-but-deferred — only the default `#lobby` is exposed today.
+`NIGHTMS_COOKIE_SECRET` (hex, ≥ 32 bytes) is optional; when unset the app generates a key on first boot and persists it to `$NIGHTMS_HOST_KEY_DIR/cookie-secret` (mode 0600) so it survives restarts. With neither the env var nor a writable host-key dir, the fallback is an ephemeral key — fine for unit tests, breaks sessions on restart.

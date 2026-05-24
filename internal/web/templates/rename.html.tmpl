@@ -1,0 +1,20 @@
+{{define "body"}}
+<section class="profile">
+  <h1>rename handle</h1>
+  {{with .Rename}}
+  {{if .Notice}}<p class="notice {{.Kind}}">{{.Notice}}</p>{{end}}
+  <p class="muted">Your current handle is <code>{{.Current}}</code>. Changing it updates everywhere that references your user row — past chat messages, forum posts, ledger rows.</p>
+  <form method="post" action="/profile/rename" autocomplete="off">
+    {{$.CSRFField}}
+    <label>new handle
+      <input type="text" name="handle" value="{{.Current}}"
+        autocapitalize="off" autocorrect="off" spellcheck="false" required
+        pattern="[A-Za-z0-9_-]{3,32}"
+        title="3-32 chars: letters, digits, underscore, dash">
+    </label>
+    <button type="submit">save</button>
+  </form>
+  {{end}}
+  <p><a href="/profile">← back to profile</a></p>
+</section>
+{{end}}

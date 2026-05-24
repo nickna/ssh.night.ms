@@ -1,53 +1,27 @@
-## Build output
-bin/
-obj/
-out/
-[Dd]ebug/
-[Rr]elease/
-x64/
-x86/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
-*.binlog
+# Binaries
+/nightms
+/nightms.exe
+/cmd/**/dist/
+/bin/
+/*.exe
 
-## .NET / SDK
-project.lock.json
-project.fragment.lock.json
-artifacts/
-.vs/
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-*.userprefs
+# Host keys (generated per-environment)
+/data/host-keys/
+/data/
 
-## Aspire
-.aspire/
+# Go workspace files
+/vendor/
+go.work
+go.work.sum
 
-## Test results
-[Tt]est[Rr]esult*/
-[Bb]uild[Ll]og.*
-
-## OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-## Editors
+# Editor / OS
 .vscode/
 .idea/
 .claude/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
 
-## Local data we don't want committed (host keys, runtime state)
-data/
-host-keys/
-*.pem
-*.key
-!**/Properties/launchSettings.json
-
-## Production secrets — committed example only, never the filled-in .env
+# Production secrets — the committed .env.example is the template; never the filled-in .env
 deploy/.env
-
-## run.ps1 smoke-test output redirected by Tee-Object / dotnet run > file
-.run-output.log
-.run-error.log

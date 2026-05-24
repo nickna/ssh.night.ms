@@ -1,0 +1,52 @@
+{{define "body"}}
+<section class="profile">
+  <h1>connected accounts</h1>
+  {{with .Connections}}
+  {{if .FlashMsg}}<p class="notice {{.FlashKind}}">{{.FlashMsg}}</p>{{end}}
+
+  {{if .Rows}}
+  <table class="creds">
+    <thead><tr><th>provider</th><th>label</th><th>added</th><th>last used</th><th></th></tr></thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td>{{.Provider}}</td>
+        <td>{{if .Label}}{{.Label}}{{else}}—{{end}}</td>
+        <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+        <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02"}}{{else}}—{{end}}</td>
+        <td>
+          <form method="post" action="/profile/connections/{{.ID}}/unlink" style="display:inline">
+            {{$.CSRFField}}
+            <button type="submit" class="link-button">unlink</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">no credentials yet.</p>
+  {{end}}
+
+  <h2>link a new account</h2>
+  <ul class="oauth-providers">
+    {{if .GoogleAvailable}}
+      <li>
+        {{if .GoogleLinked}}<span class="muted">Google linked</span>
+        {{else}}<a href="/auth/google/start?link=1">link Google</a>{{end}}
+      </li>
+    {{end}}
+    {{if .MicrosoftAvailable}}
+      <li>
+        {{if .MicrosoftLinked}}<span class="muted">Microsoft linked</span>
+        {{else}}<a href="/auth/microsoft/start?link=1">link Microsoft</a>{{end}}
+      </li>
+    {{end}}
+    {{if not (or .GoogleAvailable .MicrosoftAvailable)}}
+      <li class="muted">No OAuth providers are configured on this server.</li>
+    {{end}}
+  </ul>
+  {{end}}
+  <p><a href="/profile">← back to profile</a></p>
+</section>
+{{end}}

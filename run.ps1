@@ -1,19 +1,19 @@
 <#
 .SYNOPSIS
-    Boots the ssh.night.ms server locally — starts a Postgres + Redis container, builds
-    the solution, and runs Night.Ms.SshServer with the right connection strings.
+    Boots the ssh.night.ms server locally — starts a Postgres + Redis container,
+    builds the binary, and runs nightms with the right connection strings.
 
 .DESCRIPTION
-    Single-host dev loop: this is the only supported way to run the server. Requires
-    Docker Desktop.
+    Single-host dev loop. Requires Docker Desktop. Container names + ports match
+    the .NET stack's run.ps1, so you can use either stack against the same data
+    (one at a time — never both online together).
 
 .PARAMETER SysopHandle
-    Handle that gets auto-promoted to sysop on first registration (or at startup if it
-    already exists). Defaults to "nick".
+    Handle that gets auto-promoted to sysop on startup if it already exists.
+    Defaults to "nick".
 
 .PARAMETER PostgresPort
-    Host-side port for the Postgres container. Defaults to 55432 to avoid colliding
-    with any locally-installed Postgres.
+    Host-side port for the Postgres container. Defaults to 55432.
 
 .PARAMETER RedisPort
     Host-side port for the Redis container. Defaults to 56379.
@@ -22,16 +22,18 @@
     SSH listener port for the BBS. Defaults to 2222.
 
 .PARAMETER HttpPort
-    HTTP listener port for the Kestrel web server (landing page, SSO callbacks).
-    Defaults to 5080 (5000 is commonly held by Docker Desktop on Windows and AirPlay
-    Receiver on macOS).
+    HTTP listener port for the web server. Defaults to 5080.
 
 .PARAMETER Stop
-    Stops and removes the Postgres + Redis containers and exits. Doesn't run the server.
+    Stops and removes the Postgres + Redis containers and exits. Doesn't run
+    the server.
 
 .PARAMETER Reset
-    Drops and recreates the bbs database before starting the server. Useful when the
-    schema has changed and you want a clean slate.
+    Drops and recreates the bbs database before starting the server. Useful
+    when migrations have changed and you want a clean slate.
+
+.PARAMETER NoBuild
+    Skip the `go build` step (use the already-built binary in bin/).
 
 .EXAMPLE
     .\run.ps1
@@ -43,7 +45,7 @@
 
 .EXAMPLE
     .\run.ps1 -Stop
-    Tear down the containers (and stop the server if it's still running).
+    Tear down the containers.
 #>
 [CmdletBinding()]
 param(
@@ -53,7 +55,8 @@ param(
     [int]$SshPort = 2222,
     [int]$HttpPort = 5080,
     [switch]$Stop,
-    [switch]$Reset
+    [switch]$Reset,
+    [switch]$NoBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,13 +64,15 @@ $RepoRoot = $PSScriptRoot
 $PgContainer = 'nightms-pg'
 $RedisContainer = 'nightms-redis'
 $HostKeyDir = Join-Path $RepoRoot 'data\host-keys'
+$BinDir = Join-Path $RepoRoot 'bin'
+$BinPath = Join-Path $BinDir 'nightms.exe'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor DarkGray }
 
 function Stop-Containers {
-    Write-Step "Stopping Night.Ms.SshServer (if running)"
-    Get-Process Night.Ms.SshServer -ErrorAction SilentlyContinue | Stop-Process -Force
+    Write-Step "Stopping nightms (if running)"
+    Get-Process nightms -ErrorAction SilentlyContinue | Stop-Process -Force
     Write-Step "Removing $PgContainer + $RedisContainer"
     docker rm -f $PgContainer $RedisContainer 2>&1 | Out-Null
     Write-Note "Done."
@@ -81,11 +86,11 @@ if ($Stop) {
 # --- Preflight ----------------------------------------------------------------
 Write-Step "Preflight"
 
-$dotnetVersion = & dotnet --version 2>$null
-if (-not $dotnetVersion) {
-    throw ".NET SDK not found on PATH. Install .NET 10."
+$goVersion = & go version 2>$null
+if (-not $goVersion) {
+    throw "Go SDK not found on PATH. Install Go 1.26 or newer."
 }
-Write-Note ".NET SDK: $dotnetVersion"
+Write-Note "$goVersion"
 
 $null = & docker info 2>$null
 if ($LASTEXITCODE -ne 0) {
@@ -96,9 +101,7 @@ Write-Note "Docker daemon: ok"
 # --- Postgres -----------------------------------------------------------------
 $pgRunning = (& docker ps --filter "name=^$PgContainer$" --format '{{.Names}}') -eq $PgContainer
 if (-not $pgRunning) {
-    # Wipe a stopped-but-present container so the run command below doesn't conflict.
     & docker rm -f $PgContainer 2>&1 | Out-Null
-
     Write-Step "Starting Postgres on host port $PostgresPort"
     & docker run -d `
         --name $PgContainer `
@@ -115,7 +118,6 @@ if (-not $pgRunning) {
 $redisRunning = (& docker ps --filter "name=^$RedisContainer$" --format '{{.Names}}') -eq $RedisContainer
 if (-not $redisRunning) {
     & docker rm -f $RedisContainer 2>&1 | Out-Null
-
     Write-Step "Starting Redis on host port $RedisPort"
     & docker run -d `
         --name $RedisContainer `
@@ -147,13 +149,21 @@ if ($Reset) {
 }
 
 # --- Build --------------------------------------------------------------------
-Write-Step "Building"
-Push-Location $RepoRoot
-try {
-    & dotnet build --nologo --verbosity quiet
-    if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
-} finally {
-    Pop-Location
+if (-not $NoBuild) {
+    Write-Step "Building nightms"
+    if (-not (Test-Path $BinDir)) {
+        New-Item -ItemType Directory -Path $BinDir | Out-Null
+    }
+    Push-Location $RepoRoot
+    try {
+        & go build -o $BinPath ./cmd/nightms
+        if ($LASTEXITCODE -ne 0) { throw "go build failed." }
+    } finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path $BinPath)) {
+    throw "Binary not found at $BinPath. Run without -NoBuild first."
 }
 
 # --- Host key directory -------------------------------------------------------
@@ -162,24 +172,24 @@ if (-not (Test-Path $HostKeyDir)) {
 }
 
 # --- Run ----------------------------------------------------------------------
-Write-Step "Starting Night.Ms.SshServer on ssh :$SshPort, http :$HttpPort"
+Write-Step "Starting nightms on ssh :$SshPort, http :$HttpPort"
 Write-Host ""
 Write-Host "    Connect with:" -ForegroundColor Green
 Write-Host "      ssh -p $SshPort <handle>@localhost" -ForegroundColor Green
 Write-Host "    Or open:" -ForegroundColor Green
 Write-Host "      http://localhost:$HttpPort/" -ForegroundColor Green
 Write-Host ""
-Write-Host "    First connection from a key not on file lands on the registration screen." -ForegroundColor DarkGray
-Write-Host "    Bootstrap sysop handle: $SysopHandle" -ForegroundColor DarkGray
+Write-Host "    No signup screen yet — seed a user first:" -ForegroundColor DarkGray
+Write-Host "      go run ./cmd/seeduser -handle $SysopHandle -password <pw>" -ForegroundColor DarkGray
+Write-Host "    Bootstrap sysop handle: $SysopHandle (promoted on boot if user exists)." -ForegroundColor DarkGray
 Write-Host "    Press Ctrl+C to stop the server (containers keep running; use -Stop to tear down)." -ForegroundColor DarkGray
 Write-Host ""
 
-$env:Logging__LogLevel__Default = 'Information'
 $env:NIGHTMS_BOOTSTRAP_SYSOP_HANDLE = $SysopHandle
 $env:NIGHTMS_HOST_KEY_DIR = $HostKeyDir
 $env:BBS_SSH_PORT = $SshPort
 $env:BBS_HTTP_PORT = $HttpPort
-$env:ConnectionStrings__bbs = "Host=127.0.0.1;Port=$PostgresPort;Database=bbs;Username=postgres;Password=postgres"
-$env:ConnectionStrings__redis = "127.0.0.1:$RedisPort,abortConnect=false"
+$env:NIGHTMS_DB_CONN = "postgres://postgres:postgres@127.0.0.1:${PostgresPort}/bbs?sslmode=disable"
+$env:NIGHTMS_REDIS_CONN = "redis://127.0.0.1:${RedisPort}"
 
-& dotnet run --project (Join-Path $RepoRoot 'src\Night.Ms.SshServer') --no-build
+& $BinPath

@@ -1,0 +1,27 @@
+{{define "body"}}
+<section class="picture">
+  <h1>profile picture</h1>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  <div class="picture-preview">
+    <img class="avatar avatar-lg" src="/u/{{.Identity.Handle}}/avatar?size=128" alt="@{{.Identity.Handle}}" width="128" height="128">
+    <div>
+      <p class="muted">{{if .HasUpload}}using your uploaded picture.{{else}}using the generated identicon — upload a PNG or JPEG below to override.{{end}}</p>
+      {{if .HasUpload}}
+      <form method="post" action="/profile/picture/clear">{{.CSRFField}}<button type="submit" class="link-button">remove uploaded picture</button></form>
+      {{end}}
+    </div>
+  </div>
+
+  <h2>upload</h2>
+  <form method="post" action="/profile/picture" enctype="multipart/form-data" class="picture-form">
+    {{.CSRFField}}
+    <label>image (PNG or JPEG, max 5MB)
+      <input type="file" name="picture" accept="image/png,image/jpeg" required>
+    </label>
+    <button type="submit">upload</button>
+  </form>
+
+  <p class="muted"><a href="/profile">back to profile</a></p>
+</section>
+{{end}}

@@ -1,0 +1,20 @@
+{{define "body"}}
+<section class="auth">
+  <h1>log in</h1>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form method="post" action="/login" autocomplete="on">
+    {{.CSRFField}}
+    <label>handle <input type="text" name="handle" autocapitalize="off" autocorrect="off" spellcheck="false" required></label>
+    <label>password <input type="password" name="password" required></label>
+    <button type="submit">log in</button>
+  </form>
+  {{if or .OAuthEnabledGoogle .OAuthEnabledMicrosoft}}
+  <p class="muted">or sign in with:</p>
+  <ul class="oauth-providers">
+    {{if .OAuthEnabledGoogle}}<li><a href="/auth/google/start">Google</a></li>{{end}}
+    {{if .OAuthEnabledMicrosoft}}<li><a href="/auth/microsoft/start">Microsoft</a></li>{{end}}
+  </ul>
+  {{end}}
+  <p class="muted">no account yet? connect via ssh first: <code>ssh -p 2222 yourhandle@{{.Host}}</code></p>
+</section>
+{{end}}

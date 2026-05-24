@@ -1,0 +1,41 @@
+{{define "body"}}
+<section class="keys">
+  <h1>ssh keys</h1>
+  <p class="muted">add an OpenSSH public key (e.g., the contents of <code>~/.ssh/id_ed25519.pub</code>) to log into the BBS without a password.</p>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  {{if .Keys}}
+    <table class="keys-table">
+      <thead>
+        <tr><th>label</th><th>fingerprint</th><th>algorithm</th><th>added</th><th>last used</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{range .Keys}}
+        <tr>
+          <td>{{.Label}}</td>
+          <td><code>{{.Fingerprint}}</code></td>
+          <td>{{.Algorithm}}</td>
+          <td>{{.CreatedAt.Format "Jan 2 2006"}}</td>
+          <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "Jan 2"}}{{else}}—{{end}}</td>
+          <td>
+            <form method="post" action="/profile/keys/{{.ID}}/delete">{{$.CSRFField}}<button type="submit" class="link-button">remove</button></form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="muted">no ssh keys on file yet.</p>
+  {{end}}
+
+  <h2>add a key</h2>
+  <form method="post" action="/profile/keys" class="key-form">
+    {{.CSRFField}}
+    <label>label <input type="text" name="label" placeholder="laptop, work, …" maxlength="80"></label>
+    <label>public key <textarea name="public_key" rows="4" placeholder="ssh-ed25519 AAAA… optional-comment" required></textarea></label>
+    <button type="submit">add key</button>
+  </form>
+
+  <p class="muted"><a href="/profile">back to profile</a></p>
+</section>
+{{end}}

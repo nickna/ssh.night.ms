@@ -1,0 +1,19 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · night.ms</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">night.ms</a>
+    {{if .Identity}}<span class="identity">@{{.Identity.Handle}}{{if .Identity.IsSysop}} <span class="badge">SYSOP</span>{{end}}</span><form class="logout" method="post" action="/logout">{{.CSRFField}}<button type="submit">log out</button></form>{{end}}
+  </header>
+  <main>
+    {{template "body" .}}
+  </main>
+  <footer><span class="muted">ssh -p 2222 {{if .Identity}}{{.Identity.Handle}}{{else}}you{{end}}@{{.Host}}</span></footer>
+</body>
+</html>{{end}}

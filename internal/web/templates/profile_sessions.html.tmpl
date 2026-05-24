@@ -1,0 +1,41 @@
+{{define "body"}}
+<section class="profile">
+  <h1>active sessions</h1>
+  <p class="muted">Every browser currently signed in to <strong>@{{.Identity.Handle}}</strong>. Revoking a row signs that browser out immediately.</p>
+
+  {{if .Sessions}}
+  <table class="sessions">
+    <thead>
+      <tr>
+        <th>browser</th>
+        <th>ip</th>
+        <th>first seen</th>
+        <th>last seen</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Sessions}}
+      <tr{{if .Current}} class="sessions-current"{{end}}>
+        <td title="{{.UAFull}}">{{.UAShort}}{{if .Current}} <span class="badge">this browser</span>{{end}}</td>
+        <td>{{.IP}}</td>
+        <td>{{.CreatedAt.Format "Jan 2 2006 15:04"}}</td>
+        <td>{{.LastSeen.Format "Jan 2 2006 15:04"}}</td>
+        <td>
+          <form method="post" action="/profile/sessions/{{.SID}}/revoke"
+                onsubmit="return confirm('Revoke this session? The browser using it will be signed out immediately.');">
+            {{$.CSRFField}}
+            <button type="submit" class="action danger">revoke</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">(no active sessions — that's surprising given you're reading this page)</p>
+  {{end}}
+
+  <p><a href="/profile">back to profile</a></p>
+</section>
+{{end}}

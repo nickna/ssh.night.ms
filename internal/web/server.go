@@ -1,0 +1,292 @@
+// Package web is the HTTP surface of nightms: landing page, login + OAuth,
+// profile/account pages, and the /ws/bbs WebSocket SSH bridge that runs the
+// same bubbletea program as the SSH path. Templates and static assets are
+// embedded so the binary stays drop-anywhere.
+package web
+
+import (
+	"context"
+	"embed"
+	"errors"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/csrf"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/tui/session"
+)
+
+//go:embed templates/*.html.tmpl
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+// Config is the web-server slice of process configuration.
+type Config struct {
+	Addr           string // ":5080"
+	PublicHost     string // host string surfaced in pages (e.g. "night.ms")
+	CookieSecret   []byte // ≥ 32 bytes; used by cookie sign + CSRF middleware
+	SecureCookies  bool   // set Secure flag on cookies (true behind TLS)
+	SessionTimeout time.Duration
+	PFPDir         string // profile picture storage directory
+}
+
+// Deps groups the runtime collaborators handed to handlers via the request
+// context. Session is the same per-session bag the SSH transport hands to
+// session.New() — keeping the two on a single source of truth means the
+// /ws/bbs bridge runs every screen with the same providers and services
+// the SSH path does. CoreDeps and RealtimeDeps are also embedded for
+// handler-call-site ergonomics: h.deps.Pool, h.deps.Queries, h.deps.Chat
+// all resolve via field promotion. Use web.NewDeps to construct so the
+// embedded views stay in sync with Session.
+type Deps struct {
+	// Session is the process-singleton bag fed into session.New() when the
+	// /ws/bbs bridge spins up a tea.Program for a logged-in user. Mirrors
+	// transport.Deps.Session.
+	Session session.Deps
+
+	// Embedded views of Session.Core and Session.Realtime — promoted field
+	// access (h.deps.Pool, h.deps.Queries, h.deps.Logger, h.deps.Chat,
+	// h.deps.Presence) keeps handler code tight. main.go should build Deps
+	// via web.NewDeps, which mirrors Session into these embeds.
+	session.CoreDeps
+	session.RealtimeDeps
+
+	// Lookup is consumed by the web login form (POST /login). Web-only.
+	Lookup *auth.Lookup
+
+	// Redis backs the server-side session store. Required: web sessions
+	// are server-state-anchored now (no more HMAC-only cookies) so the
+	// web side cannot start without Redis. SSH uses the same client for
+	// rate limits + pub/sub.
+	Redis *redis.Client
+
+	// OAuth providers — either field may be nil if its env vars aren't set.
+	// The login template hides buttons for unconfigured providers; OAuth
+	// routes return 404 for them.
+	OAuth OAuthProviders
+}
+
+// NewDeps assembles a Deps from the canonical session.Deps and the web-only
+// extras (Lookup, Redis, OAuth). Mirrors the Session.Core / Session.Realtime
+// into the embedded views so handler call sites can stay on the short field
+// names (h.deps.Pool, h.deps.Chat) without main.go having to set them twice.
+func NewDeps(s session.Deps, lookup *auth.Lookup, redis *redis.Client, oauth OAuthProviders) Deps {
+	return Deps{
+		Session:      s,
+		CoreDeps:     s.Core,
+		RealtimeDeps: s.Realtime,
+		Lookup:       lookup,
+		Redis:        redis,
+		OAuth:        oauth,
+	}
+}
+
+// Server wraps the http.Server so cmd/nightms can call Listen + Shutdown
+// without taking a direct dependency on net/http.
+type Server struct {
+	inner  *http.Server
+	logger *slog.Logger
+}
+
+// NewServer builds the router and wires templates + middleware. ListenAndServe
+// returns when the listener stops.
+func NewServer(cfg Config, deps Deps) (*Server, error) {
+	if len(cfg.CookieSecret) < 32 {
+		return nil, fmt.Errorf("web: cookie secret must be at least 32 bytes")
+	}
+	if deps.Redis == nil {
+		return nil, fmt.Errorf("web: redis client required for session store")
+	}
+	tpl, err := parseTemplates()
+	if err != nil {
+		return nil, fmt.Errorf("web: parse templates: %w", err)
+	}
+	staticSub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return nil, fmt.Errorf("web: static sub: %w", err)
+	}
+
+	sessions := newSessionStore(deps.Redis, cfg.SecureCookies, cfg.SessionTimeout)
+	h := &handlers{
+		deps:      deps,
+		cfg:       cfg,
+		templates: tpl,
+		sessions:  sessions,
+		oauth:     deps.OAuth,
+	}
+
+	r := chi.NewRouter()
+	r.Use(middleware.RealIP)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(h.attachIdentity)
+
+	// gorilla/csrf v1.7+ assumes HTTPS by default and enforces Origin / Referer
+	// matching strictly. For dev (and TLS-terminated-at-proxy deployments) we
+	// flag the request as plaintext via the PlaintextHTTPContextKey so the
+	// strict checks relax to what they were in v1.6 and earlier. PublicHost
+	// + localhost are still trusted via csrf.TrustedOrigins below.
+	if !cfg.SecureCookies {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, csrf.PlaintextHTTPRequest(r))
+			})
+		})
+	}
+
+	// CSRF must come AFTER attachIdentity so the cookie can be loaded first.
+	// TrustedOrigins is needed because gorilla/csrf v1.7+ enforces origin
+	// matching on POST regardless of scheme — without it, curl/PowerShell
+	// requests against the dev port fail with "referer invalid". PublicHost
+	// covers the prod hostname; the localhost entries make dev smoke tests
+	// work over plain HTTP without juggling Referer headers.
+	csrfMiddleware := csrf.Protect(
+		cfg.CookieSecret,
+		csrf.Secure(cfg.SecureCookies),
+		csrf.Path("/"),
+		csrf.SameSite(csrf.SameSiteLaxMode),
+		csrf.TrustedOrigins([]string{
+			cfg.PublicHost,
+			"localhost",
+			"localhost:" + portFromAddr(cfg.Addr),
+			"127.0.0.1",
+			"127.0.0.1:" + portFromAddr(cfg.Addr),
+		}),
+	)
+	r.Group(func(r chi.Router) {
+		r.Use(csrfMiddleware)
+		r.Get("/", h.landing)
+		r.Get("/login", h.loginGet)
+		r.Post("/login", h.loginPost)
+		r.Post("/logout", h.logoutPost)
+		r.Post("/logout-all", h.logoutAllPost)
+		r.Get("/profile/sessions", h.sessionsView)
+		r.Post("/profile/sessions/{sid}/revoke", h.sessionsRevoke)
+		r.Get("/terminal", h.terminalPage)
+		r.Get("/profile", h.profileView)
+		r.Get("/profile/password", h.passwordGet)
+		r.Post("/profile/password", h.passwordPost)
+		r.Get("/profile/keys", h.keysGet)
+		r.Post("/profile/keys", h.keysAdd)
+		r.Post("/profile/keys/{id}/delete", h.keysDelete)
+		r.Get("/profile/picture", h.pictureGet)
+		r.Post("/profile/picture", h.picturePost)
+		r.Post("/profile/picture/clear", h.pictureClear)
+		r.Get("/u/{handle}", h.publicProfile)
+		r.Get("/profile/connections", h.connectionsView)
+		r.Post("/profile/connections/{id}/unlink", h.connectionsUnlink)
+		r.Get("/profile/rename", h.renameGet)
+		r.Post("/profile/rename", h.renamePost)
+
+		// OAuth routes. /auth/{provider}/start kicks the dance; /callback
+		// validates state + finalizes login or link; /finish is the "pick
+		// a handle" page for first-time OAuth signups. CSRF protection is
+		// inherited from this group.
+		r.Get("/auth/{provider}/start", h.oauthStart)
+		r.Get("/auth/{provider}/callback", h.oauthCallback)
+		r.Get("/auth/finish", h.oauthFinishGet)
+		r.Post("/auth/finish", h.oauthFinishPost)
+	})
+
+	// /u/{handle}/avatar.png is outside the CSRF group — it's a GET image
+	// endpoint with no state mutation, and we'd rather not pay the cookie
+	// dance on every <img src> request from third-party renderers.
+	r.Get("/u/{handle}/avatar", h.avatar)
+
+	// /ws/bbs intentionally sits OUTSIDE the CSRF group — WebSocket upgrades
+	// authenticate via the session cookie (loaded by attachIdentity above)
+	// and the gorilla/csrf middleware would otherwise insist on a token in
+	// the GET that initiates the upgrade. Browser-side same-origin policy +
+	// the Origin check in coder/websocket cover the CSRF angle.
+	r.Get("/ws/bbs", h.handleBBSWebSocket)
+
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+	return &Server{inner: srv, logger: deps.Logger}, nil
+}
+
+func (s *Server) ListenAndServe() error {
+	err := s.inner.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) Shutdown(ctx context.Context) error { return s.inner.Shutdown(ctx) }
+
+// parseTemplates parses every *.html.tmpl from the embedded FS into a single
+// template set. Each page template defines a "body" block consumed by the
+// shared layout.
+func parseTemplates() (map[string]*template.Template, error) {
+	out := map[string]*template.Template{}
+	layoutBytes, err := templateFS.ReadFile("templates/layout.html.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	entries, err := templateFS.ReadDir("templates")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "layout.html.tmpl" {
+			continue
+		}
+		t := template.New("layout")
+		if _, err := t.Parse(string(layoutBytes)); err != nil {
+			return nil, fmt.Errorf("parse layout: %w", err)
+		}
+		body, err := templateFS.ReadFile("templates/" + e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if _, err := t.Parse(string(body)); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", e.Name(), err)
+		}
+		// Trim ".html.tmpl" → page key (e.g. "landing", "login").
+		key := e.Name()
+		if i := indexFold(key, "."); i > 0 {
+			key = key[:i]
+		}
+		out[key] = t
+	}
+	return out, nil
+}
+
+// portFromAddr returns the port substring of a ":port" or "host:port" Addr
+// — used to feed gorilla/csrf's TrustedOrigins list without hardcoding a
+// default. Returns "" if the address has no port.
+func portFromAddr(addr string) string {
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			return addr[i+1:]
+		}
+	}
+	return ""
+}
+
+func indexFold(s, sep string) int {
+	for i := 0; i+len(sep) <= len(s); i++ {
+		if s[i:i+len(sep)] == sep {
+			return i
+		}
+	}
+	return -1
+}

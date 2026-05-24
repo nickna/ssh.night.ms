@@ -1,21 +1,20 @@
 # Production deployment stack for ssh.night.ms.
 #
-# One BBS app container + Postgres + Redis on a private network. TLS is
+# One Go BBS app container + Postgres + Redis on a private network. TLS is
 # terminated at Cloudflare (proxy ON, SSL/TLS mode "Flexible") — Cloudflare ↔
 # this VPS rides plain HTTP on port 80, then HTTPS browser ↔ Cloudflare.
 #
-# Image is built + pushed to GHCR by .github/workflows/deploy.yml; the VPS
-# only pulls. For an ad-hoc local build, run:
-#   docker build -f src/Night.Ms.SshServer/Dockerfile -t ghcr.io/nickna/ssh.night.ms:latest .
+# Image is built by .github/workflows/deploy.yml (or `docker build -t
+# ghcr.io/nickna/ssh.night.ms:latest .`). The VPS only pulls.
 #
 # Usage on the VPS:
 #   cp deploy/.env.example deploy/.env   # then fill in secrets
 #   docker compose -f deploy/compose.yml --env-file deploy/.env up -d
 #
-# IMPORTANT: this binds host port 22 for SSH. If the VPS's own sshd is on :22,
-# move it first (edit /etc/ssh/sshd_config, set Port 2200, restart sshd, update
-# your firewall + your shell config to use the new port) BEFORE bringing this
-# stack up — otherwise the docker-proxy port bind will fail.
+# IMPORTANT: binds host port 22 for SSH. If the VPS's own sshd is on :22,
+# move it first BEFORE bringing this stack up — otherwise docker-proxy will
+# fail to bind. Recommended: edit /etc/ssh/sshd_config, set Port 2200,
+# restart sshd, update your firewall + your shell config to use the new port.
 
 name: nightms
 
@@ -30,48 +29,47 @@ services:
       redis:
         condition: service_started
     environment:
-      # Connection strings reach the sibling containers over the compose network.
-      ConnectionStrings__bbs: "Host=postgres;Port=5432;Database=bbs;Username=bbs;Password=${POSTGRES_PASSWORD:?set in .env}"
-      ConnectionStrings__redis: "redis:6379,abortConnect=false"
+      # Go config uses URL connection strings (not the .NET "Host=...;" form).
+      NIGHTMS_DB_CONN: "postgres://bbs:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/bbs?sslmode=disable"
+      NIGHTMS_REDIS_CONN: "redis://redis:6379"
 
-      # Listener ports — match what the Dockerfile EXPOSEs.
       BBS_SSH_PORT: "2222"
       BBS_HTTP_PORT: "5080"
 
-      # Persistent paths — both inside the app-data volume.
       NIGHTMS_HOST_KEY_DIR: /data/host-keys
       NIGHTMS_PFP_DIR: /data/pfp
+      NIGHTMS_ART_DIR: /data/art/gallery
 
-      # First-run sysop (only meaningful on a fresh database; harmless after).
       NIGHTMS_BOOTSTRAP_SYSOP_HANDLE: "${NIGHTMS_BOOTSTRAP_SYSOP_HANDLE:-}"
+      NIGHTMS_BOOTSTRAP_SYSOP_PASSWORD: "${NIGHTMS_BOOTSTRAP_SYSOP_PASSWORD:-}"
 
-      # Display only — the "upload your picture at …" hint in the TUI uses the web
-      # base URL; the "ssh <handle>@…" hints on the web pages use the SSH host +
-      # public-facing port (22 in this stack — host :22 maps to container :2222).
-      NIGHTMS_WEB_BASE_URL: "${NIGHTMS_WEB_BASE_URL:-}"
-      NIGHTMS_SSH_HOST: "${NIGHTMS_SSH_HOST:-}"
-      NIGHTMS_SSH_PORT_PUBLIC: "${NIGHTMS_SSH_PORT_PUBLIC:-22}"
+      # Accepts either a bare host ("night.ms") or a full URL
+      # ("https://night.ms") — the app parses out the host either way.
+      NIGHTMS_WEB_BASE_URL: "${NIGHTMS_WEB_BASE_URL:-night.ms}"
+      # Optional. When unset the app generates a 32-byte key on first boot
+      # and persists it to /data/host-keys/cookie-secret (mode 0600), so the
+      # key survives container restarts and image updates. Set this only when
+      # you need to lift a specific key (e.g. coordinating across replicas).
+      NIGHTMS_COOKIE_SECRET: "${NIGHTMS_COOKIE_SECRET:-}"
+      # Behind Cloudflare Flexible the inbound origin connection is plain HTTP.
+      NIGHTMS_WEB_SECURE_COOKIES: "0"
 
-      # Optional SSO. The provider button is hidden when its pair is unset.
-      NIGHTMS_GOOGLE_CLIENT_ID: "${NIGHTMS_GOOGLE_CLIENT_ID:-}"
-      NIGHTMS_GOOGLE_CLIENT_SECRET: "${NIGHTMS_GOOGLE_CLIENT_SECRET:-}"
-      NIGHTMS_MICROSOFT_CLIENT_ID: "${NIGHTMS_MICROSOFT_CLIENT_ID:-}"
-      NIGHTMS_MICROSOFT_CLIENT_SECRET: "${NIGHTMS_MICROSOFT_CLIENT_SECRET:-}"
-
-      Logging__LogLevel__Default: "${LOG_LEVEL:-Information}"
+      # Default weather location when the user hasn't set one.
+      NIGHTMS_WEATHER_LAT: "${NIGHTMS_WEATHER_LAT:-40.7128}"
+      NIGHTMS_WEATHER_LON: "${NIGHTMS_WEATHER_LON:--74.0060}"
+      NIGHTMS_WEATHER_LABEL: "${NIGHTMS_WEATHER_LABEL:-New York}"
     volumes:
       - app-data:/data
     ports:
-      # Host :22 → container :2222. Move the VPS sshd off :22 first (see header).
+      # Host :22 → container :2222. Move the VPS sshd off :22 first.
       - "22:2222"
-      # Host :80 → container :5080. Cloudflare's edge fetches from this in
-      # Flexible mode. Lock down host port 80 to Cloudflare's IP ranges in the
-      # VPS firewall so the origin can't be reached directly (see runbook).
+      # Host :80 → container :5080. Lock host :80 to Cloudflare IP ranges
+      # in the VPS firewall so the origin can't be reached directly.
       - "80:5080"
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5080/healthz || exit 1"]
+      test: ["CMD", "/nightms", "--healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 5

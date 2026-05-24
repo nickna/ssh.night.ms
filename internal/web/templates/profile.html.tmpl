@@ -1,0 +1,33 @@
+{{define "body"}}
+<section class="profile">
+  <div class="profile-head">
+    <img class="avatar" src="/u/{{.Identity.Handle}}/avatar?size=96" alt="@{{.Identity.Handle}}" width="96" height="96">
+    <div>
+      <h1>profile</h1>
+      <p class="muted"><a href="/u/{{.Identity.Handle}}">public view</a></p>
+    </div>
+  </div>
+  {{if .Notice}}<p class="notice notice-{{.NoticeKind}}">{{.Notice}}</p>{{end}}
+
+  <dl class="profile-fields">
+    <dt>handle</dt><dd>@{{.Identity.Handle}}{{if .Identity.IsSysop}} <span class="badge">SYSOP</span>{{end}}</dd>
+    <dt>account created</dt><dd>{{.HandleCreated.Format "Jan 2 2006"}}</dd>
+    <dt>last seen</dt><dd>{{if .LastSeen}}{{.LastSeen.Format "Jan 2 2006 15:04"}}{{else}}never{{end}}</dd>
+    <dt>ssh keys</dt><dd>{{.SSHKeyCount}} on file</dd>
+  </dl>
+
+  <div class="profile-links">
+    <a class="action" href="/profile/password">change password</a>
+    <a class="action" href="/profile/keys">manage ssh keys</a>
+    <a class="action" href="/profile/picture">profile picture</a>
+    <a class="action" href="/profile/sessions">active sessions</a>
+  </div>
+
+  <form class="profile-danger" method="post" action="/logout-all"
+        onsubmit="return confirm('Sign out of every browser session? You will be logged out everywhere immediately.');">
+    {{.CSRFField}}
+    <button type="submit" class="action danger">log out everywhere</button>
+    <p class="muted">Revokes every active web session for this account, including this one.</p>
+  </form>
+</section>
+{{end}}
