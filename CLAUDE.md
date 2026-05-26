@@ -16,12 +16,15 @@ Both surfaces share auth (`internal/auth`), session services, providers, and the
 
 Dev loop (Windows / PowerShell — the primary supported workflow):
 ```powershell
-.\run.ps1                          # boots Postgres + Redis in Docker, builds, runs
+.\run.ps1                          # boots Postgres + Redis in Docker, builds nightms.exe natively, runs
+.\run.ps1 -Docker                  # builds + runs the prod Docker image instead — needed for Carbonyl rich mode
 .\run.ps1 -SysopHandle alice -Reset # wipe DB + reseed; user `alice` auto-promoted to sysop on boot
 .\run.ps1 -Stop                    # tear down containers
-.\run.ps1 -NoBuild                 # skip `go build`, use bin/nightms.exe as-is
+.\run.ps1 -NoBuild                 # skip the build step (native: reuse bin/nightms.exe; -Docker: reuse last image)
 ```
 Defaults: Postgres `:55432`, Redis `:56379`, SSH `:2222`, HTTP `:5080`.
+
+**Rich-mode browser (Carbonyl) only works with `-Docker`.** The native Windows build can't host it (the bundled Chromium is linux-x86_64 and the syscall surface — setsid/setctty/TIOCSWINSZ — is Linux-only). The "Web" lobby item is hidden on the native run; use `-Docker` to see it.
 
 Cross-platform equivalents:
 ```sh

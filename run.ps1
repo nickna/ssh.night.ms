@@ -33,15 +33,30 @@
     when migrations have changed and you want a clean slate.
 
 .PARAMETER NoBuild
-    Skip the `go build` step (use the already-built binary in bin/).
+    Skip the `go build` step (use the already-built binary in bin/). With
+    -Docker this also skips the `docker build` step.
+
+.PARAMETER Docker
+    Run nightms inside the prod Docker image instead of as a native Windows
+    binary. This is the only way to test rich-mode Carbonyl browsing locally
+    (the Carbonyl bundle is Linux-only), so use this when you want a true
+    "simulate prod" loop. Postgres + Redis still run in their own containers
+    on the host; the nightms container reaches them via host.docker.internal.
+    Slower per iteration than the native build but matches the deployed image
+    1:1.
 
 .EXAMPLE
     .\run.ps1
-    Start everything with defaults.
+    Start everything with defaults (native Windows build).
 
 .EXAMPLE
     .\run.ps1 -SysopHandle alice -Reset
     Wipe the database and bring it back up with alice as the bootstrap sysop.
+
+.EXAMPLE
+    .\run.ps1 -Docker
+    Build + run the prod Docker image locally. Picks up the Carbonyl bundle
+    from bundle/carbonyl-linux-x86_64.tar.xz so rich mode actually works.
 
 .EXAMPLE
     .\run.ps1 -Stop
@@ -56,13 +71,16 @@ param(
     [int]$HttpPort = 5080,
     [switch]$Stop,
     [switch]$Reset,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$Docker
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
 $PgContainer = 'nightms-pg'
 $RedisContainer = 'nightms-redis'
+$AppContainer = 'nightms-app'
+$DockerImageTag = 'nightms:local'
 $HostKeyDir = Join-Path $RepoRoot 'data\host-keys'
 $BinDir = Join-Path $RepoRoot 'bin'
 $BinPath = Join-Path $BinDir 'nightms.exe'
@@ -73,8 +91,8 @@ function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor DarkGray }
 function Stop-Containers {
     Write-Step "Stopping nightms (if running)"
     Get-Process nightms -ErrorAction SilentlyContinue | Stop-Process -Force
-    Write-Step "Removing $PgContainer + $RedisContainer"
-    docker rm -f $PgContainer $RedisContainer 2>&1 | Out-Null
+    Write-Step "Removing $AppContainer + $PgContainer + $RedisContainer"
+    docker rm -f $AppContainer $PgContainer $RedisContainer 2>&1 | Out-Null
     Write-Note "Done."
 }
 
@@ -148,7 +166,49 @@ if ($Reset) {
     Write-Note "Recreated."
 }
 
-# --- Build --------------------------------------------------------------------
+# --- Docker mode: build + run the prod image, exit when it does --------------
+if ($Docker) {
+    if (-not $NoBuild) {
+        Write-Step "Building $DockerImageTag (this is the prod Dockerfile, bookworm-slim + carbonyl bundle)"
+        Push-Location $RepoRoot
+        try {
+            & docker build -t $DockerImageTag .
+            if ($LASTEXITCODE -ne 0) { throw "docker build failed." }
+        } finally {
+            Pop-Location
+        }
+    }
+
+    # Drop any previous nightms container so the new run gets a clean slot.
+    & docker rm -f $AppContainer 2>&1 | Out-Null
+
+    Write-Step "Starting nightms container on ssh :$SshPort, http :$HttpPort"
+    Write-Host ""
+    Write-Host "    Connect with:" -ForegroundColor Green
+    Write-Host "      ssh -p $SshPort $SysopHandle@localhost" -ForegroundColor Green
+    Write-Host "    Lobby will show 'Web' (Carbonyl) — pick it to test rich mode." -ForegroundColor Green
+    Write-Host "    Press Ctrl+C to stop the server (Postgres + Redis containers keep running; use -Stop to tear down)." -ForegroundColor DarkGray
+    Write-Host ""
+
+    # nightms inside the container reaches the host-mapped Postgres/Redis via
+    # host.docker.internal. --add-host wires that name on Linux engines; it's
+    # a no-op on Docker Desktop for Windows where the resolver already knows it.
+    $dbConn = "postgres://postgres:postgres@host.docker.internal:${PostgresPort}/bbs?sslmode=disable"
+    $redisConn = "redis://host.docker.internal:${RedisPort}"
+
+    & docker run --rm -ti `
+        --name $AppContainer `
+        --add-host=host.docker.internal:host-gateway `
+        -p "${SshPort}:2222" `
+        -p "${HttpPort}:5080" `
+        -e NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=$SysopHandle `
+        -e NIGHTMS_DB_CONN=$dbConn `
+        -e NIGHTMS_REDIS_CONN=$redisConn `
+        $DockerImageTag
+    return
+}
+
+# --- Native mode (fast iteration; no Carbonyl) --------------------------------
 if (-not $NoBuild) {
     Write-Step "Building nightms"
     if (-not (Test-Path $BinDir)) {
@@ -183,6 +243,9 @@ Write-Host "    No signup screen yet — seed a user first:" -ForegroundColor Da
 Write-Host "      go run ./cmd/seeduser -handle $SysopHandle -password <pw>" -ForegroundColor DarkGray
 Write-Host "    Bootstrap sysop handle: $SysopHandle (promoted on boot if user exists)." -ForegroundColor DarkGray
 Write-Host "    Press Ctrl+C to stop the server (containers keep running; use -Stop to tear down)." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "    Note: native Windows build cannot run Carbonyl (Linux-only binary)." -ForegroundColor Yellow
+Write-Host "          The 'Web' lobby item will not appear. Use -Docker to test rich mode." -ForegroundColor Yellow
 Write-Host ""
 
 $env:NIGHTMS_BOOTSTRAP_SYSOP_HANDLE = $SysopHandle
