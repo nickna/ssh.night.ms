@@ -1,0 +1,37 @@
+# Anything the docker build doesn't need — keeps the build context tiny and,
+# critically, makes `docker build` immune to permission-denied errors on
+# runtime-created dirs (the container writes /data as root, which materializes
+# on the host as root-owned via the bind mount in run.ps1 -Docker mode; the
+# next docker build would then fail trying to tar those root:700 dirs).
+#
+# Anything that IS needed by the Dockerfile (bundle/, the Go source) must NOT
+# be listed here.
+
+# Runtime state written by the container — host keys, cookie secret, per-user
+# carbonyl profiles, profile pictures, art gallery uploads. Persists across
+# runs via the bind mount but is irrelevant to the image build.
+data/
+
+# Native build artifacts. The docker build does its own go build inside the
+# alpine stage; the host's bin/ would just bloat the build context.
+bin/
+
+# Git metadata.
+.git/
+.gitignore
+.gitattributes
+
+# Editor / OS junk.
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local docs that don't ship.
+CLAUDE.md
+
+# This file itself doesn't need to be in the build context either.
+.dockerignore
