@@ -19,6 +19,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/config"
 	"github.com/nickna/ssh.night.ms/internal/data"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
@@ -161,6 +162,39 @@ func main() {
 	}
 
 	attachSecurity(&sessionDeps, banCache, settingsCache)
+
+	// Carbonyl "rich mode" browser runner. Process singleton — Launch fans
+	// out per-session children. Returns (nil, ErrBinaryMissing) when the
+	// binary isn't on disk; that's the soft-disable path so the BBS still
+	// boots without the bundle (e.g., local dev without `make
+	// carbonyl-bundle`). When nil, the browser screen's R hotkey toasts
+	// "rich mode unavailable".
+	carbonylInitial := carbonyl.Limits{
+		Global:    opts.Carbonyl.MaxGlobal,
+		PerIP:     opts.Carbonyl.MaxPerIP,
+		PerHandle: opts.Carbonyl.MaxPerHandle,
+	}
+	carbonylRunner, err := carbonyl.New(carbonyl.Config{
+		BinPath:  opts.Carbonyl.BinPath,
+		DataRoot: opts.Carbonyl.DataDir,
+		Logger:   logger.With("component", "carbonyl"),
+		Limits:   carbonylInitial,
+	})
+	if err != nil {
+		logger.Warn("carbonyl: rich mode disabled", "err", err)
+	} else {
+		sessionDeps.System.Carbonyl = carbonylRunner
+		// Push updated caps on every settings refresh. Carbonyl-side gates
+		// only matter when the binary is actually present, so the hook is
+		// inside the success branch.
+		settingsCache.OnChange(func(snap settings.Snapshot) {
+			carbonylRunner.UpdateLimits(carbonyl.Limits{
+				Global:    snap.CarbonylMaxGlobal,
+				PerIP:     snap.CarbonylMaxPerIP,
+				PerHandle: snap.CarbonylMaxPerHandle,
+			})
+		})
+	}
 
 	// SSH-listener netlimit tracker — bounds per-IP concurrent conns + new-conn
 	// rate, plus the global in-flight unauth-handshake cap. The per-IP gates
@@ -443,6 +477,10 @@ func defaultsFromOptions(o config.Options) settings.Defaults {
 		LockoutHandleThreshold: o.RateLimit.HandleThreshold,
 		LockoutIPThreshold:     o.RateLimit.IPThreshold,
 		LockoutWindowSeconds:   int(o.RateLimit.WindowDuration / time.Second),
+		CarbonylEnabled:        o.Carbonyl.Enabled,
+		CarbonylMaxGlobal:      o.Carbonyl.MaxGlobal,
+		CarbonylMaxPerIP:       o.Carbonyl.MaxPerIP,
+		CarbonylMaxPerHandle:   o.Carbonyl.MaxPerHandle,
 	}
 }
 

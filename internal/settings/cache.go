@@ -49,6 +49,15 @@ const (
 	KeyLockoutHandleThreshold = "lockout_handle_threshold"
 	KeyLockoutIPThreshold     = "lockout_ip_threshold"
 	KeyLockoutWindowSeconds   = "lockout_window_seconds"
+
+	// Rich-mode (Carbonyl) keys. CarbonylEnabled gates the R hotkey on the
+	// browser screen; the three caps bound concurrent rich-mode launches.
+	// Defaults ship the feature dark (CarbonylEnabled=false) so prod can
+	// smoke-test before announcing.
+	KeyCarbonylEnabled      = "carbonyl_enabled"
+	KeyCarbonylMaxGlobal    = "carbonyl_max_global"
+	KeyCarbonylMaxPerIP     = "carbonyl_max_per_ip"
+	KeyCarbonylMaxPerHandle = "carbonyl_max_per_handle"
 )
 
 // Value-type tags stored in system_settings.type. Enforced by the table's
@@ -82,6 +91,10 @@ var Catalog = []SettingDef{
 	{KeyLockoutHandleThreshold, TypeInt, "Auth failures per-handle to trip a lockout"},
 	{KeyLockoutIPThreshold, TypeInt, "Auth failures per-IP to trip a lockout"},
 	{KeyLockoutWindowSeconds, TypeInt, "Sliding window seconds for lockout counters"},
+	{KeyCarbonylEnabled, TypeBool, "Allow 'rich mode' (Carbonyl browser) in SSH sessions"},
+	{KeyCarbonylMaxGlobal, TypeInt, "Cap on concurrent Carbonyl sessions process-wide (0 = unlimited)"},
+	{KeyCarbonylMaxPerIP, TypeInt, "Cap on concurrent Carbonyl sessions per source IP (0 = unlimited)"},
+	{KeyCarbonylMaxPerHandle, TypeInt, "Cap on concurrent Carbonyl sessions per user handle (0 = unlimited)"},
 }
 
 // Snapshot is an immutable, strongly-typed view of every known setting. Cache
@@ -99,6 +112,10 @@ type Snapshot struct {
 	LockoutHandleThreshold int
 	LockoutIPThreshold     int
 	LockoutWindowSeconds   int
+	CarbonylEnabled        bool
+	CarbonylMaxGlobal      int
+	CarbonylMaxPerIP       int
+	CarbonylMaxPerHandle   int
 }
 
 // Defaults is the fallback Snapshot for unset rows. main.go builds this from
@@ -119,6 +136,10 @@ type Defaults struct {
 	LockoutHandleThreshold int
 	LockoutIPThreshold     int
 	LockoutWindowSeconds   int
+	CarbonylEnabled        bool
+	CarbonylMaxGlobal      int
+	CarbonylMaxPerIP       int
+	CarbonylMaxPerHandle   int
 }
 
 // Cache is the in-process snapshot owner. One per process. Construct with
@@ -258,6 +279,10 @@ func (c *Cache) DefaultString(key string) string {
 		LockoutHandleThreshold: c.defaults.LockoutHandleThreshold,
 		LockoutIPThreshold:     c.defaults.LockoutIPThreshold,
 		LockoutWindowSeconds:   c.defaults.LockoutWindowSeconds,
+		CarbonylEnabled:        c.defaults.CarbonylEnabled,
+		CarbonylMaxGlobal:      c.defaults.CarbonylMaxGlobal,
+		CarbonylMaxPerIP:       c.defaults.CarbonylMaxPerIP,
+		CarbonylMaxPerHandle:   c.defaults.CarbonylMaxPerHandle,
 	}
 	return snap.String(key)
 }
@@ -295,6 +320,10 @@ func (c *Cache) snapshotFromRows(rows []gen.SystemSetting) Snapshot {
 		LockoutHandleThreshold: c.defaults.LockoutHandleThreshold,
 		LockoutIPThreshold:     c.defaults.LockoutIPThreshold,
 		LockoutWindowSeconds:   c.defaults.LockoutWindowSeconds,
+		CarbonylEnabled:        c.defaults.CarbonylEnabled,
+		CarbonylMaxGlobal:      c.defaults.CarbonylMaxGlobal,
+		CarbonylMaxPerIP:       c.defaults.CarbonylMaxPerIP,
+		CarbonylMaxPerHandle:   c.defaults.CarbonylMaxPerHandle,
 	}
 	for _, r := range rows {
 		c.applyRow(&snap, r.Key, r.Value)
@@ -339,6 +368,22 @@ func (c *Cache) applyRow(s *Snapshot, key, value string) {
 	case KeyLockoutWindowSeconds:
 		if n, err := strconv.Atoi(value); err == nil {
 			s.LockoutWindowSeconds = n
+		}
+	case KeyCarbonylEnabled:
+		if b, err := strconv.ParseBool(value); err == nil {
+			s.CarbonylEnabled = b
+		}
+	case KeyCarbonylMaxGlobal:
+		if n, err := strconv.Atoi(value); err == nil {
+			s.CarbonylMaxGlobal = n
+		}
+	case KeyCarbonylMaxPerIP:
+		if n, err := strconv.Atoi(value); err == nil {
+			s.CarbonylMaxPerIP = n
+		}
+	case KeyCarbonylMaxPerHandle:
+		if n, err := strconv.Atoi(value); err == nil {
+			s.CarbonylMaxPerHandle = n
 		}
 	default:
 		c.logger.Warn("settings cache: unknown key in db", "key", key)
@@ -428,6 +473,14 @@ func (s Snapshot) String(key string) string {
 		return strconv.Itoa(s.LockoutIPThreshold)
 	case KeyLockoutWindowSeconds:
 		return strconv.Itoa(s.LockoutWindowSeconds)
+	case KeyCarbonylEnabled:
+		return strconv.FormatBool(s.CarbonylEnabled)
+	case KeyCarbonylMaxGlobal:
+		return strconv.Itoa(s.CarbonylMaxGlobal)
+	case KeyCarbonylMaxPerIP:
+		return strconv.Itoa(s.CarbonylMaxPerIP)
+	case KeyCarbonylMaxPerHandle:
+		return strconv.Itoa(s.CarbonylMaxPerHandle)
 	}
 	return ""
 }

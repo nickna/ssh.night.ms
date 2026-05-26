@@ -211,6 +211,11 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 		// the chat sidebar).
 		tea.WithMouseCellMotion(),
 	)
+	// Stash the program on the session so screens that need ReleaseTerminal /
+	// RestoreTerminal (browser rich-mode) can reach it. IsSSH stays false so
+	// the rich-mode gate short-circuits on this path — there's no PTY to give
+	// Carbonyl, and xterm.js wouldn't answer its terminal-capability probes.
+	sess.SetTeaProgram(program)
 
 	// Forward subsequent resize frames to the program via tea.Send.
 	go h.forwardResizes(bridgeCtx, conn, program)
