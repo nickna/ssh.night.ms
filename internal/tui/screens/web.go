@@ -227,7 +227,9 @@ func (m *Web) View() string {
 	// exit key is known before they ever enter the full-screen browser.
 	b.WriteString(webNote.Render("While in the browser:"))
 	b.WriteString("\n  ")
-	b.WriteString(webHint.Render("Ctrl+C   exits Carbonyl, returns to this screen (SSH stays connected)"))
+	b.WriteString(webHint.Render("Esc, Q   exits Carbonyl, returns to this screen (SSH stays connected)"))
+	b.WriteString("\n  ")
+	b.WriteString(webHint.Render("Ctrl+C   also exits Carbonyl (but ends your SSH session on some clients)"))
 	b.WriteString("\n  ")
 	b.WriteString(webHint.Render("Ctrl+\\   emergency exit — intercepted before Carbonyl sees it"))
 	return b.String()

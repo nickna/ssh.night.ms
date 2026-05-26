@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -21,6 +22,21 @@ import (
 // and (d) the user can hit it without remembering a chord sequence. The byte
 // is consumed by the bridge and never forwarded to Carbonyl.
 const escChord byte = 0x1c
+
+// escByte / quitKey form the discoverable two-key exit chord: press ESC, then
+// 'q' within escQTimeout. The window is what separates the chord from "user
+// hit ESC to close a dialog and is now typing 'q' as page input" — at human
+// typing speed ESC→q as an intentional chord is well under 500ms, while
+// "ESC then later q" is normally seconds apart.
+//
+// ESC alone can't be the exit key because Carbonyl needs every ESC byte for
+// browser navigation: it's the prefix of every arrow / function / alt-key
+// sequence and the close gesture for menus, fullscreen, and find-in-page.
+const (
+	escByte     byte          = 0x1b
+	quitKey     byte          = 'q'
+	escQTimeout time.Duration = 500 * time.Millisecond
+)
 
 // bridgePTY runs three goroutines wiring the OS PTY master to the SSH session
 // for the lifetime of the child process:
@@ -61,9 +77,28 @@ func bridgePTY(ctx context.Context, master *os.File, sess SessionIO, logger *slo
 		defer wg.Done()
 		defer cancel()
 		buf := make([]byte, 4096)
+		// pendingESCAt is non-zero when the previous read ended with a bare
+		// ESC byte that we forwarded. If the very next read begins with 'q'
+		// within escQTimeout, the user typed the ESC→Q chord across two
+		// reads and we exit. After the timeout the trailing ESC is treated
+		// as an ordinary keystroke again.
+		var pendingESCAt time.Time
 		for {
 			n, err := sess.Stdin().Read(buf)
 			if n > 0 {
+				// Cross-read ESC→Q: previous read ended in ESC (already
+				// forwarded), this one starts with 'q' inside the window.
+				// Drop the 'q' and exit; the stray ESC the browser saw is
+				// harmless (closes a dialog at worst).
+				if !pendingESCAt.IsZero() && time.Since(pendingESCAt) <= escQTimeout && buf[0] == quitKey {
+					logger.Info("carbonyl bridge: esc-q exit requested")
+					if killChild != nil {
+						killChild()
+					}
+					return
+				}
+				pendingESCAt = time.Time{}
+
 				if i := bytes.IndexByte(buf[:n], escChord); i >= 0 {
 					// Write everything up to the chord (so a paste containing
 					// 0x1c mid-buffer still delivers the leading bytes), drop
@@ -79,11 +114,30 @@ func bridgePTY(ctx context.Context, master *os.File, sess SessionIO, logger *slo
 					}
 					return
 				}
+
+				// In-buffer ESC q (both bytes arrived in the same read —
+				// typical for a fast typist or a paste).
+				if i := bytes.Index(buf[:n], []byte{escByte, quitKey}); i >= 0 {
+					if i > 0 {
+						_, _ = master.Write(buf[:i])
+					}
+					logger.Info("carbonyl bridge: esc-q exit requested")
+					if killChild != nil {
+						killChild()
+					}
+					return
+				}
+
+				// Forward the buffer, then remember whether the tail was a
+				// bare ESC so the next read can complete the chord.
 				if _, werr := master.Write(buf[:n]); werr != nil {
 					if !isClosedError(werr) {
 						logger.Debug("carbonyl bridge: stdin write ended", "err", werr)
 					}
 					return
+				}
+				if buf[n-1] == escByte {
+					pendingESCAt = time.Now()
 				}
 			}
 			if err != nil {
