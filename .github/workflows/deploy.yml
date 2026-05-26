@@ -32,6 +32,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          # lfs: true pulls the ~100 MB Carbonyl bundle (bundle/*.tar.xz) that
+          # the Dockerfile carbonyl-stage extracts. Without it the checkout
+          # would leave the 130-byte LFS pointer in place and the Dockerfile's
+          # sha256 verify would abort the build.
+          lfs: true
 
       - uses: docker/setup-buildx-action@v3
 
