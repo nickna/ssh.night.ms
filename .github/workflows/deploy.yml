@@ -38,6 +38,54 @@ jobs:
           # sha256 verify would abort the build.
           lfs: true
 
+      # Sanity-check the bundle before we hand it to docker build. This is
+      # belt-and-suspenders for the lfs: true above — if LFS bandwidth is
+      # exhausted, the repo's LFS storage was revoked, or someone removed the
+      # lfs: true flag, the checkout silently leaves the pointer in place and
+      # the failure shows up 5 minutes later as a confusing sha256 mismatch
+      # deep inside the docker buildx output. Failing here surfaces it as a
+      # clear error annotation in the workflow summary in <2 seconds.
+      - name: Verify Carbonyl bundle is real (not an LFS pointer)
+        run: |
+          set -euo pipefail
+          bundle=bundle/carbonyl-linux-x86_64.tar.xz
+          sumfile=bundle/carbonyl-linux-x86_64.sha256
+          if [ ! -f "$bundle" ]; then
+            echo "::error file=$bundle::Bundle is missing from the checkout."
+            exit 1
+          fi
+          if [ ! -f "$sumfile" ]; then
+            echo "::error file=$sumfile::sha256 file is missing from the checkout."
+            exit 1
+          fi
+          size=$(stat -c%s "$bundle")
+          # Real bundle is ~107 MB. LFS pointer is ~130 bytes. Anything under
+          # 1 MB is conclusively not the real thing.
+          if [ "$size" -lt 1048576 ]; then
+            echo "::error file=$bundle::Bundle is only $size bytes — looks like an unresolved Git LFS pointer."
+            echo "Check: actions/checkout has 'lfs: true', and the repo has LFS bandwidth/storage available on github.com."
+            echo "First 200 bytes of the file (an LFS pointer starts with 'version https://git-lfs.github.com/...'):"
+            head -c 200 "$bundle" || true
+            exit 1
+          fi
+          expected=$(cat "$sumfile" | tr -d '[:space:]')
+          actual=$(sha256sum "$bundle" | awk '{print $1}')
+          if [ "$expected" != "$actual" ]; then
+            echo "::error file=$bundle::sha256 mismatch."
+            echo "  expected: $expected"
+            echo "  actual:   $actual"
+            exit 1
+          fi
+          # Also confirm the file IS an xz archive by header magic — guards
+          # against an exotic case where someone commits a wrong file at the
+          # right size with the sumfile somehow agreeing.
+          magic=$(xxd -p -l 6 "$bundle")
+          if [ "$magic" != "fd377a585a00" ]; then
+            echo "::error file=$bundle::Bundle header is $magic, expected fd377a585a00 (xz magic)."
+            exit 1
+          fi
+          echo "Bundle OK: $size bytes, sha256 $actual"
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
