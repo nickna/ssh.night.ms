@@ -205,9 +205,13 @@ func Load() Options {
 		OAuthRedirectBase:     os.Getenv("NIGHTMS_OAUTH_REDIRECT_BASE"),
 		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
 		Carbonyl: CarbonylOptions{
-			BinPath:      envOr("NIGHTMS_CARBONYL_BIN_PATH", "/opt/carbonyl/carbonyl"),
-			DataDir:      envOr("NIGHTMS_CARBONYL_DATA_DIR", filepath.Join("data", "carbonyl")),
-			Enabled:      os.Getenv("NIGHTMS_CARBONYL_ENABLED") == "1",
+			BinPath: envOr("NIGHTMS_CARBONYL_BIN_PATH", "/opt/carbonyl/carbonyl"),
+			DataDir: envOr("NIGHTMS_CARBONYL_DATA_DIR", filepath.Join("data", "carbonyl")),
+			// Default ON. Carbonyl is only actually offered to a session when
+			// the binary is also present (carbonyl.New stats the path at
+			// boot); shipping the kill switch off-by-default made the feature
+			// undiscoverable. Set NIGHTMS_CARBONYL_ENABLED=0 to disable.
+			Enabled:      envOr("NIGHTMS_CARBONYL_ENABLED", "1") != "0",
 			MaxGlobal:    int(uintEnv("NIGHTMS_CARBONYL_MAX_GLOBAL", 2)),
 			MaxPerIP:     int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_IP", 1)),
 			MaxPerHandle: int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_HANDLE", 1)),

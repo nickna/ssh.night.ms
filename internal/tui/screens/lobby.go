@@ -55,12 +55,21 @@ func NewLobby(sess *session.Session) tea.Model {
 		{Title: "Boards", Hotkey: 'b', Destination: nav.DestBoards, Icon: icon("boards")},
 		{Title: "Profile", Hotkey: 'p', Destination: nav.DestProfile, Icon: icon("profile")},
 		{Title: "News", Hotkey: 'n', Destination: nav.DestNews, Icon: icon("news")},
-		{Title: "Browser", Hotkey: 'w', Destination: nav.DestBrowser, Icon: icon("browser")},
+		{Title: "Reader", Hotkey: 'r', Destination: nav.DestBrowser, Icon: icon("browser")},
 		{Title: "Gallery", Hotkey: 'g', Destination: nav.DestGallery, Icon: icon("gallery")},
 		{Title: "Map", Hotkey: 'm', Destination: nav.DestMap, Icon: icon("map")},
 		{Title: "Weather", Hotkey: 'f', Destination: nav.DestWeather, Icon: icon("weather")},
 		{Title: "Finance", Hotkey: 'k', Destination: nav.DestFinance, Icon: icon("finance")},
 		{Title: "Doors", Hotkey: 'd', Destination: nav.DestDoors, Icon: icon("doors")},
+	}
+	// "Web" — full Carbonyl browser. Shown only when the session can actually
+	// host it: SSH transport (not WebSocket), the kill switch flipped on, and
+	// the binary loadable. WS users see only "Reader"; SSH users with rich
+	// mode enabled see both "Reader" and "Web" and pick what they want.
+	if sess.IsSSH && sess.LaunchCarbonyl != nil && sess.Settings != nil && sess.Settings.Get().CarbonylEnabled {
+		items = append(items, components.CarouselItem{
+			Title: "Web", Hotkey: 'w', Destination: nav.DestWeb, Icon: icon("web"),
+		})
 	}
 	if sess.Identity.IsSysop {
 		items = append(items, components.CarouselItem{

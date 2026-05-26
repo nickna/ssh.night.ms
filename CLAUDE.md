@@ -132,9 +132,14 @@ The SSH listener is exposed direct to the public internet (no L4 proxy in front,
 
 ## Rich-mode browser (Carbonyl)
 
-The browser screen (`internal/tui/screens/browser.go`) has two modes. The default is Mozilla-Readability-based reader-mode: HTML fetched, stripped to article body, rendered with inline half-block images. `R` (capital) on a loaded page hands the URL off to **Carbonyl** — a Chromium-based terminal browser running as a child process attached to a local OS PTY whose master end is bridged to the SSH channel. Full JS / WebGL / video / animations at terminal resolution, ~60 fps.
+Two distinct top-level lobby entries:
 
-**SSH-only.** The WebSocket-bridged web terminal can't host Carbonyl: no /dev/tty to give the child, and xterm.js wouldn't faithfully answer the DCS terminal-capability probes Carbonyl emits at startup. The R hotkey gates on `m.sess.IsSSH` and toasts on the web path.
+- **Reader** (`internal/tui/screens/browser.go`, `nav.DestBrowser`, hotkey `r`) — Mozilla-Readability-based article extractor. Works on every session type (SSH + WS), low bandwidth, text + half-block inline images. Fails on JS-heavy sites that don't ship a static HTML article body (YouTube, Twitter, GitHub homepage). For consistency a `R` hotkey inside Reader also launches the URL in Carbonyl as a convenience.
+- **Web** (`internal/tui/screens/web.go`, `nav.DestWeb`, hotkey `w`) — Carbonyl-backed full Chromium browser. URL prompt → launch → Carbonyl owns the terminal until the user `q`'s out → return to the prompt. The lobby item is hidden when the session can't actually host it (WebSocket sessions, missing binary, kill switch off) so users never see an entry that won't work.
+
+**Why two entries instead of mode-switching:** the original design buried Carbonyl behind a capital-R hotkey on the Reader screen that only appeared after a successful reader load — undiscoverable, and impossible to reach for the very pages that needed it (reader failures). Splitting them gives every user a clear pick from the lobby.
+
+**SSH-only.** The WebSocket-bridged web terminal can't host Carbonyl: no /dev/tty to give the child, and xterm.js wouldn't faithfully answer the DCS terminal-capability probes Carbonyl emits at startup. The "Web" lobby item is hidden on the WS path.
 
 **Bundle.** Carbonyl ships as a component-build of patched Chromium M148+ (the user's fork at https://github.com/nickna/carbonyl). The `bundle/carbonyl-linux-x86_64.tar.xz` Git-LFS artifact contains the `carbonyl` binary + ~410 transitive .so + V8 snapshots + ICU data + .pak resources, deterministically packed by `scripts/package-carbonyl.sh`. The Dockerfile extracts it to `/opt/carbonyl/` after sha256 verification.
 
@@ -148,7 +153,7 @@ The browser screen (`internal/tui/screens/browser.go`) has two modes. The defaul
 **Env vars** (all `NIGHTMS_CARBONYL_*`):
 - `NIGHTMS_CARBONYL_BIN_PATH` — absolute path to the binary. Default `/opt/carbonyl/carbonyl`. Missing binary → soft disable (BBS still boots; rich-mode toasts "unavailable").
 - `NIGHTMS_CARBONYL_DATA_DIR` — parent dir for per-user `--user-data-dir`. Default `/data/carbonyl`. Lazy-created at mode 0700 per uid; cookies and logins persist across reconnects.
-- `NIGHTMS_CARBONYL_ENABLED` — kill switch default. `0` (off) by default so the feature ships dark; flip via the sysop settings tab once smoke-tested.
+- `NIGHTMS_CARBONYL_ENABLED` — kill switch default. `1` (on) by default — the binary's mere presence on disk is the implicit gate, so an operator who didn't intend to enable rich mode would also not have the bundle. Set to `0` to force-disable independent of bundle presence.
 - `NIGHTMS_CARBONYL_MAX_GLOBAL` / `NIGHTMS_CARBONYL_MAX_PER_IP` / `NIGHTMS_CARBONYL_MAX_PER_HANDLE` — concurrency caps. Defaults 2 / 1 / 1. Each Chromium child is 200–400 MB resident; runaway launches OOM the container.
 
 **Runtime settings (sysop UI):** `carbonyl_enabled`, `carbonyl_max_global`, `carbonyl_max_per_ip`, `carbonyl_max_per_handle`. The `settings.Cache.OnChange` hook in `main.go` pushes new caps into `Runner.UpdateLimits` live, no restart needed.

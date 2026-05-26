@@ -40,6 +40,12 @@ const (
 	// DestLeaderboards lives next to the door games — it surfaces aggregated
 	// game_rounds stats and is reached from the same Doors carousel.
 	DestLeaderboards
+
+	// DestWeb is the Carbonyl-backed full browser, picked from the lobby
+	// alongside the reader-mode Browser. Carousel item is hidden when the
+	// session can't host Carbonyl (WebSocket sessions, missing binary, or
+	// kill switch off) so users only see it when it'll actually work.
+	DestWeb
 )
 
 // Title returns a short label suitable for the carousel and the placeholder
@@ -86,6 +92,8 @@ func (d Destination) Title() string {
 		return "Hold'em MP"
 	case DestLeaderboards:
 		return "Leaderboards"
+	case DestWeb:
+		return "Web"
 	}
 	return ""
 }
