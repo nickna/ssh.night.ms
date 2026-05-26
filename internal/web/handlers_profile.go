@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	gossh "golang.org/x/crypto/ssh"
 
+	"github.com/nickna/ssh.night.ms/internal/auth"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 )
 
@@ -285,19 +284,12 @@ func (h *handlers) keysAdd(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	pubKey, _, _, _, err := gossh.ParseAuthorizedKey([]byte(raw))
+	fingerprint, _, metadata, err := auth.ParseAuthorizedKey(raw)
 	if err != nil {
-		render("not a recognizable OpenSSH public key")
-		return
-	}
-	fingerprint := gossh.FingerprintSHA256(pubKey)
-	algorithm := pubKey.Type()
-	blob := pubKey.Marshal()
-	metadata, err := json.Marshal(map[string]any{
-		"algorithm": algorithm,
-		"blob_b64":  base64.StdEncoding.EncodeToString(blob),
-	})
-	if err != nil {
+		if errors.Is(err, auth.ErrUnparseableSSHKey) {
+			render("not a recognizable OpenSSH public key")
+			return
+		}
 		h.deps.Logger.Error("keys: marshal metadata", "err", err)
 		render("internal error encoding key")
 		return
@@ -314,7 +306,7 @@ func (h *handlers) keysAdd(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Most likely path: unique violation on ix_identity_credentials_provider_subject
 		// because the key is already on file (any user, since the index is global).
-		if isUniqueViolation(err) {
+		if auth.IsDuplicateCredential(err) {
 			render("this public key is already registered")
 			return
 		}
@@ -600,18 +592,6 @@ func sshAlgorithmFromMetadata(meta []byte) string {
 		return ""
 	}
 	return m.Algorithm
-}
-
-// isUniqueViolation matches the pg SQLSTATE 23505 — used to distinguish
-// "key already registered" from other DB errors when inserting credentials.
-func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	// pgx wraps the *pgconn.PgError in its returned errors; check by string
-	// inspection rather than importing the type for a one-off compare.
-	return strings.Contains(err.Error(), "SQLSTATE 23505") ||
-		strings.Contains(err.Error(), "duplicate key value")
 }
 
 // Compile-time guard so the handlers package isn't trimmed by goimports

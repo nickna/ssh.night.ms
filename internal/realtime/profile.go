@@ -305,6 +305,28 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID int64, hash 
 	return nil
 }
 
+// LogKeyAdd writes the audit_log row for an SSH key addition initiated from
+// the TUI. Mirrors the .NET KeysManagementScreen audit trail; the web add
+// path does not yet write an audit row (TODO).
+func (s *ProfileService) LogKeyAdd(ctx context.Context, userID int64, fingerprint string) error {
+	details, err := json.Marshal(map[string]string{
+		"provider":    "Ssh",
+		"fingerprint": fingerprint,
+	})
+	if err != nil {
+		return fmt.Errorf("profile: marshal audit details: %w", err)
+	}
+	targetID := userID
+	return s.Queries.InsertAuditLog(ctx, gen.InsertAuditLogParams{
+		ActorID:    &userID,
+		Action:     "identity.linked",
+		TargetType: "user",
+		TargetID:   &targetID,
+		Details:    details,
+		CreatedAt:  pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+}
+
 // LogKeyRemoval writes the audit_log row for an SSH key removal. The Profile
 // screen calls this after a successful DeleteCredentialByID so the trail
 // matches the .NET KeysManagementScreen.

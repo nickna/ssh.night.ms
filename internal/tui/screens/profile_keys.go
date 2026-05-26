@@ -6,10 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/nickna/ssh.night.ms/internal/auth"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/tui/components"
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
@@ -48,6 +51,8 @@ func (m *Profile) handleKeysKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.keysCursor < len(m.keys)-1 {
 			m.keysCursor++
 		}
+	case "a":
+		return m, m.openAddKey()
 	case "d", "delete":
 		return m, m.requestKeyDelete()
 	}
@@ -125,10 +130,10 @@ func (m *Profile) renderKeysModal() string {
 		Foreground(lipgloss.Color(theme.ColorAccent)).Render("SSH keys")
 	blurb := lipgloss.NewStyle().Italic(true).
 		Foreground(lipgloss.Color(theme.ColorDim)).Width(innerW).
-		Render("keys registered to your account. add new keys on the web — pasting public keys over SSH is fiddly.")
+		Render("keys registered to your account.")
 	hint := lipgloss.NewStyle().Italic(true).
 		Foreground(lipgloss.Color(theme.ColorDim)).
-		Render("↑/↓ select · d remove · Esc back")
+		Render("↑/↓ select · a add · d remove · Esc back")
 
 	rows := make([]string, 0, len(m.keys)+1)
 	if len(m.keys) == 0 {
@@ -162,6 +167,152 @@ func (m *Profile) renderKeysModal() string {
 	return theme.ModalFrame.Width(innerW + 6).Render(
 		strings.Join([]string{header, blurb, "", body, "", hint}, "\n"),
 	)
+}
+
+// openAddKey switches to the add-key modal with two fresh textinputs.
+// Patterned on openPassword: each invocation builds new inputs so a
+// cancelled attempt can't leak the previous paste into the next.
+func (m *Profile) openAddKey() tea.Cmd {
+	m.previousMode = modeKeys
+	m.mode = modeAddKey
+	m.addKeyErr = ""
+	m.addKeyBusy = false
+	m.addKeyFocus = 0
+
+	pub := textinput.New()
+	pub.Placeholder = "ssh-ed25519 AAAA… user@host"
+	pub.CharLimit = 4096
+	pub.Width = 56
+	m.addKeyPublic = pub
+
+	lbl := textinput.New()
+	lbl.Placeholder = "(optional)"
+	lbl.CharLimit = 80
+	lbl.Width = 32
+	m.addKeyLabel = lbl
+
+	m.applyAddKeyFocus()
+	return textinput.Blink
+}
+
+func (m *Profile) applyAddKeyFocus() {
+	m.addKeyPublic.Blur()
+	m.addKeyLabel.Blur()
+	switch m.addKeyFocus {
+	case 0:
+		m.addKeyPublic.Focus()
+	case 1:
+		m.addKeyLabel.Focus()
+	}
+}
+
+func (m *Profile) handleAddKeyKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.addKeyBusy {
+		// Swallow input while the insert is in flight; the result msg will
+		// re-enable the form.
+		return m, nil
+	}
+	switch k.String() {
+	case "esc":
+		m.mode = modeKeys
+		m.addKeyErr = ""
+		return m, nil
+	case "tab":
+		m.addKeyFocus = (m.addKeyFocus + 1) % 2
+		m.applyAddKeyFocus()
+		return m, textinput.Blink
+	case "shift+tab":
+		m.addKeyFocus = (m.addKeyFocus + 1) % 2
+		m.applyAddKeyFocus()
+		return m, textinput.Blink
+	case "enter":
+		return m, m.submitAddKey()
+	}
+	var cmd tea.Cmd
+	switch m.addKeyFocus {
+	case 0:
+		m.addKeyPublic, cmd = m.addKeyPublic.Update(k)
+	case 1:
+		m.addKeyLabel, cmd = m.addKeyLabel.Update(k)
+	}
+	return m, cmd
+}
+
+func (m *Profile) submitAddKey() tea.Cmd {
+	if m.addKeyBusy {
+		return nil
+	}
+	raw := m.addKeyPublic.Value()
+	fingerprint, _, metadata, parseErr := auth.ParseAuthorizedKey(raw)
+	if parseErr != nil {
+		m.addKeyErr = "not a recognizable OpenSSH public key."
+		return nil
+	}
+
+	// Match the web handler: empty label becomes "untitled" so the keys
+	// list always has a non-empty display string.
+	label := strings.TrimSpace(m.addKeyLabel.Value())
+	if label == "" {
+		label = "untitled"
+	}
+	labelPtr := &label
+
+	userID := m.sess.Identity.UserID
+	queries := m.sess.Queries
+	svc := m.sess.Profile
+
+	m.addKeyBusy = true
+	m.addKeyErr = ""
+	return func() tea.Msg {
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
+		defer cancel()
+		_, err := queries.InsertSshCredential(ctx, gen.InsertSshCredentialParams{
+			UserID:    userID,
+			Subject:   fingerprint,
+			Metadata:  metadata,
+			Label:     labelPtr,
+			CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
+		if err != nil {
+			if auth.IsDuplicateCredential(err) {
+				return keyAddedMsg{err: fmt.Errorf("this public key is already registered")}
+			}
+			return keyAddedMsg{err: err}
+		}
+		// Best-effort audit log; insert already succeeded.
+		_ = svc.LogKeyAdd(ctx, userID, fingerprint)
+		return keyAddedMsg{fingerprint: fingerprint}
+	}
+}
+
+// renderAddKeyModal builds the modal body for the add-key form.
+func (m *Profile) renderAddKeyModal() string {
+	innerW := 62
+	header := lipgloss.NewStyle().Bold(true).
+		Foreground(lipgloss.Color(theme.ColorAccent)).Render("add ssh key")
+	blurb := lipgloss.NewStyle().Italic(true).
+		Foreground(lipgloss.Color(theme.ColorDim)).Width(innerW).
+		Render("paste your public key (the one line from ~/.ssh/id_*.pub).")
+	hint := lipgloss.NewStyle().Italic(true).
+		Foreground(lipgloss.Color(theme.ColorDim)).
+		Render("Tab cycle · Enter add · Esc cancel")
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccentDim))
+
+	lines := []string{header, blurb, ""}
+	lines = append(lines, labelStyle.Render("public key"))
+	lines = append(lines, m.addKeyPublic.View(), "")
+	lines = append(lines, labelStyle.Render("label (optional)"))
+	lines = append(lines, m.addKeyLabel.View(), "")
+	if m.addKeyErr != "" {
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(lipgloss.Color(theme.ColorRed)).Render("! "+m.addKeyErr), "")
+	}
+	if m.addKeyBusy {
+		lines = append(lines, lipgloss.NewStyle().Italic(true).
+			Foreground(lipgloss.Color(theme.ColorDim)).Render("adding…"), "")
+	}
+	lines = append(lines, hint)
+	return theme.ModalFrame.Width(innerW + 6).Render(strings.Join(lines, "\n"))
 }
 
 // credentialLabelOr returns *c.Label or fallback when nil/empty.

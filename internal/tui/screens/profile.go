@@ -91,6 +91,14 @@ type Profile struct {
 	// Keys modal cursor.
 	keysCursor int
 
+	// Add-key modal inputs. Built fresh in openAddKey so a cancelled attempt
+	// leaves no residue. addKeyFocus: 0=public-key, 1=label.
+	addKeyPublic textinput.Model
+	addKeyLabel  textinput.Model
+	addKeyFocus  int
+	addKeyErr    string
+	addKeyBusy   bool
+
 	// Confirm-overlay state. confirmKind identifies which guard fired so
 	// the Yes-branch can dispatch the right follow-up cmd.
 	confirm     *components.Confirm
@@ -115,6 +123,7 @@ const (
 	modeTabSettings
 	modePassword
 	modeKeys
+	modeAddKey
 	modeLocations
 	modeConfirm
 	modeFinger
@@ -150,6 +159,12 @@ type keysReloadedMsg struct {
 type keyRemovedMsg struct {
 	id  int64
 	err error
+}
+type keyAddedMsg struct {
+	err error
+	// fingerprint is captured pre-insert so the success branch can audit-log
+	// without a re-read.
+	fingerprint string
 }
 type profileErrMsg struct {
 	stage string
@@ -339,6 +354,20 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.noticeKind = "ok"
 		return m, m.reloadKeys()
 
+	case keyAddedMsg:
+		m.addKeyBusy = false
+		if msg.err != nil {
+			m.addKeyErr = msg.err.Error()
+			return m, nil
+		}
+		m.mode = modeKeys
+		m.addKeyErr = ""
+		m.addKeyPublic.SetValue("")
+		m.addKeyLabel.SetValue("")
+		m.notice = "ssh key added."
+		m.noticeKind = "ok"
+		return m, m.reloadKeys()
+
 	case profileErrMsg:
 		m.notice = msg.stage + ": " + msg.err.Error()
 		m.noticeKind = "err"
@@ -413,6 +442,8 @@ func (m *Profile) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePasswordKey(k)
 	case modeKeys:
 		return m.handleKeysKey(k)
+	case modeAddKey:
+		return m.handleAddKeyKey(k)
 	case modeLocations:
 		return m.handleLocationsKey(k)
 	case modeConfirm:
@@ -731,6 +762,11 @@ func (m *Profile) View() string {
 		base := m.renderTabs()
 		dim := components.DimSGR(base, theme.ColorDim)
 		modal := m.renderKeysModal()
+		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
+	case modeAddKey:
+		base := m.renderTabs()
+		dim := components.DimSGR(base, theme.ColorDim)
+		modal := m.renderAddKeyModal()
 		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
 	case modeLocations:
 		base := m.renderTabs()
