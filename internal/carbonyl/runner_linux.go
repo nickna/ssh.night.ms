@@ -67,8 +67,15 @@ func (r *Runner) Launch(ctx context.Context, req LaunchRequest) error {
 		Col: uint16(cols),
 	})
 
+	// Wrap the caller's ctx so the bridge can SIGKILL the child on the
+	// Ctrl+\ emergency-exit chord without affecting the outer SSH-session
+	// ctx (which would tear down more than we want — the SSH session
+	// itself).
+	launchCtx, cancelLaunch := context.WithCancel(ctx)
+	defer cancelLaunch()
+
 	args := buildArgs(req, profile, cols, rows)
-	cmd := exec.CommandContext(ctx, r.binPath, args...)
+	cmd := exec.CommandContext(launchCtx, r.binPath, args...)
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	// Capture stderr separately so Carbonyl's GPU/sandbox warnings go to
@@ -122,7 +129,7 @@ func (r *Runner) Launch(ctx context.Context, req LaunchRequest) error {
 		drainStderr(stderr, r.logger.With("handle", req.Handle, "url", req.URL), &stderrTail)
 	}()
 
-	bridgeErr := bridgePTY(ctx, master, req.SessionRef, r.logger)
+	bridgeErr := bridgePTY(launchCtx, master, req.SessionRef, r.logger, cancelLaunch)
 
 	// Whatever bridgePTY returns, the child should be done shortly after —
 	// either because it exited (and that's why bridgePTY returned) or because

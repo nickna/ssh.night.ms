@@ -157,6 +157,10 @@ Two distinct top-level lobby entries:
 4. `bridgePTY` runs three goroutines: SSH-stdin → master, master → SSH-stdout, screen-owned resize chan → `TIOCSWINSZ(master)`. The browser screen's Update forwards every `tea.WindowSizeMsg` into the resize chan while `richModeActive`.
 5. The screen's launch Cmd wraps the whole thing in `prog.ReleaseTerminal()` / `prog.RestoreTerminal()` so the bubbletea read loop pauses and resumes around Carbonyl's takeover. After restore, the screen writes a recovery escape sequence (`\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1006l`) to wipe alt-screen + cursor-hide + mouse-tracking state Carbonyl leaves behind.
 
+**Exit keys.** From inside Carbonyl two ways out:
+- `Ctrl+C` — Carbonyl's own normal exit. Carbonyl's input parser (`carbonyl/src/input/parser.rs:80`) maps `0x03` to `Event::Exit` and shuts down cleanly. SSH stays connected; user lands back at the Web screen URL prompt.
+- `Ctrl+\` — emergency exit intercepted by our PTY bridge (`internal/carbonyl/ptybridge_linux.go`) BEFORE the byte reaches Carbonyl. The bridge consumes the chord byte and calls `cancelLaunch()` which SIGKILLs the child via `exec.CommandContext`. Use when Carbonyl is unresponsive (a stuck WebGL canvas, a runaway JS loop) and Ctrl+C isn't getting through. The chord is a single byte (ASCII FS, `0x1c`), chosen because browsers never bind it.
+
 **Env vars** (all `NIGHTMS_CARBONYL_*`):
 - `NIGHTMS_CARBONYL_BIN_PATH` — absolute path to the binary. Default `/opt/carbonyl/carbonyl`. Missing binary → soft disable (BBS still boots; rich-mode toasts "unavailable").
 - `NIGHTMS_CARBONYL_DATA_DIR` — parent dir for per-user `--user-data-dir`. Default `/data/carbonyl`. Lazy-created at mode 0700 per uid; cookies and logins persist across reconnects.

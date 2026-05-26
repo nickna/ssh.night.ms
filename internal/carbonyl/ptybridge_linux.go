@@ -3,6 +3,7 @@
 package carbonyl
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,14 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+// escChord is the single byte that triggers the emergency exit out of rich
+// mode. Ctrl+\ in raw mode is 0x1c (the ASCII FS — "file separator" — control
+// code). Chosen because (a) browsers never bind it for anything, (b) it's not
+// a default SSH escape, (c) it's a single byte so the intercept is trivial,
+// and (d) the user can hit it without remembering a chord sequence. The byte
+// is consumed by the bridge and never forwarded to Carbonyl.
+const escChord byte = 0x1c
 
 // bridgePTY runs three goroutines wiring the OS PTY master to the SSH session
 // for the lifetime of the child process:
@@ -24,25 +33,65 @@ import (
 // cleanly OR was killed and the kernel released the pty). The caller is
 // responsible for closing master after we return.
 //
+// killChild is invoked when we detect the user pressed escChord (Ctrl+\) —
+// the chord byte is consumed before reaching Carbonyl, and killChild cancels
+// the parent launch context so exec.CommandContext SIGKILLs the child without
+// waiting for it to notice EOF on its stdin (Chromium has many threads and
+// stdin-EOF isn't a reliable shutdown signal).
+//
 // Both copy loops swallow io.EOF and net.ErrClosed-style errors silently —
 // those are the normal teardown path. Other errors are logged at debug.
-func bridgePTY(ctx context.Context, master *os.File, sess SessionIO, logger *slog.Logger) error {
+func bridgePTY(ctx context.Context, master *os.File, sess SessionIO, logger *slog.Logger, killChild func()) error {
 	var wg sync.WaitGroup
 	// Use one inner context: cancelling it on the first goroutine exit makes
 	// the others wake up immediately (instead of waiting for their own EOF).
 	bridgeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// stdin -> master. When the SSH connection closes, sess.Stdin() returns
-	// io.EOF and the copy unblocks naturally. When the child exits and we
-	// close master, the read also unblocks.
+	// stdin -> master. Custom copier (not io.Copy) so we can scan each chunk
+	// for the escChord byte and trigger an emergency exit before Carbonyl
+	// sees it. The common case (no chord) writes the whole buffer once and
+	// is functionally identical to io.Copy.
+	//
+	// When the SSH connection closes, sess.Stdin() returns io.EOF and the
+	// loop unblocks. When the child exits and we close master, the write
+	// errors and unblocks.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer cancel()
-		_, err := io.Copy(master, sess.Stdin())
-		if err != nil && !isClosedError(err) {
-			logger.Debug("carbonyl bridge: stdin copy ended", "err", err)
+		buf := make([]byte, 4096)
+		for {
+			n, err := sess.Stdin().Read(buf)
+			if n > 0 {
+				if i := bytes.IndexByte(buf[:n], escChord); i >= 0 {
+					// Write everything up to the chord (so a paste containing
+					// 0x1c mid-buffer still delivers the leading bytes), drop
+					// the byte itself, and signal the parent to SIGKILL the
+					// child. The defer cancel() winds down the other
+					// goroutines; killChild() makes cmd.Wait() return promptly.
+					if i > 0 {
+						_, _ = master.Write(buf[:i])
+					}
+					logger.Info("carbonyl bridge: ctrl-\\ emergency exit requested")
+					if killChild != nil {
+						killChild()
+					}
+					return
+				}
+				if _, werr := master.Write(buf[:n]); werr != nil {
+					if !isClosedError(werr) {
+						logger.Debug("carbonyl bridge: stdin write ended", "err", werr)
+					}
+					return
+				}
+			}
+			if err != nil {
+				if !isClosedError(err) {
+					logger.Debug("carbonyl bridge: stdin read ended", "err", err)
+				}
+				return
+			}
 		}
 	}()
 
