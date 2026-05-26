@@ -81,6 +81,13 @@ RUN apt-get update && \
 COPY --from=build /out/nightms /nightms
 COPY --from=carbonyl-stage /opt/carbonyl /opt/carbonyl
 
+# Defensive: make the carbonyl bundle world-readable + execute-on-dirs so the
+# container can be run with `--user $(id -u):$(id -g)` from the host (which
+# run.ps1 -Docker mode does on Linux to avoid root-owned files showing up on
+# the host's bind-mounted data/ dir). Without this, files extracted with
+# strict tarball perms would deny reads to anyone but root.
+RUN chmod -R a+rX /opt/carbonyl
+
 # /data is the volume mount point. Persistence required: host-keys (so
 # clients' known_hosts entries don't trip), profile-pictures, art/gallery,
 # and per-user carbonyl --user-data-dir state (cookies + history survive
@@ -88,12 +95,17 @@ COPY --from=carbonyl-stage /opt/carbonyl /opt/carbonyl
 # off — no orphan data accumulates while the feature is dark).
 EXPOSE 2222 5080
 
+# HOME=/tmp gives the unprivileged --user a writable HOME (Chromium uses it
+# for caches and crash dumps; /tmp is mode 1777, writable for any user). Does
+# not affect carbonyl's per-user profile location — that's set explicitly via
+# --user-data-dir (NIGHTMS_CARBONYL_DATA_DIR/<userid>).
 ENV NIGHTMS_HOST_KEY_DIR=/data/host-keys \
     NIGHTMS_PFP_DIR=/data/profile-pictures \
     NIGHTMS_ART_DIR=/data/art/gallery \
     NIGHTMS_CARBONYL_BIN_PATH=/opt/carbonyl/carbonyl \
     NIGHTMS_CARBONYL_DATA_DIR=/data/carbonyl \
     BBS_SSH_PORT=2222 \
-    BBS_HTTP_PORT=5080
+    BBS_HTTP_PORT=5080 \
+    HOME=/tmp
 
 ENTRYPOINT ["/nightms"]

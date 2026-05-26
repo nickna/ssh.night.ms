@@ -236,6 +236,38 @@ if ($Docker) {
         New-Item -ItemType Directory -Path $DataDir | Out-Null
     }
 
+    # On Linux we pass --user $(id -u):$(id -g) to the container so files it
+    # writes to the bind-mounted /data come back owned by the host user
+    # instead of root. This avoids the "permission denied" trap on the NEXT
+    # docker build context read after data/host-keys + data/carbonyl get
+    # written. Docker Desktop on Mac/Windows virtualizes file ownership so
+    # the --user flag isn't strictly needed there; we only do it on Linux.
+    $dockerUserArgs = @()
+    if (-not $IsWin) {
+        $uid = (& id -u).Trim()
+        $gid = (& id -g).Trim()
+        $dockerUserArgs = @('--user', "${uid}:${gid}")
+
+        # If earlier runs (before --user was added) left root-owned files in
+        # data/, the new container user won't be able to write to them. Detect
+        # and chown via sudo — one prompt, one fix, never again.
+        $foreign = $null
+        try {
+            $foreign = & find $DataDir -mindepth 1 -not -user $env:USER -print -quit 2>$null
+        } catch {
+            $foreign = 'unreadable'
+        }
+        if ($foreign) {
+            Write-Step "Fixing ownership of $DataDir (left as root by an earlier run)"
+            Write-Note "Needs sudo. You may be prompted for your password."
+            & sudo chown -R "${env:USER}:${env:USER}" $DataDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "chown failed. Fix manually: sudo chown -R `$USER:`$USER $DataDir"
+            }
+            Write-Note "Ownership fixed."
+        }
+    }
+
     Write-Step "Starting nightms container on ssh :$SshPort, http :$HttpPort"
     Write-Host ""
     Write-Host "    Connect with:" -ForegroundColor Green
@@ -254,16 +286,18 @@ if ($Docker) {
     # -v ${DataDir}:/data is what keeps the SSH host key stable across runs.
     # Without it every container start regenerates host keys and the user gets
     # the "REMOTE HOST IDENTIFICATION HAS CHANGED" warning from their client.
-    & docker run --rm -ti `
-        --name $AppContainer `
-        --add-host=host.docker.internal:host-gateway `
-        -p "${SshPort}:2222" `
-        -p "${HttpPort}:5080" `
-        -v "${DataDir}:/data" `
-        -e NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=$SysopHandle `
-        -e NIGHTMS_DB_CONN=$dbConn `
-        -e NIGHTMS_REDIS_CONN=$redisConn `
-        $DockerImageTag
+    $dockerRunArgs = @(
+        'run', '--rm', '-ti',
+        '--name', $AppContainer,
+        '--add-host=host.docker.internal:host-gateway',
+        '-p', "${SshPort}:2222",
+        '-p', "${HttpPort}:5080",
+        '-v', "${DataDir}:/data",
+        '-e', "NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=$SysopHandle",
+        '-e', "NIGHTMS_DB_CONN=$dbConn",
+        '-e', "NIGHTMS_REDIS_CONN=$redisConn"
+    ) + $dockerUserArgs + @($DockerImageTag)
+    & docker @dockerRunArgs
     return
 }
 
