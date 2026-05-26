@@ -214,12 +214,22 @@ if ($Docker) {
     # Drop any previous nightms container so the new run gets a clean slot.
     & docker rm -f $AppContainer 2>&1 | Out-Null
 
+    # Ensure repo/data exists on the host before docker mounts it — otherwise
+    # the daemon would create it root-owned in some configurations. The same
+    # dir is used by native mode, so host keys, cookie secret, art, pfp, and
+    # the per-user carbonyl profiles all stay consistent across mode switches.
+    $DataDir = [IO.Path]::Combine($RepoRoot, 'data')
+    if (-not (Test-Path $DataDir)) {
+        New-Item -ItemType Directory -Path $DataDir | Out-Null
+    }
+
     Write-Step "Starting nightms container on ssh :$SshPort, http :$HttpPort"
     Write-Host ""
     Write-Host "    Connect with:" -ForegroundColor Green
     Write-Host "      ssh -p $SshPort $SysopHandle@localhost" -ForegroundColor Green
     Write-Host "    Lobby will show 'Web' (Carbonyl) — pick it to test rich mode." -ForegroundColor Green
     Write-Host "    Press Ctrl+C to stop the server (Postgres + Redis containers keep running; use -Stop to tear down)." -ForegroundColor DarkGray
+    Write-Host "    Host keys + carbonyl profiles persist in $DataDir." -ForegroundColor DarkGray
     Write-Host ""
 
     # nightms inside the container reaches the host-mapped Postgres/Redis via
@@ -228,11 +238,15 @@ if ($Docker) {
     $dbConn = "postgres://postgres:postgres@host.docker.internal:${PostgresPort}/bbs?sslmode=disable"
     $redisConn = "redis://host.docker.internal:${RedisPort}"
 
+    # -v ${DataDir}:/data is what keeps the SSH host key stable across runs.
+    # Without it every container start regenerates host keys and the user gets
+    # the "REMOTE HOST IDENTIFICATION HAS CHANGED" warning from their client.
     & docker run --rm -ti `
         --name $AppContainer `
         --add-host=host.docker.internal:host-gateway `
         -p "${SshPort}:2222" `
         -p "${HttpPort}:5080" `
+        -v "${DataDir}:/data" `
         -e NIGHTMS_BOOTSTRAP_SYSOP_HANDLE=$SysopHandle `
         -e NIGHTMS_DB_CONN=$dbConn `
         -e NIGHTMS_REDIS_CONN=$redisConn `
