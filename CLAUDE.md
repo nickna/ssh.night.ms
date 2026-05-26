@@ -95,7 +95,9 @@ Don't reorder without checking that downstream invariants still hold (sysop boot
 
 ## Deployment
 
-`Dockerfile` produces a static scratch image (~5 MB + ca-certs). `deploy/compose.yml` is the prod stack (app + Postgres + Redis on a private network). Host `:22 → :2222` and `:80 → :5080`; TLS terminates at Cloudflare (Flexible mode), so `NIGHTMS_WEB_SECURE_COOKIES=0` behind that proxy. The compose project name is `nightms`, matching the volume names inherited from the .NET stack so cutover was a drop-in replacement (see `deploy/CUTOVER.md`).
+`Dockerfile` produces a ~750 MB `debian:bookworm-slim`-based image — the Carbonyl rich-mode bundle alone adds ~400 MB of stripped Chromium .so files. Before the rich-mode feature this was a ~5 MB scratch image; the size jump is the unavoidable cost of bundling a browser. `deploy/compose.yml` is the prod stack (app + Postgres + Redis on a private network). Host `:22 → :2222` and `:80 → :5080`; TLS terminates at Cloudflare (Flexible mode), so `NIGHTMS_WEB_SECURE_COOKIES=0` behind that proxy. The compose project name is `nightms`, matching the volume names inherited from the .NET stack so cutover was a drop-in replacement (see `deploy/CUTOVER.md`).
+
+**Bundle prerequisite for `docker build`:** the Carbonyl runtime ships via Git LFS under `bundle/carbonyl-linux-x86_64.tar.xz` (~103 MB compressed, ~560 MB extracted). Clone with `git lfs install` then `git lfs pull` before building — CI must do the same. To regenerate after a Carbonyl source rebuild, run `scripts/package-carbonyl.sh [path-to-chromium/src/out/Release]`. Bundle layout + provenance: `bundle/README.md`.
 
 `NIGHTMS_COOKIE_SECRET` (hex, ≥ 32 bytes) is optional; when unset the app generates a key on first boot and persists it to `$NIGHTMS_HOST_KEY_DIR/cookie-secret` (mode 0600) so it survives restarts. With neither the env var nor a writable host-key dir, the fallback is an ephemeral key — fine for unit tests, breaks sessions on restart.
 
@@ -127,3 +129,42 @@ The SSH listener is exposed direct to the public internet (no L4 proxy in front,
 - **Events** (`sysop_events.go`, default landing tab) — unified chronological feed merging `audit_log` (sysop actions) and `security_events` rows via a Postgres `UNION ALL`. Keyset-paginated (`ListUnifiedEvents`), with cursor + PgUp/PgDn navigation, auto-load-more as the cursor approaches the bottom, and a detail modal (Enter) showing the full jsonb payload + related events (same handle/ip within ±5 min via `ListUnifiedEventsRelated`). The textinput at the bottom is a live-debounced filter (150ms quiet window) parsed by `parseFilters` (`sysop_events_filter.go`) into chips: `severity:warn handle:alice ip:1.2.3.4 kind:auth_failure source:audit since:1h until:2026-05-23 text:foo`. Filtered queries take the hand-written `data.ListUnifiedEventsFiltered` path (`internal/data/events_filtered.go`); the dim names are a closed allowlist to bound the SQL surface. `/` re-grabs filter focus from list-navigation mode; `Esc` clears the filter when it's non-empty, otherwise falls through to the page-level back-to-lobby.
 - **Users** (`sysop.go::renderUsers`) — alphabetical user list with flag column (S/B/K). Commands at the prompt: `ban`, `unban`, `sysop`, `unsysop`, `clear-passwordless`, `wall`.
 - **Bans** (`sysop_bans.go`) — active `security_ip_bans` rows. Commands: `ban-ip <ip> [duration] [reason]`, `unban-ip <ip>`. Both go through `auth.BanCache` which push-invalidates over the Redis `security:ban-invalidate` channel so multiple replicas converge in <1s.
+
+## Rich-mode browser (Carbonyl)
+
+The browser screen (`internal/tui/screens/browser.go`) has two modes. The default is Mozilla-Readability-based reader-mode: HTML fetched, stripped to article body, rendered with inline half-block images. `R` (capital) on a loaded page hands the URL off to **Carbonyl** — a Chromium-based terminal browser running as a child process attached to a local OS PTY whose master end is bridged to the SSH channel. Full JS / WebGL / video / animations at terminal resolution, ~60 fps.
+
+**SSH-only.** The WebSocket-bridged web terminal can't host Carbonyl: no /dev/tty to give the child, and xterm.js wouldn't faithfully answer the DCS terminal-capability probes Carbonyl emits at startup. The R hotkey gates on `m.sess.IsSSH` and toasts on the web path.
+
+**Bundle.** Carbonyl ships as a component-build of patched Chromium M148+ (the user's fork at https://github.com/nickna/carbonyl). The `bundle/carbonyl-linux-x86_64.tar.xz` Git-LFS artifact contains the `carbonyl` binary + ~410 transitive .so + V8 snapshots + ICU data + .pak resources, deterministically packed by `scripts/package-carbonyl.sh`. The Dockerfile extracts it to `/opt/carbonyl/` after sha256 verification.
+
+**Process model.** Per launch (`internal/carbonyl/runner.go::Runner.Launch`):
+1. `tokens.Acquire(ip, uid)` reserves a slot under the three concurrency caps.
+2. `pty.Open()` allocates a master/slave pair; initial winsize via `TIOCSWINSZ`.
+3. `exec.CommandContext` spawns `/opt/carbonyl/carbonyl` with stdio on the slave + `Setsid + Setctty + Ctty: 0` so the child has its own session and a real controlling tty. Stderr is captured separately so Carbonyl's GPU warnings go to slog, not to the SSH terminal where they'd corrupt the rendered frame.
+4. `bridgePTY` runs three goroutines: SSH-stdin → master, master → SSH-stdout, screen-owned resize chan → `TIOCSWINSZ(master)`. The browser screen's Update forwards every `tea.WindowSizeMsg` into the resize chan while `richModeActive`.
+5. The screen's launch Cmd wraps the whole thing in `prog.ReleaseTerminal()` / `prog.RestoreTerminal()` so the bubbletea read loop pauses and resumes around Carbonyl's takeover. After restore, the screen writes a recovery escape sequence (`\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1006l`) to wipe alt-screen + cursor-hide + mouse-tracking state Carbonyl leaves behind.
+
+**Env vars** (all `NIGHTMS_CARBONYL_*`):
+- `NIGHTMS_CARBONYL_BIN_PATH` — absolute path to the binary. Default `/opt/carbonyl/carbonyl`. Missing binary → soft disable (BBS still boots; rich-mode toasts "unavailable").
+- `NIGHTMS_CARBONYL_DATA_DIR` — parent dir for per-user `--user-data-dir`. Default `/data/carbonyl`. Lazy-created at mode 0700 per uid; cookies and logins persist across reconnects.
+- `NIGHTMS_CARBONYL_ENABLED` — kill switch default. `0` (off) by default so the feature ships dark; flip via the sysop settings tab once smoke-tested.
+- `NIGHTMS_CARBONYL_MAX_GLOBAL` / `NIGHTMS_CARBONYL_MAX_PER_IP` / `NIGHTMS_CARBONYL_MAX_PER_HANDLE` — concurrency caps. Defaults 2 / 1 / 1. Each Chromium child is 200–400 MB resident; runaway launches OOM the container.
+
+**Runtime settings (sysop UI):** `carbonyl_enabled`, `carbonyl_max_global`, `carbonyl_max_per_ip`, `carbonyl_max_per_handle`. The `settings.Cache.OnChange` hook in `main.go` pushes new caps into `Runner.UpdateLimits` live, no restart needed.
+
+**Security model (v1):** in-process URL allowlist + Chromium hardening flags.
+- `internal/carbonyl/urlpolicy.go::ValidateURL` rejects `file://`, `chrome://`, `view-source:`, any private/loopback/link-local IP literal, and `localhost`/`ip6-localhost` by name. Runs before the child is forked.
+- Args (`internal/carbonyl/args.go::buildArgs`) always emit `--no-sandbox --disable-dev-shm-usage --user-data-dir=<profile> --disable-extensions --host-resolver-rules="MAP localhost ~NOTFOUND,..."`. The host-resolver flag blocks loopback from inside the running Chromium too, defending against the user typing `http://127.0.0.1/` into Carbonyl's own address bar after launch.
+- Known limitation: once running, Carbonyl's address bar can navigate to any public URL. DNS rebinding mid-session is not defended against. Acceptable for invite-only / trusted-BBS use; revisit with an egress-proxy sidecar if abuse appears.
+
+**Package map (`internal/carbonyl/`):**
+- `runner.go` — `Runner` singleton + per-launch process supervision.
+- `limits.go` — three-axis concurrency token bucket (global/per-IP/per-handle).
+- `urlpolicy.go` — `ValidateURL` + private-IP gates.
+- `args.go` — Chromium argv builder; pure func, unit-tested.
+- `ptybridge.go` — three goroutine bridge between OS PTY master and SSH channel.
+- `session_io.go` — `SessionIO` interface keeping `gliderlabs/ssh` out of the package.
+- `runner_test.go` — limits/url-policy/args tests.
+
+The SSH-side `carbonyl.SessionIO` implementation lives at `internal/transport/sshsession.go`. The wish-supplied SIGWINCH channel can NOT be drained from this package because wish's middleware already drains it to send `tea.WindowSizeMsg` — instead the screen forwards WindowSizeMsg into its own per-launch chan, which is the chan the SessionIO returns from WindowChanges().

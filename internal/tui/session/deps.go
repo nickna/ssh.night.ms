@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
@@ -38,6 +39,7 @@ type Deps struct {
 	Games     GameDeps
 	Policy    PolicyDeps
 	Security  SecurityDeps
+	System    SystemDeps
 }
 
 // CoreDeps is the irreducible base every layer needs.
@@ -118,4 +120,12 @@ type PolicyDeps struct {
 type SecurityDeps struct {
 	Bans     *auth.BanCache
 	Settings *settings.Cache
+}
+
+// SystemDeps groups process-singletons that drive an out-of-process feature
+// from inside a screen. Currently just the Carbonyl runner — the "rich mode"
+// hand-off for the browser screen. Nil when the binary isn't on disk; screens
+// gate on `m.sess.Carbonyl == nil` and surface a toast.
+type SystemDeps struct {
+	Carbonyl *carbonyl.Runner
 }

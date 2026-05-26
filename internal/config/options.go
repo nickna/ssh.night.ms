@@ -82,6 +82,38 @@ type Options struct {
 	// ORSAPIKey enables the Map screen's directions affordance when set.
 	// Empty disables routing — the map still works for browsing.
 	ORSAPIKey string
+
+	// Carbonyl bundles the rich-mode browser config. BinPath / DataDir take
+	// effect at boot; the Enabled flag + concurrency caps seed the matching
+	// settings.Defaults so a sysop can flip them live without restart.
+	Carbonyl CarbonylOptions
+}
+
+// CarbonylOptions configures the "rich mode" handoff in the browser screen.
+// All NIGHTMS_CARBONYL_* env vars; safe to leave defaulted (feature ships
+// disabled until the sysop flips carbonyl_enabled=true via the settings tab).
+type CarbonylOptions struct {
+	// BinPath is the absolute path to the extracted carbonyl binary. Default
+	// /opt/carbonyl/carbonyl matches the Dockerfile bundle layout. When the
+	// path doesn't exist, the BBS still boots — carbonyl.New returns
+	// ErrBinaryMissing and rich mode is left disabled at the screen layer.
+	BinPath string
+
+	// DataDir is the parent for per-user --user-data-dir subdirs (one per
+	// userid, mode 0700, lazy-created). Default /data/carbonyl; lives on the
+	// same persistent volume as host-keys / pfp / gallery.
+	DataDir string
+
+	// Enabled seeds settings.Defaults.CarbonylEnabled. False by default so the
+	// feature ships dark; flip via sysop UI after smoke-testing in prod.
+	Enabled bool
+
+	// MaxGlobal / MaxPerIP / MaxPerHandle seed the matching settings.Defaults
+	// concurrency caps. Tuned conservatively because each carbonyl child is
+	// hundreds of MB resident — runaway launches OOM the container.
+	MaxGlobal    int
+	MaxPerIP     int
+	MaxPerHandle int
 }
 
 // SSHSecurityOptions holds the SSH listener's protocol- and network-layer
@@ -172,6 +204,14 @@ func Load() Options {
 		MicrosoftClientSecret: os.Getenv("NIGHTMS_MICROSOFT_CLIENT_SECRET"),
 		OAuthRedirectBase:     os.Getenv("NIGHTMS_OAUTH_REDIRECT_BASE"),
 		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
+		Carbonyl: CarbonylOptions{
+			BinPath:      envOr("NIGHTMS_CARBONYL_BIN_PATH", "/opt/carbonyl/carbonyl"),
+			DataDir:      envOr("NIGHTMS_CARBONYL_DATA_DIR", filepath.Join("data", "carbonyl")),
+			Enabled:      os.Getenv("NIGHTMS_CARBONYL_ENABLED") == "1",
+			MaxGlobal:    int(uintEnv("NIGHTMS_CARBONYL_MAX_GLOBAL", 2)),
+			MaxPerIP:     int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_IP", 1)),
+			MaxPerHandle: int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_HANDLE", 1)),
+		},
 	}
 	o.WebCookieSecret = loadCookieSecret(o.HostKeyDir)
 	return o

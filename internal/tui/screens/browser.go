@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nickna/ssh.night.ms/internal/browser"
+	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/imaging/graphics"
 	"github.com/nickna/ssh.night.ms/internal/providers/bookmarks"
 	"github.com/nickna/ssh.night.ms/internal/providers/search"
@@ -87,6 +88,14 @@ type Browser struct {
 	bookmarksErr    string
 	toast           string
 	toastExpires    time.Time
+
+	// Rich-mode (Carbonyl) state. richModeActive is set true the moment the
+	// launch Cmd is dispatched and cleared by carbonylExitedMsg; we use it
+	// both to gate against a double-press and to gate WindowSizeMsg forwarding
+	// to the bridge's resize chan. richResize is allocated per-launch and
+	// closed on exit so the bridge goroutine knows when to stop reading.
+	richModeActive bool
+	richResize     chan carbonyl.WinSize
 }
 
 // NewBrowser is the screen constructor wired into the root model.
@@ -147,6 +156,14 @@ type browserBookmarkDeletedMsg struct {
 
 // browserToastExpiredMsg clears the toast banner when the TTL elapses.
 type browserToastExpiredMsg struct{ at time.Time }
+
+// carbonylExitedMsg lands when the Carbonyl child process exits (clean or
+// crashed). err is non-nil for non-zero exits; the Update handler surfaces the
+// first portion via a toast and resets richModeActive.
+type carbonylExitedMsg struct {
+	url string
+	err error
+}
 
 func (m *Browser) Init() tea.Cmd { return textinput.Blink }
 
@@ -242,6 +259,36 @@ func (m *Browser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case carbonylExitedMsg:
+		m.richModeActive = false
+		if m.richResize != nil {
+			close(m.richResize)
+			m.richResize = nil
+		}
+		if msg.err != nil {
+			// Truncate to one line in the toast; full stderr tail went to slog
+			// already (Runner.drainStderr).
+			text := msg.err.Error()
+			if i := strings.IndexByte(text, '\n'); i >= 0 {
+				text = text[:i]
+			}
+			return m, m.showToast("! rich mode: " + text)
+		}
+		return m, nil
+
+	case tea.WindowSizeMsg:
+		// While rich mode owns the SSH PTY, forward resizes into the bridge's
+		// chan so it can ioctl(TIOCSWINSZ) on the carbonyl child. Non-blocking
+		// send because we sized the chan with slack; if the bridge is stuck
+		// we drop the resize rather than blocking Update.
+		if m.richModeActive && m.richResize != nil {
+			select {
+			case m.richResize <- carbonyl.WinSize{Rows: msg.Height, Cols: msg.Width}:
+			default:
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeBrowserURLBar:
@@ -282,6 +329,8 @@ func (m *Browser) handleBrowseKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cache.Forget(entry.URL)
 			return m, m.navigate(entry.URL, false)
 		}
+	case "R":
+		return m, m.launchRichMode()
 	case "m":
 		return m, m.addBookmark()
 	case "M":
@@ -478,6 +527,107 @@ func (m *Browser) showToast(message string) tea.Cmd {
 	return tea.Tick(browserToastTTL, func(t time.Time) tea.Msg {
 		return browserToastExpiredMsg{at: t}
 	})
+}
+
+// launchRichMode hands the currently-loaded URL off to Carbonyl. Gates on
+// IsSSH (no PTY on the WS path), the sysop kill switch, runner presence
+// (binary may be missing in dev), and a valid currently-loaded URL. Returns
+// a tea.Cmd that ReleaseTerminal → Launch → RestoreTerminal → exit-msg.
+//
+// The Cmd blocks for the entire rich-mode session (Carbonyl owns the SSH
+// channel via the PTY bridge), but bubbletea's main loop continues to handle
+// other Msgs in parallel — that's how WindowSizeMsg keeps flowing into our
+// Update handler and gets forwarded to richResize.
+func (m *Browser) launchRichMode() tea.Cmd {
+	if m.richModeActive {
+		return m.showToast("rich mode already running")
+	}
+	if !m.sess.IsSSH {
+		return m.showToast("rich mode requires SSH (not available via web terminal)")
+	}
+	if m.sess.Settings == nil || !m.sess.Settings.Get().CarbonylEnabled {
+		return m.showToast("rich mode is disabled")
+	}
+	if m.sess.LaunchCarbonyl == nil {
+		// IsSSH true but launcher missing — runner binary wasn't on disk at
+		// boot (carbonyl.New returned ErrBinaryMissing). User-facing wording
+		// matches the env var the operator would set.
+		return m.showToast("rich mode unavailable: carbonyl binary missing")
+	}
+	if m.sess.TeaProgram == nil {
+		return m.showToast("rich mode: tea.Program reference missing (transport bug)")
+	}
+	entry, ok := m.history.Current()
+	if !ok || entry.URL == "" {
+		return m.showToast("load a page first")
+	}
+	if err := carbonyl.ValidateURL(entry.URL); err != nil {
+		return m.showToast("! " + err.Error())
+	}
+
+	// Build the per-launch resize channel BEFORE marking richModeActive so
+	// the WindowSizeMsg handler can never see active=true with chan=nil.
+	m.richResize = make(chan carbonyl.WinSize, 4)
+	m.richModeActive = true
+
+	url := entry.URL
+	prog := m.sess.TeaProgram
+	launch := m.sess.LaunchCarbonyl
+	ctx := m.sess.Ctx()
+	cols := m.sess.Width
+	rows := m.sess.Height
+	uid := m.sess.Identity.UserID
+	handle := m.sess.Identity.Handle
+	remoteIP := remoteIPFromIdentity(m.sess)
+	resizeCh := m.richResize
+
+	return func() tea.Msg {
+		// Release the bubbletea read loop on the SSH channel so the user's
+		// keypresses go straight to Carbonyl through the PTY bridge.
+		if err := prog.ReleaseTerminal(); err != nil {
+			// Best-effort — still try to launch but log via the error
+			// surfaced in the exit msg.
+			return carbonylExitedMsg{url: url, err: fmt.Errorf("release terminal: %w", err)}
+		}
+		req := carbonyl.LaunchRequest{
+			URL:         url,
+			UserID:      uid,
+			Handle:      handle,
+			RemoteIP:    remoteIP,
+			InitialCols: cols,
+			InitialRows: rows,
+		}
+		launchErr := launch(ctx, req, resizeCh)
+		// Restore the bubbletea read loop + repaint. Even on launch error
+		// we MUST restore or the terminal stays in a half-released state.
+		restoreErr := prog.RestoreTerminal()
+		// Carbonyl leaves alt-screen + cursor-hide + mouse-tracking sequences
+		// on exit; this best-effort reset wipes the slate so the resumed
+		// bubbletea render lands cleanly. Order: leave alt screen, show
+		// cursor, soft reset.
+		if m.sess.TeaProgram != nil {
+			m.sess.TeaProgram.Printf("\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1006l")
+		}
+		if launchErr != nil {
+			return carbonylExitedMsg{url: url, err: launchErr}
+		}
+		if restoreErr != nil {
+			return carbonylExitedMsg{url: url, err: fmt.Errorf("restore terminal: %w", restoreErr)}
+		}
+		return carbonylExitedMsg{url: url}
+	}
+}
+
+// remoteIPFromIdentity extracts a printable IP for the per-IP carbonyl limit.
+// We don't currently plumb the SSH RemoteAddr through to the session bag (no
+// other screen needs it), so for v1 we key by handle alone for the per-IP cap
+// — same IP per user is the dominant case. Wiring up RemoteAddr is a small
+// follow-up if multi-IP-per-user abuse appears.
+func remoteIPFromIdentity(sess *session.Session) string {
+	// Empty string disables the per-IP axis in the carbonyl Acquire call;
+	// per-handle still applies, which is the meaningful guard here.
+	_ = sess
+	return ""
 }
 
 // handleBookmarksKey runs the bookmark-list mode. Enter opens the cursor
@@ -934,6 +1084,12 @@ func (m *Browser) renderHintBar() string {
 		if _, ok := m.history.Current(); ok {
 			parts = append(parts, browserHint.Render("r reload"))
 			parts = append(parts, browserHint.Render("m bookmark"))
+			// Surface the R hotkey only when the gate would let it through —
+			// SSH session AND sysop flipped it on. Avoids dangling a "press
+			// R" hint that always toasts.
+			if m.sess.IsSSH && m.sess.Settings != nil && m.sess.Settings.Get().CarbonylEnabled && m.sess.LaunchCarbonyl != nil {
+				parts = append(parts, browserHint.Render("R rich"))
+			}
 		}
 		parts = append(parts, browserHint.Render("M list"))
 		parts = append(parts, browserHint.Render("Esc lobby"))

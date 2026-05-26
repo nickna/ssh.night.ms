@@ -7,7 +7,10 @@ import (
 	"context"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/imaging/graphics"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
 	"github.com/nickna/ssh.night.ms/internal/tui/art"
@@ -113,10 +116,55 @@ type Session struct {
 	ArtDeps
 	GameDeps
 	SecurityDeps
+	SystemDeps
 
 	// Embedded mutable state: same flat-access convenience (sess.Identity,
 	// sess.Width, sess.DisplayPrefs, ...).
 	State
+
+	// IsSSH is true when the session came from the SSH transport (a real
+	// PTY behind the wish.Session), false when it came from the WebSocket
+	// bridge (xterm.js, no PTY). Screens gate PTY-dependent features (notably
+	// Carbonyl rich-mode) on this — the WS path can't host a child Chromium
+	// because there's no /dev/tty to give it.
+	IsSSH bool
+
+	// LaunchCarbonyl spawns Carbonyl as a child process attached to the
+	// transport's PTY, blocking for the lifetime of the rich-mode session.
+	// The transport installs it via AttachSSHLauncher right after constructing
+	// the Session — never set on the WS path, so screens must nil-check.
+	// Returns once the child exits or the SSH context cancels.
+	//
+	// The resizes channel is owned by the caller (the screen). It pushes new
+	// dimensions whenever it sees a tea.WindowSizeMsg while rich-mode is
+	// active — wish's middleware already drains the SSH SIGWINCH chan into
+	// WindowSizeMsg, so re-draining at the source would race.
+	LaunchCarbonyl func(ctx context.Context, req carbonyl.LaunchRequest, resizes <-chan carbonyl.WinSize) error
+
+	// TeaProgram is the running bubbletea program for this session. Set by
+	// the transport (SSH) and the wsbridge (WS) immediately after
+	// tea.NewProgram, before Run. Used by the browser screen's rich-mode
+	// hand-off to ReleaseTerminal before exec and RestoreTerminal after.
+	// Nil during early screen construction; screens calling these methods
+	// must nil-check.
+	TeaProgram *tea.Program
+}
+
+// AttachSSHLauncher wires the Carbonyl launch closure onto an SSH-side session
+// after construction. Transport calls this from its programHandler so the
+// closure can capture the wish.Session reference (which session.New can't
+// see). WS sessions never call this; LaunchCarbonyl stays nil and the screen
+// gates accordingly.
+func (s *Session) AttachSSHLauncher(launch func(context.Context, carbonyl.LaunchRequest, <-chan carbonyl.WinSize) error) {
+	s.IsSSH = true
+	s.LaunchCarbonyl = launch
+}
+
+// SetTeaProgram is called by both transport (SSH) and wsbridge (WS) right
+// after tea.NewProgram and before Run, so screens that need ReleaseTerminal/
+// RestoreTerminal can reach it via m.sess.TeaProgram.
+func (s *Session) SetTeaProgram(p *tea.Program) {
+	s.TeaProgram = p
 }
 
 // New builds a Session from the process-singleton Deps plus the per-session
@@ -140,6 +188,7 @@ func New(deps Deps, st State, sshCtx context.Context, gfx graphics.Protocol) *Se
 		ArtDeps:         deps.Art,
 		GameDeps:        deps.Games,
 		SecurityDeps:    deps.Security,
+		SystemDeps:      deps.System,
 		State:           st,
 	}
 }

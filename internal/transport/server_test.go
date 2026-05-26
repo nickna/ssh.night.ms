@@ -31,7 +31,7 @@ func minimalDeps() session.Deps {
 
 func TestDispatchAuthKnownReturnsLobbyRoot(t *testing.T) {
 	deps := minimalDeps()
-	model, opts := dispatchAuth(
+	model, opts, _ := dispatchAuth(
 		deps, quietLogger(), context.Background(), "alice",
 		auth.Known{UserID: 42, Handle: "alice"},
 		graphics.Halfblock, 80, 24,
@@ -50,7 +50,7 @@ func TestDispatchAuthKnownReturnsLobbyRoot(t *testing.T) {
 func TestDispatchAuthSignupReturnsSignupRoot(t *testing.T) {
 	deps := minimalDeps()
 	deps.Policy.MinPasswordLength = 8
-	model, opts := dispatchAuth(
+	model, opts, _ := dispatchAuth(
 		deps, quietLogger(), context.Background(), "newuser",
 		auth.SignupRequired{Handle: "newuser"},
 		graphics.Halfblock, 80, 24,
@@ -72,7 +72,7 @@ func TestDispatchAuthUnknownDecisionReturnsErrorMessage(t *testing.T) {
 	deps := minimalDeps()
 	// Pass a decision type that isn't Known or SignupRequired — wish should
 	// never get us here, but the defensive branch must not panic.
-	model, opts := dispatchAuth(
+	model, opts, _ := dispatchAuth(
 		deps, quietLogger(), context.Background(), "bob",
 		auth.Banned{Reason: "test"},
 		graphics.Halfblock, 80, 24,
@@ -92,7 +92,7 @@ func TestDispatchAuthNilDecisionReturnsErrorMessage(t *testing.T) {
 	// Real-world: wish.Context().Value() returns nil if the auth callbacks
 	// somehow never stored a decision. Must not panic.
 	deps := minimalDeps()
-	model, _ := dispatchAuth(
+	model, _, _ := dispatchAuth(
 		deps, quietLogger(), context.Background(), "ghost",
 		nil, graphics.Halfblock, 80, 24,
 	)
@@ -110,7 +110,7 @@ func TestDispatchAuthKnownStartsPresenceHeartbeat(t *testing.T) {
 	deps := minimalDeps() // Realtime.Presence is nil
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	model, _ := dispatchAuth(
+	model, _, _ := dispatchAuth(
 		deps, quietLogger(), ctx, "alice",
 		auth.Known{UserID: 1, Handle: "alice"},
 		graphics.Halfblock, 80, 24,
@@ -134,7 +134,7 @@ func TestDispatchAuthPropagatesWindowDims(t *testing.T) {
 		{"zero (pre-resize)", 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			model, _ := dispatchAuth(
+			model, _, _ := dispatchAuth(
 				minimalDeps(), quietLogger(), context.Background(), "alice",
 				auth.Known{UserID: 1, Handle: "alice"},
 				graphics.Halfblock, tc.w, tc.h,

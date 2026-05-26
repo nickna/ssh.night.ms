@@ -13,11 +13,13 @@ import (
 	"github.com/charmbracelet/wish/activeterm"
 	bm "github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
+	"github.com/muesli/termenv"
 	gossh "golang.org/x/crypto/ssh"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/imaging/graphics"
 	"github.com/nickna/ssh.night.ms/internal/security/audit"
 	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
@@ -110,7 +112,14 @@ func NewServer(cfg Config, deps Deps, logger *slog.Logger) (*Server, error) {
 		wish.WithPublicKeyAuth(pubKeyHandler(deps.Lookup, logger)),
 		wish.WithPasswordAuth(passwordHandler(deps.Lookup, logger)),
 		wish.WithMiddleware(
-			bm.Middleware(programHandler(deps, logger)),
+			// MiddlewareWithProgramHandler (vs the default Middleware) lets us
+			// build the *tea.Program ourselves and stash a reference onto the
+			// session so the browser screen can call ReleaseTerminal /
+			// RestoreTerminal around the Carbonyl rich-mode exec. Pass
+			// termenv.Ascii as the *minimum* color profile floor — clients
+			// with richer profiles keep theirs (this matches bm.Middleware's
+			// default behavior, just expressed at the explicit constructor).
+			bm.MiddlewareWithProgramHandler(programHandler(deps, logger), termenv.Ascii),
 			activeterm.Middleware(),
 			logging.Middleware(),
 		),
@@ -275,15 +284,19 @@ func passwordHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PasswordHandl
 }
 
 // programHandler captures the deps closure and returns the wish/bubbletea
-// program-handler callback. Reads the SSH-specific bits (pty, environ,
-// stored decision) off the wish Session, then hands off to dispatchAuth for
-// the actual model-routing — that split lets dispatchAuth be tested without
-// mocking the wish Session surface.
-func programHandler(deps Deps, logger *slog.Logger) func(ssh.Session) (tea.Model, []tea.ProgramOption) {
-	return func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
+// ProgramHandler callback. Reads the SSH-specific bits off the wish Session,
+// hands off to dispatchAuth for model routing, builds the *tea.Program
+// ourselves so we can stash a reference + the Carbonyl launcher closure onto
+// the constructed session.Session before Run starts.
+//
+// MiddlewareWithProgramHandler expects a func returning *tea.Program (vs the
+// default Middleware which returns (Model, []ProgramOption)). The body here
+// mirrors what wish does internally in newDefaultProgramHandler.
+func programHandler(deps Deps, logger *slog.Logger) func(ssh.Session) *tea.Program {
+	return func(sess ssh.Session) *tea.Program {
 		pty, _, active := sess.Pty()
 		if !active {
-			return nil, nil
+			return nil
 		}
 		decision := sess.Context().Value(authResultKey{})
 		// Detect terminal-image protocol from PTY $TERM + SSH-forwarded
@@ -291,8 +304,36 @@ func programHandler(deps Deps, logger *slog.Logger) func(ssh.Session) (tea.Model
 		// override). Halfblock when nothing more capable advertised — safe
 		// fallback that works on every SSH client.
 		gfx := graphics.Detect(pty.Term, sess.Environ())
-		return dispatchAuth(deps.Session, logger, sess.Context(), sess.User(), decision, gfx,
+		model, opts, s := dispatchAuth(deps.Session, logger, sess.Context(), sess.User(), decision, gfx,
 			pty.Window.Width, pty.Window.Height)
+		if model == nil {
+			return nil
+		}
+		// MakeOptions wires tea.WithInput/WithOutput onto the wish session
+		// the same way bm.Middleware does by default — both emulated and
+		// allocated PTYs land on the right io.ReadWriter pair.
+		opts = append(opts, bm.MakeOptions(sess)...)
+		program := tea.NewProgram(model, opts...)
+		if s != nil {
+			s.SetTeaProgram(program)
+			if deps.Session.System.Carbonyl != nil {
+				// Capture sess (wish ssh.Session) + runner reference. The
+				// closure is what the browser screen calls; it constructs the
+				// per-launch SessionIO around the screen-owned resizes chan
+				// and forwards into the Runner.
+				runner := deps.Session.System.Carbonyl
+				s.AttachSSHLauncher(func(ctx context.Context, req carbonyl.LaunchRequest, resizes <-chan carbonyl.WinSize) error {
+					req.SessionRef = newSSHSessionIO(sess, resizes)
+					return runner.Launch(ctx, req)
+				})
+			} else {
+				// Runner missing (binary not on disk) — still flag IsSSH so
+				// the screen distinguishes WS sessions, but leave the launcher
+				// nil so the gate toasts "rich mode unavailable".
+				s.IsSSH = true
+			}
+		}
+		return program
 	}
 }
 
@@ -308,6 +349,10 @@ func programHandler(deps Deps, logger *slog.Logger) func(ssh.Session) (tea.Model
 // (heartbeat fires later from registerCompletedMsg). Any other Decision is
 // an internal invariant violation — wish should never have admitted the
 // session — so we return a fatal-message model rather than panic.
+// Returns (model, opts, sess) where sess is the constructed *session.Session
+// (or nil for the early-exit branches: capacity-full and unexpected-decision
+// fatal). Callers that need to attach post-construction state (e.g. the
+// Carbonyl launcher closure on SSH) check sess != nil before doing so.
 func dispatchAuth(
 	sdeps session.Deps,
 	logger *slog.Logger,
@@ -316,7 +361,7 @@ func dispatchAuth(
 	decision any,
 	gfx graphics.Protocol,
 	width, height int,
-) (tea.Model, []tea.ProgramOption) {
+) (tea.Model, []tea.ProgramOption, *session.Session) {
 	// Global session cap — applied to both Known and SignupRequired branches
 	// (a user on the signup screen still occupies a session-shaped resource).
 	// Limit == 0 means unlimited; the runtime-tunable cap is read fresh from
@@ -329,7 +374,7 @@ func dispatchAuth(
 	if !session.AcquireForContext(sshCtx, maxTotal) {
 		logger.Warn("session rejected: total session cap reached",
 			"handle", handle, "cap", maxTotal, "active", session.ActiveCount())
-		return screens.NewMessage("Server is at capacity — please try again shortly."), nil
+		return screens.NewMessage("Server is at capacity — please try again shortly."), nil, nil
 	}
 	switch d := decision.(type) {
 	case auth.Known:
@@ -389,7 +434,7 @@ func dispatchAuth(
 		if sdeps.Realtime.Presence != nil {
 			go sdeps.Realtime.Presence.RunHeartbeat(sshCtx, d.Handle, d.UserID)
 		}
-		return tui.NewRoot(s), []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+		return tui.NewRoot(s), []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}, s
 	case auth.SignupRequired:
 		st := session.State{
 			Width:  width,
@@ -404,11 +449,11 @@ func dispatchAuth(
 			BootstrapSysopHandle: sdeps.Policy.BootstrapSysopHandle,
 			MinPasswordLength:    sdeps.Policy.MinPasswordLength,
 			Settings:             sdeps.Security.Settings,
-		}, sdeps.Realtime.Presence), []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}
+		}, sdeps.Realtime.Presence), []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}, s
 	}
 	logger.Error("program handler reached with unexpected decision",
 		"handle", handle, "decision_type", fmt.Sprintf("%T", decision))
-	return screens.NewMessage("internal error: missing auth decision"), nil
+	return screens.NewMessage("internal error: missing auth decision"), nil, nil
 }
 
 // mergeOfferedKey copies an SSH pubkey that was offered but not used for
