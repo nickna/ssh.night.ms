@@ -127,17 +127,26 @@ if ($Stop) {
 # --- Preflight ----------------------------------------------------------------
 Write-Step "Preflight"
 
-$goVersion = & go version 2>$null
-if (-not $goVersion) {
-    throw "Go SDK not found on PATH. Install Go 1.26 or newer."
-}
-Write-Note "$goVersion"
-
+# Docker is mandatory either way: native mode needs it for Postgres/Redis,
+# Docker mode needs it for everything.
 $null = & docker info 2>$null
 if ($LASTEXITCODE -ne 0) {
-    throw "Docker daemon isn't reachable. Start Docker Desktop and re-run."
+    throw "Docker daemon isn't reachable. Start Docker Desktop / dockerd and re-run."
 }
 Write-Note "Docker daemon: ok"
+
+# Go is only required by the native build path. If it's missing on the host,
+# silently flip to -Docker (which builds Go inside the alpine container) so a
+# fresh Linux box without a Go SDK still "just works" — slower per iteration,
+# but no install required.
+$goAvailable = $null -ne (Get-Command go -ErrorAction SilentlyContinue)
+if ($goAvailable) {
+    Write-Note (& go version)
+} elseif (-not $Docker) {
+    Write-Step "Go not found on PATH — auto-enabling -Docker mode"
+    Write-Note "Install Go 1.26+ from https://go.dev/dl/ for the faster native loop, then re-run."
+    $Docker = $true
+}
 
 # --- Postgres -----------------------------------------------------------------
 $pgRunning = (& docker ps --filter "name=^$PgContainer$" --format '{{.Names}}') -eq $PgContainer
