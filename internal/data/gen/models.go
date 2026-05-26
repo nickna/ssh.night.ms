@@ -191,6 +191,15 @@ type User struct {
 	RequireSshKey              bool
 }
 
+type UserBookmark struct {
+	ID        int64
+	UserID    int64
+	Url       string
+	Title     string
+	SortOrder int32
+	CreatedAt pgtype.Timestamptz
+}
+
 type UserSavedLocation struct {
 	ID        int64
 	UserID    int64
@@ -218,4 +227,22 @@ type UserWatchlistItem struct {
 	Kind      int32
 	SortOrder int32
 	CreatedAt pgtype.Timestamptz
+}
+
+type WebBookmark struct {
+	ID        int64
+	UserID    int64
+	Url       string
+	Title     string
+	SortOrder int32
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type WebHistory struct {
+	ID            int64
+	UserID        int64
+	Url           string
+	LastVisitedAt pgtype.Timestamptz
+	VisitCount    int32
 }
