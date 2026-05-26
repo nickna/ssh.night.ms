@@ -1,12 +1,23 @@
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Boots the ssh.night.ms server locally — starts a Postgres + Redis container,
     builds the binary, and runs nightms with the right connection strings.
+    Runs on Windows (PowerShell 5.1 or 7+) and Linux/macOS (PowerShell 7+).
 
 .DESCRIPTION
-    Single-host dev loop. Requires Docker Desktop. Container names + ports match
-    the .NET stack's run.ps1, so you can use either stack against the same data
-    (one at a time — never both online together).
+    Single-host dev loop. Requires Docker (Docker Desktop on Windows/macOS,
+    docker engine on Linux). Container names + ports match the .NET stack's
+    run.ps1, so you can use either stack against the same data (one at a
+    time — never both online together).
+
+    Carbonyl rich-mode browser:
+      * Linux native run: works out of the box. The Carbonyl bundle from
+        bundle/ is auto-extracted to bin/carbonyl/ on first run.
+      * Windows native run: Carbonyl is Linux-only, so the "Web" lobby item
+        is hidden. Use -Docker to test the full prod image instead.
+      * -Docker (any platform): builds + runs the prod image, Carbonyl
+        always works there.
 
 .PARAMETER SysopHandle
     Handle that gets auto-promoted to sysop on startup if it already exists.
@@ -77,13 +88,25 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
+# $IsWindows is a built-in automatic variable in PS6+. Fallback to the env
+# probe so the same script still runs under Windows PowerShell 5.1.
+$IsWin = if ($null -ne $IsWindows) { $IsWindows } else { $env:OS -eq 'Windows_NT' }
 $PgContainer = 'nightms-pg'
 $RedisContainer = 'nightms-redis'
 $AppContainer = 'nightms-app'
 $DockerImageTag = 'nightms:local'
-$HostKeyDir = Join-Path $RepoRoot 'data\host-keys'
-$BinDir = Join-Path $RepoRoot 'bin'
-$BinPath = Join-Path $BinDir 'nightms.exe'
+# IO.Path.Combine picks the right separator for the platform and works on every
+# PS version. Backslash literals would silently misbehave on Linux.
+$HostKeyDir = [IO.Path]::Combine($RepoRoot, 'data', 'host-keys')
+$BinDir = [IO.Path]::Combine($RepoRoot, 'bin')
+$BinName = if ($IsWin) { 'nightms.exe' } else { 'nightms' }
+$BinPath = [IO.Path]::Combine($BinDir, $BinName)
+# Carbonyl bundle paths — only used on the Linux native path. The Linux bundle
+# is what's shipped in the repo; on Windows native it stays packed (we can't
+# run it), and -Docker extracts inside the image via its own bundle stage.
+$BundlePath = [IO.Path]::Combine($RepoRoot, 'bundle', 'carbonyl-linux-x86_64.tar.xz')
+$CarbonylDir = [IO.Path]::Combine($BinDir, 'carbonyl')
+$CarbonylBin = [IO.Path]::Combine($CarbonylDir, 'carbonyl')
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Note($msg) { Write-Host "    $msg" -ForegroundColor DarkGray }
@@ -208,7 +231,7 @@ if ($Docker) {
     return
 }
 
-# --- Native mode (fast iteration; no Carbonyl) --------------------------------
+# --- Native mode (fast iteration; Carbonyl works on Linux) --------------------
 if (-not $NoBuild) {
     Write-Step "Building nightms"
     if (-not (Test-Path $BinDir)) {
@@ -226,6 +249,32 @@ if (-not (Test-Path $BinPath)) {
     throw "Binary not found at $BinPath. Run without -NoBuild first."
 }
 
+# --- Carbonyl bundle extraction (Linux native only) --------------------------
+# The bundle ships via git LFS — a fresh clone without `git lfs pull` leaves a
+# small text pointer in its place. Detect that and warn instead of failing in
+# tar with an opaque error.
+$carbonylReady = $false
+if (-not $IsWin) {
+    if (Test-Path $BundlePath) {
+        $bundleSize = (Get-Item $BundlePath).Length
+        if ($bundleSize -lt 1024) {
+            Write-Host "    Note: $BundlePath looks like an LFS pointer ($bundleSize bytes)." -ForegroundColor Yellow
+            Write-Host "          Run 'git lfs install && git lfs pull' to download the real bundle, then re-run." -ForegroundColor Yellow
+        } elseif (-not (Test-Path $CarbonylBin)) {
+            Write-Step "Extracting Carbonyl bundle to bin/carbonyl/ (one-time, ~560 MB)"
+            New-Item -ItemType Directory -Path $CarbonylDir -Force | Out-Null
+            & tar -C $CarbonylDir -xJf $BundlePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "tar -xJf failed. Is xz-utils installed? (apt-get install xz-utils)"
+            }
+            Write-Note "Extracted: $CarbonylBin"
+            $carbonylReady = $true
+        } else {
+            $carbonylReady = $true
+        }
+    }
+}
+
 # --- Host key directory -------------------------------------------------------
 if (-not (Test-Path $HostKeyDir)) {
     New-Item -ItemType Directory -Path $HostKeyDir | Out-Null
@@ -235,17 +284,20 @@ if (-not (Test-Path $HostKeyDir)) {
 Write-Step "Starting nightms on ssh :$SshPort, http :$HttpPort"
 Write-Host ""
 Write-Host "    Connect with:" -ForegroundColor Green
-Write-Host "      ssh -p $SshPort <handle>@localhost" -ForegroundColor Green
+Write-Host "      ssh -p $SshPort $SysopHandle@localhost" -ForegroundColor Green
 Write-Host "    Or open:" -ForegroundColor Green
 Write-Host "      http://localhost:$HttpPort/" -ForegroundColor Green
 Write-Host ""
-Write-Host "    No signup screen yet — seed a user first:" -ForegroundColor DarkGray
-Write-Host "      go run ./cmd/seeduser -handle $SysopHandle -password <pw>" -ForegroundColor DarkGray
 Write-Host "    Bootstrap sysop handle: $SysopHandle (promoted on boot if user exists)." -ForegroundColor DarkGray
 Write-Host "    Press Ctrl+C to stop the server (containers keep running; use -Stop to tear down)." -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "    Note: native Windows build cannot run Carbonyl (Linux-only binary)." -ForegroundColor Yellow
-Write-Host "          The 'Web' lobby item will not appear. Use -Docker to test rich mode." -ForegroundColor Yellow
+if ($IsWin) {
+    Write-Host ""
+    Write-Host "    Note: native Windows build cannot run Carbonyl (Linux-only binary)." -ForegroundColor Yellow
+    Write-Host "          The 'Web' lobby item will not appear. Use -Docker to test rich mode." -ForegroundColor Yellow
+} elseif ($carbonylReady) {
+    Write-Host ""
+    Write-Host "    Carbonyl: ready (Web lobby item will appear; pick it for full-browser mode)." -ForegroundColor Green
+}
 Write-Host ""
 
 $env:NIGHTMS_BOOTSTRAP_SYSOP_HANDLE = $SysopHandle
@@ -254,5 +306,8 @@ $env:BBS_SSH_PORT = $SshPort
 $env:BBS_HTTP_PORT = $HttpPort
 $env:NIGHTMS_DB_CONN = "postgres://postgres:postgres@127.0.0.1:${PostgresPort}/bbs?sslmode=disable"
 $env:NIGHTMS_REDIS_CONN = "redis://127.0.0.1:${RedisPort}"
+if ($carbonylReady) {
+    $env:NIGHTMS_CARBONYL_BIN_PATH = $CarbonylBin
+}
 
 & $BinPath

@@ -14,17 +14,21 @@ Both surfaces share auth (`internal/auth`), session services, providers, and the
 
 ## Commands
 
-Dev loop (Windows / PowerShell — the primary supported workflow):
+Dev loop — `run.ps1` is the canonical entry point and runs on both Windows (PowerShell 5.1+) and Linux/macOS (PowerShell 7+). On Linux invoke as `pwsh ./run.ps1` (or `./run.ps1` if executable + pwsh shebang resolves).
+
 ```powershell
-.\run.ps1                          # boots Postgres + Redis in Docker, builds nightms.exe natively, runs
-.\run.ps1 -Docker                  # builds + runs the prod Docker image instead — needed for Carbonyl rich mode
-.\run.ps1 -SysopHandle alice -Reset # wipe DB + reseed; user `alice` auto-promoted to sysop on boot
-.\run.ps1 -Stop                    # tear down containers
-.\run.ps1 -NoBuild                 # skip the build step (native: reuse bin/nightms.exe; -Docker: reuse last image)
+./run.ps1                          # boots Postgres + Redis in Docker, builds nightms natively, runs
+./run.ps1 -Docker                  # builds + runs the prod Docker image instead (matches deployed env 1:1)
+./run.ps1 -SysopHandle alice -Reset # wipe DB + reseed; user `alice` auto-promoted to sysop on boot
+./run.ps1 -Stop                    # tear down containers
+./run.ps1 -NoBuild                 # skip the build step (native: reuse bin/nightms[.exe]; -Docker: reuse last image)
 ```
 Defaults: Postgres `:55432`, Redis `:56379`, SSH `:2222`, HTTP `:5080`.
 
-**Rich-mode browser (Carbonyl) only works with `-Docker`.** The native Windows build can't host it (the bundled Chromium is linux-x86_64 and the syscall surface — setsid/setctty/TIOCSWINSZ — is Linux-only). The "Web" lobby item is hidden on the native run; use `-Docker` to see it.
+**Carbonyl rich-mode browser availability by platform:**
+- Linux native (`./run.ps1`): works. Script auto-extracts the LFS bundle from `bundle/` to `bin/carbonyl/` on first run and sets `NIGHTMS_CARBONYL_BIN_PATH`.
+- Windows native (`./run.ps1`): hidden. The bundled Chromium is linux-x86_64 and the bridge syscalls (setsid/setctty/TIOCSWINSZ) are Linux-only. Use `-Docker`.
+- Any platform with `-Docker`: works. Builds the prod image which extracts the bundle to `/opt/carbonyl/` inside the container.
 
 Cross-platform equivalents:
 ```sh
