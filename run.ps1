@@ -56,6 +56,11 @@
     Slower per iteration than the native build but matches the deployed image
     1:1.
 
+.PARAMETER Rebuild
+    Forces a `docker build --no-cache` on the -Docker path. Useful when you
+    pulled new source but Docker's layer cache stuck to the old image and
+    your changes aren't showing up at runtime. No effect outside -Docker.
+
 .EXAMPLE
     .\run.ps1
     Start everything with defaults (native Windows build).
@@ -83,7 +88,8 @@ param(
     [switch]$Stop,
     [switch]$Reset,
     [switch]$NoBuild,
-    [switch]$Docker
+    [switch]$Docker,
+    [switch]$Rebuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,10 +207,17 @@ if ($Reset) {
 # --- Docker mode: build + run the prod image, exit when it does --------------
 if ($Docker) {
     if (-not $NoBuild) {
-        Write-Step "Building $DockerImageTag (this is the prod Dockerfile, bookworm-slim + carbonyl bundle)"
+        $buildArgs = @('build', '-t', $DockerImageTag)
+        if ($Rebuild) {
+            Write-Step "Building $DockerImageTag (--no-cache, forced clean rebuild)"
+            $buildArgs += '--no-cache'
+        } else {
+            Write-Step "Building $DockerImageTag (use -Rebuild if your source changes aren't showing up)"
+        }
+        $buildArgs += '.'
         Push-Location $RepoRoot
         try {
-            & docker build -t $DockerImageTag .
+            & docker @buildArgs
             if ($LASTEXITCODE -ne 0) { throw "docker build failed." }
         } finally {
             Pop-Location

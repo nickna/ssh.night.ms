@@ -62,11 +62,13 @@ func NewLobby(sess *session.Session) tea.Model {
 		{Title: "Finance", Hotkey: 'k', Destination: nav.DestFinance, Icon: icon("finance")},
 		{Title: "Doors", Hotkey: 'd', Destination: nav.DestDoors, Icon: icon("doors")},
 	}
-	// "Web" — full Carbonyl browser. Shown only when the session can actually
-	// host it: SSH transport (not WebSocket), the kill switch flipped on, and
-	// the binary loadable. WS users see only "Reader"; SSH users with rich
-	// mode enabled see both "Reader" and "Web" and pick what they want.
-	if sess.IsSSH && sess.LaunchCarbonyl != nil && sess.Settings != nil && sess.Settings.Get().CarbonylEnabled {
+	// "Web" — full Carbonyl browser. Gate only on IsSSH because WS sessions
+	// truly can't host it (no PTY for the child). All other gates (binary
+	// loadable, kill switch on) are enforced inside the Web screen itself
+	// with clear status messages — that way the user can SEE the option,
+	// click it, and learn why it won't run, instead of the option silently
+	// vanishing under a multi-condition gate that's hard to diagnose.
+	if sess.IsSSH {
 		items = append(items, components.CarouselItem{
 			Title: "Web", Hotkey: 'w', Destination: nav.DestWeb, Icon: icon("web"),
 		})
@@ -79,6 +81,21 @@ func NewLobby(sess *session.Session) tea.Model {
 	items = append(items, components.CarouselItem{
 		Title: "Logout", Hotkey: 'l', Destination: nav.DestLogout, Icon: icon("logout"),
 	})
+	// Log the constructed item list once per session-attach so a missing
+	// carousel card never has to be diagnosed by guesswork. INFO so it's on
+	// by default in prod; trivially small even at high session churn.
+	if sess.Logger != nil {
+		titles := make([]string, 0, len(items))
+		for _, it := range items {
+			titles = append(titles, it.Title)
+		}
+		sess.Logger.Info("lobby items",
+			"handle", sess.Identity.Handle,
+			"is_ssh", sess.IsSSH,
+			"is_sysop", sess.Identity.IsSysop,
+			"carbonyl_loaded", sess.LaunchCarbonyl != nil,
+			"items", titles)
+	}
 	return &Lobby{sess: sess, carousel: components.NewCarousel(items)}
 }
 
