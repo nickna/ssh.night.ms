@@ -191,15 +191,6 @@ type User struct {
 	RequireSshKey              bool
 }
 
-type UserBookmark struct {
-	ID        int64
-	UserID    int64
-	Url       string
-	Title     string
-	SortOrder int32
-	CreatedAt pgtype.Timestamptz
-}
-
 type UserSavedLocation struct {
 	ID        int64
 	UserID    int64

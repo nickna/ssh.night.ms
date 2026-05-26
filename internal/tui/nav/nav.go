@@ -6,9 +6,7 @@ package nav
 
 import tea "github.com/charmbracelet/bubbletea"
 
-// Destination is the set of top-level lobby targets. The full set mirrors
-// the .NET LobbyNavigation enum so we have a stable identifier for every
-// screen across the port.
+// Destination is the set of top-level lobby targets.
 type Destination int
 
 const (
@@ -18,7 +16,6 @@ const (
 	DestBoards
 	DestProfile
 	DestNews
-	DestBrowser
 	DestGallery
 	DestMap
 	DestWeather
@@ -41,10 +38,9 @@ const (
 	// game_rounds stats and is reached from the same Doors carousel.
 	DestLeaderboards
 
-	// DestWeb is the Carbonyl-backed full browser, picked from the lobby
-	// alongside the reader-mode Browser. Carousel item is hidden when the
-	// session can't host Carbonyl (WebSocket sessions, missing binary, or
-	// kill switch off) so users only see it when it'll actually work.
+	// DestWeb is the Carbonyl-backed full browser. Always shown in the
+	// lobby; the screen itself surfaces the reason if a launch can't
+	// actually happen (WS session, missing binary, kill switch off).
 	DestWeb
 )
 
@@ -62,8 +58,6 @@ func (d Destination) Title() string {
 		return "Profile"
 	case DestNews:
 		return "News"
-	case DestBrowser:
-		return "Browser"
 	case DestGallery:
 		return "Gallery"
 	case DestMap:

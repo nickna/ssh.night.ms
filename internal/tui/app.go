@@ -349,9 +349,6 @@ func (m *Root) route(dest nav.Destination, arg string) (tea.Model, tea.Cmd) {
 	case nav.DestNews:
 		m.screen = screens.NewNews(m.sess)
 		return m, m.screen.Init()
-	case nav.DestBrowser:
-		m.screen = screens.NewBrowser(m.sess)
-		return m, m.screen.Init()
 	case nav.DestWeb:
 		m.screen = screens.NewWeb(m.sess)
 		return m, m.screen.Init()

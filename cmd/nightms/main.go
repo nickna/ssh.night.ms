@@ -26,13 +26,11 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
-	"github.com/nickna/ssh.night.ms/internal/providers/bookmarks"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
 	"github.com/nickna/ssh.night.ms/internal/providers/news"
 	"github.com/nickna/ssh.night.ms/internal/providers/routing"
-	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
 	"github.com/nickna/ssh.night.ms/internal/security/audit"
@@ -433,7 +431,7 @@ func buildSessionDeps(
 			Locations:    &realtime.LocationService{Queries: queries},
 			Leaderboards: &realtime.LeaderboardService{Queries: queries},
 		},
-		Providers: buildProviders(queries, opts),
+		Providers: buildProviders(opts),
 		Art:       buildArt(opts, logger),
 		Games: session.GameDeps{
 			HoldemRegistry: holdemReg,
@@ -490,7 +488,7 @@ func defaultsFromOptions(o config.Options) settings.Defaults {
 // per-host TCP+TLS connection pool is amortized across CoinGecko, Yahoo,
 // Frankfurter, NWS, OpenMeteo, and HackerNews — each previously stood up
 // its own Transport and paid handshake cost on every fetch.
-func buildProviders(queries *gen.Queries, opts config.Options) session.ProviderDeps {
+func buildProviders(opts config.Options) session.ProviderDeps {
 	sharedTransport := &http.Transport{
 		Proxy:               http.ProxyFromEnvironment,
 		MaxIdleConns:        100,
@@ -549,8 +547,6 @@ func buildProviders(queries *gen.Queries, opts config.Options) session.ProviderD
 		},
 		FinanceNews: financeNews,
 		MapTiles:    tiles,
-		Search:      search.NewDuckDuckGo(newClient(8 * time.Second)),
-		Bookmarks:   bookmarks.New(queries),
 		Geocoder:    geo,
 		Routing:     routingProv,
 	}

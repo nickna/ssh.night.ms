@@ -39,10 +39,11 @@ const (
 type lobbyAlertsMsg struct{ alerts []weather.Alert }
 type lobbyAlertTickMsg struct{}
 
-// NewLobby builds the lobby with its carousel items. Order and hotkeys match
-// .NET LobbyScreen.cs exactly: Chat/Boards/Profile/News/Browser/Gallery/Map/
-// Weather/Finance/Doors/[Sysop]/Logout. The Alerts destination is reachable
-// via the 'a' shortcut handled by Update, never as a permanent carousel card.
+// NewLobby builds the lobby with its carousel items. The Alerts destination
+// is reachable via the 'a' shortcut handled by Update, never as a permanent
+// carousel card. "Web" always renders — when it can't actually launch
+// Carbonyl (WS session, missing binary, kill switch off) the screen itself
+// surfaces the reason inline.
 func NewLobby(sess *session.Session) tea.Model {
 	icon := func(name string) *art.CellGrid {
 		if sess.LobbyIcons == nil {
@@ -55,23 +56,12 @@ func NewLobby(sess *session.Session) tea.Model {
 		{Title: "Boards", Hotkey: 'b', Destination: nav.DestBoards, Icon: icon("boards")},
 		{Title: "Profile", Hotkey: 'p', Destination: nav.DestProfile, Icon: icon("profile")},
 		{Title: "News", Hotkey: 'n', Destination: nav.DestNews, Icon: icon("news")},
-		{Title: "Reader", Hotkey: 'r', Destination: nav.DestBrowser, Icon: icon("browser")},
 		{Title: "Gallery", Hotkey: 'g', Destination: nav.DestGallery, Icon: icon("gallery")},
 		{Title: "Map", Hotkey: 'm', Destination: nav.DestMap, Icon: icon("map")},
 		{Title: "Weather", Hotkey: 'f', Destination: nav.DestWeather, Icon: icon("weather")},
 		{Title: "Finance", Hotkey: 'k', Destination: nav.DestFinance, Icon: icon("finance")},
 		{Title: "Doors", Hotkey: 'd', Destination: nav.DestDoors, Icon: icon("doors")},
-	}
-	// "Web" — full Carbonyl browser. Gate only on IsSSH because WS sessions
-	// truly can't host it (no PTY for the child). All other gates (binary
-	// loadable, kill switch on) are enforced inside the Web screen itself
-	// with clear status messages — that way the user can SEE the option,
-	// click it, and learn why it won't run, instead of the option silently
-	// vanishing under a multi-condition gate that's hard to diagnose.
-	if sess.IsSSH {
-		items = append(items, components.CarouselItem{
-			Title: "Web", Hotkey: 'w', Destination: nav.DestWeb, Icon: icon("web"),
-		})
+		{Title: "Web", Hotkey: 'w', Destination: nav.DestWeb, Icon: icon("web")},
 	}
 	if sess.Identity.IsSysop {
 		items = append(items, components.CarouselItem{

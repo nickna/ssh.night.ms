@@ -11,13 +11,11 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
-	"github.com/nickna/ssh.night.ms/internal/providers/bookmarks"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
 	"github.com/nickna/ssh.night.ms/internal/providers/news"
 	"github.com/nickna/ssh.night.ms/internal/providers/routing"
-	"github.com/nickna/ssh.night.ms/internal/providers/search"
 	"github.com/nickna/ssh.night.ms/internal/providers/weather"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
 	"github.com/nickna/ssh.night.ms/internal/settings"
@@ -49,9 +47,9 @@ type CoreDeps struct {
 	Hasher  *auth.Hasher
 	Logger  *slog.Logger
 
-	// Images is the process-wide inline-image fetch scheduler. Screens that
-	// paint URLs (chat, browser) share it so a paste-storm in one can't
-	// starve the other's network budget.
+	// Images is the process-wide inline-image fetch scheduler shared by every
+	// screen that paints URLs (chat etc.) so a paste-storm in one can't
+	// starve the others' network budget.
 	Images *asyncfetch.Pool
 }
 
@@ -74,8 +72,6 @@ type ProviderDeps struct {
 	Finance     finance.Provider
 	FinanceNews finance.NewsProvider
 	MapTiles    *maptile.Provider
-	Search      search.Provider
-	Bookmarks   *bookmarks.Service
 	Geocoder    geocoding.Provider
 
 	// Routing is nil when NIGHTMS_ORS_API_KEY isn't set. The Map screen
