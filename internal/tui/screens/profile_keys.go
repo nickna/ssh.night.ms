@@ -85,7 +85,7 @@ func (m *Profile) requestKeyDelete() tea.Cmd {
 		fmt.Sprintf("remove %q (%s)? this cannot be undone.", credentialLabelOr(target, "(unlabeled)"), target.Subject),
 	)
 	m.confirmKind = fmt.Sprintf("removeKey:%d", target.ID)
-	m.previousMode = modeKeys
+	m.confirmReturnMode = modeKeys
 	m.mode = modeConfirm
 	return nil
 }
@@ -172,8 +172,12 @@ func (m *Profile) renderKeysModal() string {
 // openAddKey switches to the add-key modal with two fresh textinputs.
 // Patterned on openPassword: each invocation builds new inputs so a
 // cancelled attempt can't leak the previous paste into the next.
+//
+// previousMode is intentionally left untouched — handleAddKeyKey on Esc
+// hardcodes the return to modeKeys, and overwriting previousMode here
+// would clobber the outer parent (modeTabProfile) that openKeys saved,
+// stranding the second Esc on the keys modal.
 func (m *Profile) openAddKey() tea.Cmd {
-	m.previousMode = modeKeys
 	m.mode = modeAddKey
 	m.addKeyErr = ""
 	m.addKeyBusy = false

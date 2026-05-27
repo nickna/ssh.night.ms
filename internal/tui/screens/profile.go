@@ -100,16 +100,23 @@ type Profile struct {
 	addKeyBusy   bool
 
 	// Confirm-overlay state. confirmKind identifies which guard fired so
-	// the Yes-branch can dispatch the right follow-up cmd.
-	confirm     *components.Confirm
-	confirmKind string
+	// the Yes-branch can dispatch the right follow-up cmd. confirmReturnMode
+	// is the mode to restore when the overlay closes — kept separate from
+	// previousMode so a confirm raised on top of e.g. modeKeys doesn't
+	// clobber the outer parent (modeTabProfile) and strand Esc.
+	confirm           *components.Confirm
+	confirmKind       string
+	confirmReturnMode profileMode
 
 	// Cross-mode UI state.
 	working    bool
 	notice     string
 	noticeKind string // "" / "ok" / "err"
 
-	// previousMode tracks where to return when a modal is dismissed.
+	// previousMode tracks where to return when a screen-level modal
+	// (modeKeys / modePassword / modeLocations) is dismissed. Sub-overlays
+	// (modeAddKey, modeConfirm) must NOT write here — their return targets
+	// are tracked separately so nested escapes bubble out correctly.
 	previousMode profileMode
 }
 
@@ -678,14 +685,14 @@ func (m *Profile) submitProfile() tea.Cmd {
 
 func (m *Profile) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirm == nil {
-		m.mode = m.previousMode
+		m.mode = m.confirmReturnMode
 		return m, nil
 	}
 	m.confirm.Update(k)
 	if m.confirm.Cancelled {
 		m.confirm = nil
 		m.confirmKind = ""
-		m.mode = m.previousMode
+		m.mode = m.confirmReturnMode
 		return m, nil
 	}
 	if !m.confirm.Submitted {
@@ -695,7 +702,7 @@ func (m *Profile) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	kind := m.confirmKind
 	m.confirm = nil
 	m.confirmKind = ""
-	m.mode = m.previousMode
+	m.mode = m.confirmReturnMode
 	if choice == 0 {
 		// User chose No — nothing to do.
 		return m, nil

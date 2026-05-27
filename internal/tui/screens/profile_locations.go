@@ -393,7 +393,7 @@ func (m *Profile) requestLocationDelete() tea.Cmd {
 		fmt.Sprintf("remove %q (%.4f, %.4f)?", target.Label, target.Latitude, target.Longitude),
 	)
 	m.confirmKind = fmt.Sprintf("removeLocation:%d", target.ID)
-	m.previousMode = modeLocations
+	m.confirmReturnMode = modeLocations
 	m.mode = modeConfirm
 	return nil
 }

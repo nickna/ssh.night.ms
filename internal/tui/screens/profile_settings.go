@@ -68,7 +68,7 @@ func (m *Profile) handleRequireSshToggle() tea.Cmd {
 			"only one SSH key is registered. If you lose this key, only a sysop can restore access. Enable anyway?",
 		)
 		m.confirmKind = "requireSsh"
-		m.previousMode = modeTabSettings
+		m.confirmReturnMode = modeTabSettings
 		m.mode = modeConfirm
 		return nil
 	}
