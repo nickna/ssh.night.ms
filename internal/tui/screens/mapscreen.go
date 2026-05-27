@@ -100,7 +100,13 @@ const (
 )
 
 func NewMapScreen(sess *session.Session) tea.Model {
-	lat, lon, _ := sess.WeatherCoords()
+	// Use the user's saved location as the initial center; sessions without
+	// one open on a neutral world-ish view (slightly north of the equator,
+	// prime meridian) and let the user search/pan from there.
+	lat, lon, _, ok := sess.WeatherCoords()
+	if !ok {
+		lat, lon = 20, 0
+	}
 	ti := textinput.New()
 	ti.Placeholder = "city, address, or place"
 	ti.CharLimit = 96

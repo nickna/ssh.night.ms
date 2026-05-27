@@ -20,21 +20,13 @@ import (
 // session.GalleryEntry name resolves locally for the screens package.
 type artGalleryEntry = art.GalleryEntry
 
-// WeatherDefaults holds the fallback lat/lon used when the user hasn't
-// saved a location. Sourced from NIGHTMS_WEATHER_LAT / LON / LABEL.
-type WeatherDefaults struct {
-	Lat   float64
-	Lon   float64
-	Label string
-}
-
 // ProfileLocation is the user's .NET-era profile city, sourced from the
 // users.location / location_canonical / location_latitude / location_longitude
-// columns the .NET stack wrote to. Used as a fallback between
-// PrimaryLocation and WeatherDefaults so users carrying data over from
-// .NET don't see the default city until they've added an entry to
-// user_saved_locations. Also fed into LocationService.SeedFromProfile
-// at login to backfill an explicit saved-location row.
+// columns the .NET stack wrote to. Used as the fallback after PrimaryLocation
+// so users carrying data over from .NET don't see "no location" until they've
+// added an entry to user_saved_locations. Also fed into
+// LocationService.SeedFromProfile at login to backfill an explicit
+// saved-location row.
 type ProfileLocation struct {
 	Label     string
 	Canonical string
@@ -65,16 +57,18 @@ type State struct {
 	Height int
 
 	// PrimaryLocation is the user's preferred saved location (lowest
-	// sort_order in user_saved_locations). nil means "use the env-var
-	// defaults via WeatherDefaults". Loaded once at login by the transport
-	// layer; refreshed by the Profile screen after mutating the list.
+	// sort_order in user_saved_locations). nil means "no saved location";
+	// callers fall through to ProfileLocation, and if that's also nil they
+	// must treat the session as having no location at all (WeatherCoords
+	// returns ok=false). Loaded once at login by the transport layer;
+	// refreshed by the Profile screen after mutating the list.
 	PrimaryLocation *realtime.SavedLocation
 
-	// ProfileLocation is the legacy users.location_* fallback, loaded
-	// from the user row at login. Consulted by WeatherCoords() between
-	// PrimaryLocation and WeatherDefaults so .NET-era profile data still
-	// drives the weather/map screens for users who haven't yet added a
-	// saved location.
+	// ProfileLocation is the legacy users.location_* fallback, loaded from
+	// the user row at login. Consulted by WeatherCoords() after
+	// PrimaryLocation so .NET-era profile data still drives the
+	// weather/map screens for users who haven't yet added a saved
+	// location.
 	ProfileLocation *ProfileLocation
 
 	// DisplayPrefs is the cached time / date / clock format slice of the
@@ -101,11 +95,6 @@ type Session struct {
 	// per-session from $TERM + SSH-forwarded environ (transport) or fixed at
 	// Halfblock (web — xterm.js renders the half-block fallback).
 	Graphics graphics.Protocol
-
-	// WeatherDefaults flows through to every Session via WeatherCoords().
-	// Copied off PolicyDeps at session-attach to keep the WeatherCoords()
-	// receiver free of indirection.
-	WeatherDefaults WeatherDefaults
 
 	// Embedded process-singleton groups: field promotion keeps screen access
 	// flat (sess.Pool, sess.Chat, sess.News, ...) even though the underlying
@@ -179,17 +168,16 @@ func (s *Session) SetTeaProgram(p *tea.Program) {
 // the queries package.
 func New(deps Deps, st State, sshCtx context.Context, gfx graphics.Protocol) *Session {
 	return &Session{
-		SSHContext:      sshCtx,
-		Graphics:        gfx,
-		WeatherDefaults: deps.Policy.WeatherDefaults,
-		CoreDeps:        deps.Core,
-		RealtimeDeps:    deps.Realtime,
-		ProviderDeps:    deps.Providers,
-		ArtDeps:         deps.Art,
-		GameDeps:        deps.Games,
-		SecurityDeps:    deps.Security,
-		SystemDeps:      deps.System,
-		State:           st,
+		SSHContext:   sshCtx,
+		Graphics:     gfx,
+		CoreDeps:     deps.Core,
+		RealtimeDeps: deps.Realtime,
+		ProviderDeps: deps.Providers,
+		ArtDeps:      deps.Art,
+		GameDeps:     deps.Games,
+		SecurityDeps: deps.Security,
+		SystemDeps:   deps.System,
+		State:        st,
 	}
 }
 
@@ -215,17 +203,19 @@ func (s *Session) CtxWithTimeout(timeout time.Duration) (context.Context, contex
 
 // WeatherCoords returns the lat/lon/label the Weather screen should query.
 // Resolution order: user's primary saved location → legacy profile city
-// (users.location_*) → env-var defaults. The first two are cached at login;
-// the saved-location cache is refreshed whenever the Profile screen mutates
-// the list.
-func (s *Session) WeatherCoords() (lat, lon float64, label string) {
+// (users.location_*). Both are cached at login; the saved-location cache
+// is refreshed whenever the Profile screen mutates the list. Returns
+// ok=false when neither source is populated — callers must skip the
+// weather fetch and surface a "set a location" prompt rather than
+// silently picking some default city for the user.
+func (s *Session) WeatherCoords() (lat, lon float64, label string, ok bool) {
 	if s.PrimaryLocation != nil {
-		return s.PrimaryLocation.Latitude, s.PrimaryLocation.Longitude, s.PrimaryLocation.Label
+		return s.PrimaryLocation.Latitude, s.PrimaryLocation.Longitude, s.PrimaryLocation.Label, true
 	}
 	if s.ProfileLocation != nil {
-		return s.ProfileLocation.Lat, s.ProfileLocation.Lon, s.ProfileLocation.Label
+		return s.ProfileLocation.Lat, s.ProfileLocation.Lon, s.ProfileLocation.Label, true
 	}
-	return s.WeatherDefaults.Lat, s.WeatherDefaults.Lon, s.WeatherDefaults.Label
+	return 0, 0, "", false
 }
 
 // RefreshPrimaryLocation re-reads the user's primary saved location from

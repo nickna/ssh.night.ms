@@ -49,10 +49,6 @@ type Options struct {
 	BoardIconsDir    string // .ans glyphs shown next to each forum row
 	LoginArtPath     string // optional path to a .ans login banner
 
-	WeatherLat   float64
-	WeatherLon   float64
-	WeatherLabel string
-
 	Argon2Params auth.Argon2Params
 	RateLimit    auth.RateLimitParams
 
@@ -177,9 +173,6 @@ func Load() Options {
 		LobbyIconsDir:    envOr("NIGHTMS_LOBBY_ICONS_DIR", filepath.Join("data", "art", "lobby-icons")),
 		BoardIconsDir:    envOr("NIGHTMS_BOARD_ICONS_DIR", filepath.Join("data", "art", "board-icons")),
 		LoginArtPath:     os.Getenv("NIGHTMS_LOGIN_ART_PATH"),
-		WeatherLat:       floatEnv("NIGHTMS_WEATHER_LAT", 40.7128),
-		WeatherLon:       floatEnv("NIGHTMS_WEATHER_LON", -74.0060),
-		WeatherLabel:     envOr("NIGHTMS_WEATHER_LABEL", "New York"),
 		RateLimit: auth.RateLimitParams{
 			HandleThreshold:        int(uintEnv("NIGHTMS_LOCKOUT_HANDLE_THRESHOLD", 5)),
 			IPThreshold:            int(uintEnv("NIGHTMS_LOCKOUT_IP_THRESHOLD", 20)),

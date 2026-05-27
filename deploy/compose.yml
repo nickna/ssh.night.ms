@@ -53,11 +53,6 @@ services:
       NIGHTMS_COOKIE_SECRET: "${NIGHTMS_COOKIE_SECRET:-}"
       # Behind Cloudflare Flexible the inbound origin connection is plain HTTP.
       NIGHTMS_WEB_SECURE_COOKIES: "0"
-
-      # Default weather location when the user hasn't set one.
-      NIGHTMS_WEATHER_LAT: "${NIGHTMS_WEATHER_LAT:-40.7128}"
-      NIGHTMS_WEATHER_LON: "${NIGHTMS_WEATHER_LON:--74.0060}"
-      NIGHTMS_WEATHER_LABEL: "${NIGHTMS_WEATHER_LABEL:-New York}"
     volumes:
       - app-data:/data
     ports:

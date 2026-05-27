@@ -79,7 +79,8 @@ LIMIT 1
 // Returns the first row by sort_order. Weather + Map screens consult this to
 // decide which lat/lon to load when no per-request override is supplied.
 // pgx.ErrNoRows means the user has nothing saved — caller falls back to the
-// env-var defaults.
+// legacy users.location_* columns and, if those are also empty, treats the
+// session as having no location.
 func (q *Queries) GetPrimaryUserSavedLocation(ctx context.Context, userID int64) (UserSavedLocation, error) {
 	row := q.db.QueryRow(ctx, getPrimaryUserSavedLocation, userID)
 	var i UserSavedLocation

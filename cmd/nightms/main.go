@@ -438,11 +438,6 @@ func buildSessionDeps(
 			Wallet:         &doors.WalletService{Queries: queries},
 		},
 		Policy: session.PolicyDeps{
-			WeatherDefaults: session.WeatherDefaults{
-				Lat:   opts.WeatherLat,
-				Lon:   opts.WeatherLon,
-				Label: opts.WeatherLabel,
-			},
 			BootstrapSysopHandle: opts.BootstrapSysopHandle,
 			MinPasswordLength:    8,
 		},

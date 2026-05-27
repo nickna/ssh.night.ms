@@ -103,10 +103,8 @@ type GameDeps struct {
 }
 
 // PolicyDeps groups env-derived policy knobs needed at session-attach or by
-// the register flow. WeatherDefaults flows through to every Session via
-// WeatherCoords(); the other two are only read by transport during signup.
+// the register flow. Read by transport during signup.
 type PolicyDeps struct {
-	WeatherDefaults      WeatherDefaults
 	BootstrapSysopHandle string
 	MinPasswordLength    int
 }

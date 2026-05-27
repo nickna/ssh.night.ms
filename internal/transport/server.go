@@ -385,8 +385,9 @@ func dispatchAuth(
 		}
 		// Load the user's primary saved location into the Session cache
 		// so WeatherCoords() returns it without an extra DB hit per
-		// screen mount. Misses (no row) leave PrimaryLocation nil and
-		// fall back to WeatherDefaults.
+		// screen mount. Misses (no row) leave PrimaryLocation nil; if
+		// ProfileLocation is also nil the weather/alerts surfaces gate
+		// themselves off via WeatherCoords()'s ok=false return.
 		if sdeps.Realtime.Locations != nil {
 			loadCtx, cancel := context.WithTimeout(sshCtx, 2*time.Second)
 			if loc, err := sdeps.Realtime.Locations.GetPrimary(loadCtx, d.UserID); err != nil {

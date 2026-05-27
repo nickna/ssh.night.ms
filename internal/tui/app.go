@@ -101,12 +101,17 @@ func (m *Root) Init() tea.Cmd {
 }
 
 // fetchStatusTempCmd kicks off a single weather fetch for the status-bar
-// widget. Uses the same coords WeatherCoords resolves — saved primary
-// location first, env defaults second. Failure produces ok=false; the
-// Update handler keeps any previous reading rather than blanking.
+// widget. Uses the coords WeatherCoords resolves — saved primary location,
+// then legacy profile city. Returns a no-op cmd when the session has no
+// known location (status-bar temp stays hidden) so we don't silently show
+// a default city's weather. Failure produces ok=false; the Update handler
+// keeps any previous reading rather than blanking.
 func (m *Root) fetchStatusTempCmd() tea.Cmd {
 	provider := m.sess.Weather
-	lat, lon, label := m.sess.WeatherCoords()
+	lat, lon, label, ok := m.sess.WeatherCoords()
+	if !ok {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

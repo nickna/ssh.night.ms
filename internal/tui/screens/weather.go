@@ -15,9 +15,10 @@ import (
 )
 
 // Weather is the Open-Meteo-backed forecast screen. Shows current
-// conditions, a 24-hour strip, and a 7-day strip. Per-user saved
-// locations are still on the TODO list; the screen falls back to the
-// env-var defaults via Session.WeatherCoords().
+// conditions, a 24-hour strip, and a 7-day strip for the session's
+// resolved location (Session.WeatherCoords). Sessions with no saved
+// location render a "set a location" prompt rather than picking a city
+// for the user.
 type Weather struct {
 	sess     *session.Session
 	forecast *weather.Forecast
@@ -39,7 +40,10 @@ func (m *Weather) fetch() tea.Cmd {
 		return func() tea.Msg { return weatherLoadedMsg{err: fmt.Errorf("weather provider not configured")} }
 	}
 	provider := m.sess.Weather
-	lat, lon, label := m.sess.WeatherCoords()
+	lat, lon, label, ok := m.sess.WeatherCoords()
+	if !ok {
+		return func() tea.Msg { return weatherLoadedMsg{err: errNoLocation} }
+	}
 	return func() tea.Msg {
 		ctx, cancel := m.sess.CtxWithTimeout(12*time.Second)
 		defer cancel()
@@ -99,6 +103,9 @@ func (m *Weather) View() string {
 	switch {
 	case m.loading:
 		b.WriteString(weatherHint.Render("fetching from open-meteo.com…"))
+		return b.String()
+	case m.err == errNoLocation.Error():
+		b.WriteString(weatherHint.Render("Add a location in your profile to see its forecast."))
 		return b.String()
 	case m.err != "":
 		b.WriteString(weatherErrStyle.Render("! " + m.err))

@@ -95,10 +95,15 @@ func (m *Lobby) Init() tea.Cmd {
 
 // fetchAlerts is the alerts-provider read used both on Init and on the
 // 5-minute refresh schedule. Failure is silent — no banner is friendlier
-// than an error banner on the lobby.
+// than an error banner on the lobby. Sessions without a known location
+// skip the fetch entirely so the lobby never shows alerts for somewhere
+// the user hasn't told us they care about.
 func (m *Lobby) fetchAlerts() tea.Cmd {
 	provider := m.sess.Alerts
-	lat, lon, _ := m.sess.WeatherCoords()
+	lat, lon, _, ok := m.sess.WeatherCoords()
+	if !ok {
+		return nil
+	}
 	return func() tea.Msg {
 		if provider == nil {
 			return lobbyAlertsMsg{}

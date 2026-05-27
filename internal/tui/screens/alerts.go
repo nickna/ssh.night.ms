@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,12 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
+
+// errNoLocation is the sentinel returned by the alerts and weather screens
+// when the session has no PrimaryLocation or ProfileLocation. The View
+// handlers special-case it to render a "set a location in your profile"
+// prompt instead of a generic error.
+var errNoLocation = errors.New("no location")
 
 // Alerts renders the active NWS alerts for the session's configured weather
 // coordinate. The user picks one with ↑/↓ + Enter to read the full body;
@@ -51,7 +58,10 @@ func (m *Alerts) Init() tea.Cmd { return m.loadCmd() }
 
 func (m *Alerts) loadCmd() tea.Cmd {
 	provider := m.sess.Alerts
-	lat, lon, _ := m.sess.WeatherCoords()
+	lat, lon, _, ok := m.sess.WeatherCoords()
+	if !ok {
+		return func() tea.Msg { return alertsLoadedMsg{err: errNoLocation} }
+	}
 	return func() tea.Msg {
 		if provider == nil {
 			return alertsLoadedMsg{err: fmt.Errorf("alerts provider not configured")}
@@ -136,10 +146,14 @@ func (m *Alerts) View() string {
 	if m.sess.Width == 0 || m.sess.Height == 0 {
 		return "initializing..."
 	}
-	_, _, label := m.sess.WeatherCoords()
+	_, _, label, hasLoc := m.sess.WeatherCoords()
 
 	var b strings.Builder
-	b.WriteString(alertsTitle.Render("Active alerts — " + label))
+	if hasLoc {
+		b.WriteString(alertsTitle.Render("Active alerts — " + label))
+	} else {
+		b.WriteString(alertsTitle.Render("Active alerts"))
+	}
 	b.WriteString("  ")
 	if m.mode == alertsDetail {
 		b.WriteString(alertsHint.Render("Esc: back · PgUp/PgDn: scroll · r: refresh"))
@@ -150,6 +164,10 @@ func (m *Alerts) View() string {
 
 	if m.loading {
 		b.WriteString(alertsHint.Render("loading…"))
+		return b.String()
+	}
+	if m.err == errNoLocation.Error() {
+		b.WriteString(alertsHint.Render("Add a location in your profile to see alerts for it."))
 		return b.String()
 	}
 	if m.err != "" {

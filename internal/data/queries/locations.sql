@@ -8,7 +8,8 @@ ORDER BY sort_order ASC, id ASC;
 -- Returns the first row by sort_order. Weather + Map screens consult this to
 -- decide which lat/lon to load when no per-request override is supplied.
 -- pgx.ErrNoRows means the user has nothing saved — caller falls back to the
--- env-var defaults.
+-- legacy users.location_* columns and, if those are also empty, treats the
+-- session as having no location.
 SELECT id, user_id, label, latitude, longitude, canonical, sort_order, created_at
 FROM user_saved_locations
 WHERE user_id = $1
