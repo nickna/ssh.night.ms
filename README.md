@@ -1,4 +1,6 @@
 # ssh.night.ms
+<img width="3341" height="1650" alt="image" src="https://github.com/user-attachments/assets/dab04685-1624-4196-a43a-b6a6b7715cfc" />
+
 
 A retro BBS written in Go, served over SSH and the web. Connect via:
 
