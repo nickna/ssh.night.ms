@@ -47,7 +47,7 @@ func (q *Queries) GetOrCreateWallet(ctx context.Context, arg GetOrCreateWalletPa
 }
 
 const getUserByHandle = `-- name: GetUserByHandle :one
-SELECT id, handle, created_at, last_seen_at, is_sysop, is_banned, bio, location, real_name, clock_format, date_format, temperature_unit, time_zone_id, location_canonical, location_latitude, location_longitude, location_source, email, profile_picture_updated_at, password_algo, password_hash, password_updated_at, suppress_key_adoption_prompts, require_ssh_key
+SELECT id, handle, created_at, last_seen_at, is_sysop, is_banned, bio, location, real_name, clock_format, date_format, temperature_unit, time_zone_id, location_canonical, location_latitude, location_longitude, location_source, email, profile_picture_updated_at, password_algo, password_hash, password_updated_at, suppress_key_adoption_prompts, require_ssh_key, preferred_news_source
 FROM users
 WHERE handle = $1
 `
@@ -81,12 +81,13 @@ func (q *Queries) GetUserByHandle(ctx context.Context, handle string) (User, err
 		&i.PasswordUpdatedAt,
 		&i.SuppressKeyAdoptionPrompts,
 		&i.RequireSshKey,
+		&i.PreferredNewsSource,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, handle, created_at, last_seen_at, is_sysop, is_banned, bio, location, real_name, clock_format, date_format, temperature_unit, time_zone_id, location_canonical, location_latitude, location_longitude, location_source, email, profile_picture_updated_at, password_algo, password_hash, password_updated_at, suppress_key_adoption_prompts, require_ssh_key
+SELECT id, handle, created_at, last_seen_at, is_sysop, is_banned, bio, location, real_name, clock_format, date_format, temperature_unit, time_zone_id, location_canonical, location_latitude, location_longitude, location_source, email, profile_picture_updated_at, password_algo, password_hash, password_updated_at, suppress_key_adoption_prompts, require_ssh_key, preferred_news_source
 FROM users
 WHERE id = $1
 `
@@ -119,6 +120,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.PasswordUpdatedAt,
 		&i.SuppressKeyAdoptionPrompts,
 		&i.RequireSshKey,
+		&i.PreferredNewsSource,
 	)
 	return i, err
 }
@@ -179,6 +181,23 @@ type RenameUserHandleParams struct {
 // to surface a friendlier message but the DB still catches races.
 func (q *Queries) RenameUserHandle(ctx context.Context, arg RenameUserHandleParams) error {
 	_, err := q.db.Exec(ctx, renameUserHandle, arg.ID, arg.Handle)
+	return err
+}
+
+const setUserPreferredNewsSource = `-- name: SetUserPreferredNewsSource :exec
+UPDATE users
+SET preferred_news_source = $2
+WHERE id = $1
+`
+
+type SetUserPreferredNewsSourceParams struct {
+	ID                  int64
+	PreferredNewsSource *string
+}
+
+// NULL clears the preference (screen falls back to first registered source).
+func (q *Queries) SetUserPreferredNewsSource(ctx context.Context, arg SetUserPreferredNewsSourceParams) error {
+	_, err := q.db.Exec(ctx, setUserPreferredNewsSource, arg.ID, arg.PreferredNewsSource)
 	return err
 }
 

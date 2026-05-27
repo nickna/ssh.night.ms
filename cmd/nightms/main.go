@@ -516,6 +516,9 @@ func buildProviders(opts config.Options) session.ProviderDeps {
 	hn := news.NewHackerNews()
 	hn.HTTPClient = newClient(10 * time.Second)
 
+	lob := news.NewLobsters()
+	lob.HTTPClient = newClient(10 * time.Second)
+
 	om := weather.NewOpenMeteo()
 	om.HTTPClient = newClient(10 * time.Second)
 	nws := weather.NewNWSAlerts("")
@@ -536,8 +539,29 @@ func buildProviders(opts config.Options) session.ProviderDeps {
 		routingProv = ors
 	}
 
+	// Per-source TTLs: HN's front page churns within a few minutes so a 5m
+	// window keeps cached views feeling fresh without hammering Firebase.
+	// Lobsters moves much slower — its front page is roughly hourly — so a
+	// longer TTL is appropriate and friendlier to a small self-hosted site.
+	newsRegistry := news.NewRegistry(
+		news.Source{
+			ID:          news.SourceIDHackerNews,
+			DisplayName: "HN",
+			Host:        "news.ycombinator.com",
+			Hotkey:      '1',
+			Provider:    news.NewCache(hn, 5*time.Minute),
+		},
+		news.Source{
+			ID:          news.SourceIDLobsters,
+			DisplayName: "Lobsters",
+			Host:        "lobste.rs",
+			Hotkey:      '2',
+			Provider:    news.NewCache(lob, 15*time.Minute),
+		},
+	)
+
 	return session.ProviderDeps{
-		News:    news.NewCache(hn, 5*time.Minute),
+		News:    newsRegistry,
 		Weather: om,
 		Alerts:  weather.NewNWSCache(nws, 5*time.Minute),
 		Finance: &finance.Multi{

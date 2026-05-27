@@ -51,6 +51,12 @@ SET is_sysop = TRUE
 WHERE handle = $1
   AND is_sysop = FALSE;
 
+-- name: SetUserPreferredNewsSource :exec
+-- NULL clears the preference (screen falls back to first registered source).
+UPDATE users
+SET preferred_news_source = $2
+WHERE id = $1;
+
 -- name: GetOrCreateWallet :one
 -- Upsert that returns the existing wallet or creates a zero-credit one. The
 -- caller is responsible for the daily refresh check on the returned row.

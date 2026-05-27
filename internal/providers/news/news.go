@@ -12,14 +12,24 @@ import (
 
 // Story is the rendered-ready shape passed to the TUI. Provider implementations
 // normalize whatever the upstream API returns into this struct.
+//
+// SourceID identifies which Source produced the row. Per-source providers
+// stamp it on output so a future merged-feed view can route a click back to
+// the right provider; the current tabs-per-source UI never reads it.
+//
+// URL is required: every provider fills it with a navigable link. For
+// discussion-only items (Ask HN, Lobsters self-posts) the provider
+// substitutes its own comment-page URL so the screen sees a single uniform
+// "URL always populated" invariant.
 type Story struct {
-	ID      int64
-	Title   string
-	URL     string  // empty for Ask HN / discussion-only items
-	Author  string
-	Score   int
-	Posted  time.Time
-	KidsCnt int // top-level comment count
+	SourceID string
+	ID       int64
+	Title    string
+	URL      string
+	Author   string
+	Score    int
+	Posted   time.Time
+	KidsCnt  int // top-level comment count
 }
 
 // Host returns the bare hostname of URL, or "" when URL is empty. Useful

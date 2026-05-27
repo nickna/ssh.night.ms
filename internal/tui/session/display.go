@@ -25,6 +25,11 @@ type DisplayPrefs struct {
 	ClockFormat     int32
 	DateFormat      int32
 	TemperatureUnit int32
+	// PreferredNewsSource is the registry ID of the news source the News
+	// screen should land on at open. Empty means "no preference, use the
+	// first registered source." Persisted to users.preferred_news_source
+	// (nullable text) — NULL on the DB side maps to "" here.
+	PreferredNewsSource string
 }
 
 // Temperature-unit enum values, mirroring the users.temperature_unit
@@ -38,11 +43,16 @@ const (
 
 // DisplayPrefsFromUser builds DisplayPrefs from a users row.
 func DisplayPrefsFromUser(u gen.User) DisplayPrefs {
+	pref := ""
+	if u.PreferredNewsSource != nil {
+		pref = *u.PreferredNewsSource
+	}
 	return DisplayPrefs{
-		TimeZoneID:      u.TimeZoneID,
-		ClockFormat:     u.ClockFormat,
-		DateFormat:      u.DateFormat,
-		TemperatureUnit: u.TemperatureUnit,
+		TimeZoneID:          u.TimeZoneID,
+		ClockFormat:         u.ClockFormat,
+		DateFormat:          u.DateFormat,
+		TemperatureUnit:     u.TemperatureUnit,
+		PreferredNewsSource: pref,
 	}
 }
 

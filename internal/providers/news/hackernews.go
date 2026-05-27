@@ -155,14 +155,28 @@ func (p *HackerNews) fetchItem(ctx context.Context, id int64) (hnItem, error) {
 	return item, nil
 }
 
+// SourceID is the registry ID the HackerNews provider stamps on every Story
+// it emits. Mirrors the ID hardcoded in cmd/nightms/main.go::buildProviders;
+// keeping the constant here lets a future merged-feed view filter by source
+// without importing main.
+const SourceIDHackerNews = "hn"
+
 func itemToStory(i hnItem) Story {
+	// Ask HN / discussion-only items have no upstream URL. Substitute the HN
+	// item page so every Story.URL is navigable — the News screen no longer
+	// needs an HN-specific fallback branch.
+	url := i.URL
+	if url == "" {
+		url = fmt.Sprintf("https://news.ycombinator.com/item?id=%d", i.ID)
+	}
 	return Story{
-		ID:      i.ID,
-		Title:   i.Title,
-		URL:     i.URL,
-		Author:  i.By,
-		Score:   i.Score,
-		Posted:  time.Unix(i.Time, 0).UTC(),
-		KidsCnt: len(i.Kids),
+		SourceID: SourceIDHackerNews,
+		ID:       i.ID,
+		Title:    i.Title,
+		URL:      url,
+		Author:   i.By,
+		Score:    i.Score,
+		Posted:   time.Unix(i.Time, 0).UTC(),
+		KidsCnt:  len(i.Kids),
 	}
 }

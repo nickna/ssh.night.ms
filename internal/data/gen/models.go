@@ -189,6 +189,7 @@ type User struct {
 	PasswordUpdatedAt          pgtype.Timestamptz
 	SuppressKeyAdoptionPrompts bool
 	RequireSshKey              bool
+	PreferredNewsSource        *string
 }
 
 type UserBookmark struct {

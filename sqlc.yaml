@@ -9,6 +9,7 @@ sql:
       - "internal/data/migrations/000005_security_events_and_bans.up.sql"
       - "internal/data/migrations/000006_system_settings.up.sql"
       - "internal/data/migrations/000008_web_browsing.up.sql"
+      - "internal/data/migrations/000009_users_preferred_news_source.up.sql"
     queries: "internal/data/queries"
     gen:
       go:

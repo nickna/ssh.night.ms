@@ -66,7 +66,11 @@ type RealtimeDeps struct {
 
 // ProviderDeps groups the outbound HTTP-cached integrations.
 type ProviderDeps struct {
-	News        news.Provider
+	// News is the registry of news sources the BBS exposes. The News screen
+	// renders one tab per registered source. Each Source carries its own
+	// Provider (typically already wrapped in a per-source TTL cache so one
+	// upstream outage can't poison the others).
+	News        *news.Registry
 	Weather     weather.Provider
 	Alerts      weather.AlertProvider
 	Finance     finance.Provider
