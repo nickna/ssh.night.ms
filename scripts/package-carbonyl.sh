@@ -11,12 +11,22 @@
 # build inputs produce a byte-identical archive. The sha256 lands next to it
 # so the Dockerfile can verify on extract.
 #
-# Usage: scripts/package-carbonyl.sh [CHROMIUM_OUT_DIR]
-#   CHROMIUM_OUT_DIR defaults to /home/nbn/carbonyl/chromium/src/out/Release
+# Usage: scripts/package-carbonyl.sh <CHROMIUM_OUT_DIR>
+#   or: CARBONYL_OUT_DIR=... scripts/package-carbonyl.sh
+#
+# CHROMIUM_OUT_DIR points at the Carbonyl/Chromium component-build output
+# directory (the one containing the `carbonyl` binary + its transitive .so
+# closure). No default is provided so a fork can't accidentally regenerate
+# the bundle against a stale tree.
 
 set -euo pipefail
 
-SRC="${1:-/home/nbn/carbonyl/chromium/src/out/Release}"
+SRC="${1:-${CARBONYL_OUT_DIR:-}}"
+if [ -z "$SRC" ]; then
+    echo "error: pass CHROMIUM_OUT_DIR as the first arg or set CARBONYL_OUT_DIR" >&2
+    echo "       (e.g. scripts/package-carbonyl.sh ~/carbonyl/chromium/src/out/Release)" >&2
+    exit 1
+fi
 REPO_ROOT=$(cd "$(dirname -- "$0")/.." && pwd)
 BUNDLE_DIR="$REPO_ROOT/bundle"
 STAGE_DIR="$(mktemp -d -t carbonyl-stage-XXXXXX)"

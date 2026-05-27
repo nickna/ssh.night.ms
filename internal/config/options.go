@@ -36,6 +36,12 @@ type Options struct {
 	DBConnStr    string
 	RedisConnStr string
 
+	// DBMaxConns caps the pgxpool size. The pgx default is max(4, NumCPU)
+	// which is far too low for a process serving SSH + HTTP + realtime
+	// fan-out concurrently; one finger-lookup screen can chew several
+	// connections before releasing them. NIGHTMS_DB_MAX_CONNS overrides.
+	DBMaxConns int32
+
 	BootstrapSysopHandle   string
 	BootstrapSysopPassword string
 
@@ -154,6 +160,7 @@ func Load() Options {
 		// the prefix; pgx accepts both forms equally, so the URL works for the pool too.
 		DBConnStr:    envOr("NIGHTMS_DB_CONN", "postgres://postgres:postgres@127.0.0.1:55432/bbs?sslmode=disable"),
 		RedisConnStr: envOr("NIGHTMS_REDIS_CONN", "redis://127.0.0.1:56379"),
+		DBMaxConns:   int32(uintEnv("NIGHTMS_DB_MAX_CONNS", 16)),
 
 		BootstrapSysopHandle:   os.Getenv("NIGHTMS_BOOTSTRAP_SYSOP_HANDLE"),
 		BootstrapSysopPassword: os.Getenv("NIGHTMS_BOOTSTRAP_SYSOP_PASSWORD"),

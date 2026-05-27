@@ -54,6 +54,14 @@ git lfs pull
 Without the bundle the BBS still boots fine; the Web lobby entry just
 prints "rich mode unavailable".
 
+> **Note on Git LFS bandwidth.** The Carbonyl bundle lives in Git LFS and
+> counts against the *forking account's* LFS bandwidth quota (GitHub's free
+> tier is 1 GB/month). If you're forking and don't need rich-mode browsing,
+> you can leave the bundle out — `git clone --filter=blob:none` or simply
+> not running `git lfs pull` skips the download, and the BBS still boots
+> with rich mode disabled. If you're publishing your own image, expect the
+> bundle to dominate clone time on cold CI runs.
+
 Pure-Go alternative without Docker (you supply Postgres + Redis yourself
 and set the `NIGHTMS_*` env vars):
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 )
@@ -99,48 +100,7 @@ func (s *ProfileService) GetByHandle(ctx context.Context, handle string) (*Profi
 		}
 		return nil, fmt.Errorf("profile: get user: %w", err)
 	}
-
-	chatCount, err := s.Queries.ChatMessageCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: chat count: %w", err)
-	}
-	topicCount, err := s.Queries.TopicCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: topic count: %w", err)
-	}
-	postCount, err := s.Queries.PostCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: post count: %w", err)
-	}
-
-	snap := &ProfileSnapshot{
-		UserID:                     user.ID,
-		Handle:                     user.Handle,
-		CreatedAt:                  user.CreatedAt.Time,
-		LastSeenAt:                 user.LastSeenAt.Time,
-		IsSysop:                    user.IsSysop,
-		TimeZoneID:                 user.TimeZoneID,
-		TemperatureUnit:            user.TemperatureUnit,
-		ClockFormat:                user.ClockFormat,
-		DateFormat:                 user.DateFormat,
-		SuppressKeyAdoptionPrompts: user.SuppressKeyAdoptionPrompts,
-		RequireSshKey:              user.RequireSshKey,
-		HasPassword:                len(user.PasswordHash) > 0,
-		ChatMessageCount:           chatCount,
-		TopicCount:                 topicCount,
-		PostCount:                  postCount,
-		ProfilePictureUpdatedAt:    user.ProfilePictureUpdatedAt.Time,
-	}
-	if user.RealName != nil {
-		snap.RealName = *user.RealName
-	}
-	if user.Location != nil {
-		snap.Location = *user.Location
-	}
-	if user.Bio != nil {
-		snap.Bio = *user.Bio
-	}
-	return snap, nil
+	return s.assembleSnapshot(ctx, user)
 }
 
 // GetByID is the by-id variant of GetByHandle, used when the caller already
@@ -154,18 +114,44 @@ func (s *ProfileService) GetByID(ctx context.Context, userID int64) (*ProfileSna
 		}
 		return nil, fmt.Errorf("profile: get user: %w", err)
 	}
-	chatCount, err := s.Queries.ChatMessageCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: chat count: %w", err)
+	return s.assembleSnapshot(ctx, user)
+}
+
+// assembleSnapshot runs the three per-user COUNT queries concurrently and
+// folds them into a ProfileSnapshot. Sequential round-trips here would be
+// 3× the latency floor for every /finger lookup; on a chat with many idle
+// users refreshing presence, that floor turns into the bottleneck.
+func (s *ProfileService) assembleSnapshot(ctx context.Context, user gen.User) (*ProfileSnapshot, error) {
+	var chatCount, topicCount, postCount int64
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		n, err := s.Queries.ChatMessageCountForUser(gctx, user.ID)
+		if err != nil {
+			return fmt.Errorf("profile: chat count: %w", err)
+		}
+		chatCount = n
+		return nil
+	})
+	g.Go(func() error {
+		n, err := s.Queries.TopicCountForUser(gctx, user.ID)
+		if err != nil {
+			return fmt.Errorf("profile: topic count: %w", err)
+		}
+		topicCount = n
+		return nil
+	})
+	g.Go(func() error {
+		n, err := s.Queries.PostCountForUser(gctx, user.ID)
+		if err != nil {
+			return fmt.Errorf("profile: post count: %w", err)
+		}
+		postCount = n
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
-	topicCount, err := s.Queries.TopicCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: topic count: %w", err)
-	}
-	postCount, err := s.Queries.PostCountForUser(ctx, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("profile: post count: %w", err)
-	}
+
 	snap := &ProfileSnapshot{
 		UserID:                     user.ID,
 		Handle:                     user.Handle,

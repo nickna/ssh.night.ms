@@ -19,7 +19,7 @@
 
 .PARAMETER SysopHandle
     Handle that gets auto-promoted to sysop on startup if it already exists.
-    Defaults to "nick".
+    Defaults to "admin".
 
 .PARAMETER PostgresPort
     Host-side port for the Postgres container. Defaults to 55432.
@@ -78,7 +78,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$SysopHandle = 'nick',
+    [string]$SysopHandle = 'admin',
     [int]$PostgresPort = 55432,
     [int]$RedisPort = 56379,
     [int]$SshPort = 2222,

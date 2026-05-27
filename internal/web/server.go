@@ -130,6 +130,7 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(smallBodyLimit)
 	r.Use(h.attachIdentity)
 
 	// gorilla/csrf v1.7+ assumes HTTPS by default and enforces Origin / Referer
@@ -287,6 +288,25 @@ func portFromAddr(addr string) string {
 		}
 	}
 	return ""
+}
+
+// smallBodyLimit caps inbound request bodies at 1 MiB on mutating methods —
+// defense-in-depth against an attacker uploading multi-gigabyte POSTs to
+// exhaust memory. The profile-picture upload sets its own larger
+// (5 MiB) MaxBytesReader inside the handler and is skipped here; reaching
+// that handler still works because the second wrap would otherwise clip
+// the body before the multipart parse.
+func smallBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if r.URL.Path != "/profile/picture" {
+				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func indexFold(s, sep string) int {

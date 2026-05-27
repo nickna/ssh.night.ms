@@ -32,10 +32,28 @@ type WallDispatcher struct {
 	bus    Bus
 	logger *slog.Logger
 
-	mu   sync.RWMutex
-	subs map[int64]chan WallMessage
+	mu   sync.Mutex
+	subs map[int64]*wallSub
 	next int64
 }
+
+// wallSub bundles a subscriber's delivery channel with the running count of
+// consecutive dropped messages. A chronically slow consumer (network stall,
+// stuck render loop) is evicted after evictAfterDrops to free its goroutine
+// and force a fresh subscription on reconnect.
+type wallSub struct {
+	ch    chan WallMessage
+	drops int
+}
+
+// evictAfterDrops caps consecutive drops before we close out a subscriber.
+// 4 broadcasts in a row missed is well past "transient blip" territory.
+const evictAfterDrops = 4
+
+// wallSubBufferSize is the per-subscriber channel capacity. Sized to absorb
+// reasonable bursts (multiple sysop notices in quick succession) without
+// drops on healthy consumers.
+const wallSubBufferSize = 16
 
 // NewWallDispatcher builds the dispatcher. Run() starts the subscription
 // loop; cancel its ctx on shutdown.
@@ -43,7 +61,7 @@ func NewWallDispatcher(bus Bus, logger *slog.Logger) *WallDispatcher {
 	return &WallDispatcher{
 		bus:    bus,
 		logger: logger,
-		subs:   make(map[int64]chan WallMessage),
+		subs:   make(map[int64]*wallSub),
 	}
 }
 
@@ -99,45 +117,61 @@ func (d *WallDispatcher) consume(ctx context.Context) error {
 }
 
 func (d *WallDispatcher) subscriberCount() int {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return len(d.subs)
 }
 
 // fanout pushes the broadcast to every registered subscriber's channel. Uses
 // a non-blocking select so one stuck session can't gum up the rest — the
-// buffered channel absorbs the bursty case, and a stuck-on-full sub just
-// loses the broadcast rather than backpressuring the dispatch loop.
+// buffered channel absorbs the bursty case. A subscriber that drops
+// evictAfterDrops broadcasts in a row is unsubscribed and its channel closed,
+// which signals the per-session listener to tear down and reconnect on its
+// next interaction. We hold the write lock (not RLock) because we mutate
+// per-sub drop counters and may evict; the iteration is bounded and the
+// critical section is short, so contention is negligible.
 func (d *WallDispatcher) fanout(msg WallMessage) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for id, sub := range d.subs {
 		select {
-		case sub <- msg:
+		case sub.ch <- msg:
+			sub.drops = 0
 		default:
-			d.logger.Warn("wall: subscriber buffer full; dropped", "sub_id", id)
+			sub.drops++
+			d.logger.Warn("wall: subscriber buffer full; dropped",
+				"sub_id", id, "consecutive_drops", sub.drops)
+			if sub.drops >= evictAfterDrops {
+				d.logger.Warn("wall: evicting chronically slow subscriber",
+					"sub_id", id, "drops", sub.drops)
+				close(sub.ch)
+				delete(d.subs, id)
+			}
 		}
 	}
 }
 
 // Subscribe registers a per-session receiver. Returns the channel (read-only
 // from the caller's perspective) and an unregister func — call it from the
-// session's teardown to free the slot and let GC reclaim the channel.
+// session's teardown to free the slot and let GC reclaim the channel. The
+// channel may be closed by the dispatcher itself if this subscriber is
+// chronically slow; callers should already handle channel close as the
+// signal to stop listening.
 func (d *WallDispatcher) Subscribe() (<-chan WallMessage, func()) {
-	ch := make(chan WallMessage, 4)
+	sub := &wallSub{ch: make(chan WallMessage, wallSubBufferSize)}
 	d.mu.Lock()
 	d.next++
 	id := d.next
-	d.subs[id] = ch
+	d.subs[id] = sub
 	d.mu.Unlock()
 	cancel := func() {
 		d.mu.Lock()
-		if existing, ok := d.subs[id]; ok && existing == ch {
+		if existing, ok := d.subs[id]; ok && existing == sub {
 			delete(d.subs, id)
 		}
 		d.mu.Unlock()
 	}
-	return ch, cancel
+	return sub.ch, cancel
 }
 
 // Publish posts a wall message to Redis. The dispatcher's own Run loop will

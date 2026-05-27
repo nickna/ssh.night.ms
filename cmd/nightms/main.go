@@ -326,6 +326,9 @@ func mustOpenPool(ctx context.Context, opts config.Options, logger *slog.Logger)
 		logger.Error("pgxpool parse", "err", err)
 		os.Exit(1)
 	}
+	if opts.DBMaxConns > 0 {
+		poolCfg.MaxConns = opts.DBMaxConns
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		logger.Error("pgxpool connect", "err", err)

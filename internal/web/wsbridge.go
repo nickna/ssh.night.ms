@@ -133,6 +133,30 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 	bridgeCtx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Heartbeat. coder/websocket's Read blocks indefinitely until a frame
+	// arrives, with no built-in idle timeout — a client that opens the bridge
+	// and then stalls would pin one goroutine + one TCP socket forever. The
+	// ping path detects a dead/wedged peer within (interval + timeout) and
+	// closes the conn, which unblocks every Read goroutine via err return.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-bridgeCtx.Done():
+				return
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(bridgeCtx, 10*time.Second)
+				err := conn.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					_ = conn.Close(websocket.StatusPolicyViolation, "ping timeout")
+					return
+				}
+			}
+		}
+	}()
+
 	// Global session cap mirrors the SSH path — settings.MaxTotalSessions
 	// covers both surfaces so a sysop tightening it during an incident closes
 	// new logins everywhere at once.
