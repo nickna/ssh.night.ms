@@ -1,10 +1,10 @@
 package chat
 
 // HandleColor maps a handle to a stable hex color drawn from a curated palette
-// tuned for legibility on the BBS dark background. Mirrors the .NET
-// HandleColorizer: lowercased FNV-1a-32 over the bytes, modulo the palette
-// size. The 16-entry palette is small on purpose — past ~16 colors the eye
-// stops mapping color → identity and the readability win evaporates.
+// tuned for legibility on the BBS dark background. Lowercased FNV-1a-32 over
+// the bytes, modulo the palette size. The 16-entry palette is small on
+// purpose — past ~16 colors the eye stops mapping color → identity and the
+// readability win evaporates.
 func HandleColor(handle string) string {
 	if handle == "" {
 		return ""
@@ -40,7 +40,7 @@ func fnv1a(s string) uint32 {
 	h := offsetBasis
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		// Lowercase ASCII so "Alice" and "alice" share a color, matching .NET.
+		// Lowercase ASCII so "Alice" and "alice" share a color.
 		if c >= 'A' && c <= 'Z' {
 			c += 32
 		}

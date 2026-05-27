@@ -17,9 +17,8 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Spin animation cadence — matches the .NET SlotsScreen timing so the
-// "click click click" sequential reel-lock feels the same across both
-// implementations. 60ms × 33 frames ≈ 2.0 s total spin.
+// Spin animation cadence — the "click click click" sequential reel-lock
+// runs at 60ms × 33 frames ≈ 2.0 s total spin.
 const (
 	slotsSpinFrameMs   = 60
 	slotsReel1Lock     = 18
@@ -210,7 +209,7 @@ func (m *Slots) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cabScroll[i]++
 			}
 		}
-		// Sequential reel locks. Frame numbers match the .NET cadence.
+		// Sequential reel locks.
 		switch m.spinFrame {
 		case slotsReel1Lock:
 			m.lockReel(0)

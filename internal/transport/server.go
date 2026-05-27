@@ -401,7 +401,7 @@ func dispatchAuth(
 		// the status-bar clock + every other render-time formatter can
 		// stay synchronous. A load failure leaves the zero value, which
 		// renders as UTC + ISO + 24-hour — same as a brand-new row.
-		// The same row carries the .NET-era location_* fallback that
+		// The same row carries the legacy location_* fallback that
 		// WeatherCoords() consults when the user has no saved location.
 		if sdeps.Core.Queries != nil {
 			loadCtx, cancel := context.WithTimeout(sshCtx, 2*time.Second)
@@ -415,7 +415,7 @@ func dispatchAuth(
 		}
 		// One-shot backfill: when the user has nothing in
 		// user_saved_locations but the legacy users.location_* columns
-		// are populated (carry-over from the .NET stack), seed a single
+		// are populated (carry-over from an earlier deploy), seed a single
 		// row so the Profile screen's saved-locations list and
 		// WeatherCoords() converge on the same source of truth. After
 		// this point the read-through fallback in WeatherCoords() is a

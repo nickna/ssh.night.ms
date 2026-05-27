@@ -45,7 +45,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Startup ordering is load-bearing and mirrors the .NET DatabaseInitializer:
+// Startup ordering is load-bearing:
 //
 //  1. Migrations  — must finish before any pool reads
 //  2. Pool        — single *pgxpool.Pool

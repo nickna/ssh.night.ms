@@ -21,9 +21,7 @@ type LoginBanner struct {
 }
 
 // DefaultBanner is the in-code fallback shown when NIGHTMS_LOGIN_ART_PATH
-// is unset or fails to load. Matches the .NET ArtProvider.DefaultArt verbatim
-// so both stacks land on the same monochrome frame when nothing else is
-// configured.
+// is unset or fails to load.
 const DefaultBanner = ` ╓──────────────────────────────────────────────────╖
  ║                                                  ║
  ║   ssh.night.ms   ▒▓█  a small bbs over ssh  █▓▒  ║

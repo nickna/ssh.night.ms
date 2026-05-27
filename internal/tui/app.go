@@ -20,15 +20,14 @@ import (
 )
 
 // wallTTL is how long a wall banner stays pinned over the active screen
-// before fading. 10s matches the .NET MessageBox prompt — long enough to
-// read a 500-char broadcast at a glance, short enough not to occupy the
-// header forever.
+// before fading. 10s — long enough to read a 500-char broadcast at a glance,
+// short enough not to occupy the header forever.
 const wallTTL = 10 * time.Second
 
 // statusBarTempRefresh is how often the status-bar weather widget pulls a
 // fresh forecast. The Open-Meteo upstream is cheap but a per-render fetch
-// would still be wrong; 30 min matches what the .NET stack's status-bar
-// widget did and is plenty given the surface (a single rounded temp).
+// would still be wrong; 30 min is plenty given the surface (a single
+// rounded temp).
 const statusBarTempRefresh = 30 * time.Minute
 
 // Root is the per-SSH-session tea.Model. Holds the Session and the currently
@@ -254,8 +253,7 @@ func (m *Root) renderStatusBar(width int) string {
 	right := "night.ms · "
 	if m.statusTempOK {
 		// Glyph + compact temp (user's preferred unit, no °C/°F suffix —
-		// the glyph is the contextual cue). Mirrors the .NET status-bar
-		// weather widget.
+		// the glyph is the contextual cue).
 		right += weather.CodeGlyph(m.statusCode) + " " + m.sess.DisplayPrefs.FormatTemperatureCompact(m.statusTemp) + " · "
 	}
 	right += m.sess.DisplayPrefs.FormatClock(time.Now()) + " "

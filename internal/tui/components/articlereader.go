@@ -141,8 +141,8 @@ func (a *ArticleReader) View(width, height int, title string) string {
 		return b.String()
 	}
 
-	// Articles read better narrower; cap at ~90 cells like the .NET
-	// RichArticleView does. Subtract 4 from the host width for padding.
+	// Articles read better narrower; cap at ~90 cells. Subtract 4 from the
+	// host width for padding.
 	maxLineW := width - 4
 	if maxLineW < 40 {
 		maxLineW = 40

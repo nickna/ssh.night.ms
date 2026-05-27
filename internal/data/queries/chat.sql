@@ -138,10 +138,9 @@ GROUP BY mr.message_id, mr.emoji
 ORDER BY mr.message_id, mr.emoji;
 
 -- name: SeedLobbyChannel :exec
--- Idempotent seed of the default public channel — used by DatabaseInitializer
--- on every startup. The .NET DatabaseInitializer creates this row too; the
--- ON CONFLICT clause is a guard for cutover scenarios where both stacks may
--- have touched the DB at different times.
+-- Idempotent seed of the default public channel — used by the startup
+-- initializer on every boot. The ON CONFLICT clause is a guard for cutover
+-- scenarios where multiple stacks may have touched the DB at different times.
 INSERT INTO channels (name, topic, is_private, created_at)
 VALUES ('lobby', 'general chat', FALSE, $1)
 ON CONFLICT DO NOTHING;

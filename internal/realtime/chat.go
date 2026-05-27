@@ -16,9 +16,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 )
 
-// ChatService owns chat reads/writes and the bus integration. Mirrors the
-// .NET ChatService + ChatMutationService — split there for DI lifetimes; we
-// collapse them here since Go has no scope concept and one type is simpler.
+// ChatService owns chat reads/writes and the bus integration.
 type ChatService struct {
 	Queries *gen.Queries
 	Bus     Bus
@@ -42,8 +40,7 @@ type Message struct {
 }
 
 // ResolvePublicChannel returns an existing channel by name or creates it if
-// missing. Mirrors the .NET pattern where public channels are auto-created
-// on first join (BBS-style).
+// missing. Public channels are auto-created on first join (BBS-style).
 func (s *ChatService) ResolvePublicChannel(ctx context.Context, name string, createdByID int64) (gen.Channel, error) {
 	ch, err := s.Queries.GetChannelByName(ctx, name)
 	if err == nil {
@@ -594,10 +591,9 @@ func (s *ChatService) DeleteMessage(ctx context.Context, messageID int64, actor 
 	return s.Bus.Publish(ctx, T.ChatChannel(msg.ChannelID), payload)
 }
 
-// SetPinned flips the is_pinned flag and publishes ChatEventPinChanged. The
-// .NET version lets any participant pin/unpin in public channels; we mirror
-// that — adding role-aware authz is a follow-up. Idempotent: setting the
-// same state is a no-op return-nil.
+// SetPinned flips the is_pinned flag and publishes ChatEventPinChanged. Any
+// participant can pin/unpin in public channels — role-aware authz is a
+// follow-up. Idempotent: setting the same state is a no-op return-nil.
 func (s *ChatService) SetPinned(ctx context.Context, messageID int64, pin bool, actor Author) error {
 	msg, err := s.Queries.GetChatMessageByID(ctx, messageID)
 	if err != nil {
@@ -766,9 +762,8 @@ func (s *ChatService) Search(ctx context.Context, channelID int64, term string, 
 		}
 		return out, nil
 	}
-	// Fallback: tsquery dropped the term — try ILIKE with the same escape
-	// convention .NET uses. `|` as the escape char so a literal % / _ in the
-	// term doesn't expand into a wildcard.
+	// Fallback: tsquery dropped the term — try ILIKE. `|` as the escape char
+	// so a literal % / _ in the term doesn't expand into a wildcard.
 	pattern := ilikeEscape(trimmed)
 	rows, err := s.Queries.SearchChatMessagesILike(ctx, gen.SearchChatMessagesILikeParams{
 		ChannelID: channelID,

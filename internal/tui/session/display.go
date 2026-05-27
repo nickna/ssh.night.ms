@@ -12,10 +12,8 @@ import (
 // the four fields that drive time / date / temperature rendering: IANA
 // time zone, clock format (0 = 24-hour, 1 = 12-hour), date format
 // (0 = ISO, 1 = US slash, 2 = EU slash), and temperature unit
-// (0 = Celsius, 1 = Fahrenheit, 2 = Both). Mirrors UserDisplayExtensions
-// in the .NET stack — same pattern (extension-method-style formatters
-// keyed on the user) but expressed as receiver methods on this type so
-// screens can pass the value around without holding the full users row.
+// (0 = Celsius, 1 = Fahrenheit, 2 = Both). Expressed as receiver methods
+// so screens can pass the value around without holding the full users row.
 //
 // The zero value is safe: UTC + ISO + 24-hour + Celsius. That's what
 // brand-new accounts get from the DB defaults too, so a missing cache
@@ -56,7 +54,7 @@ func DisplayPrefsFromUser(u gen.User) DisplayPrefs {
 	}
 }
 
-// ProfileLocationFromUser pulls the legacy .NET location_* columns off a
+// ProfileLocationFromUser pulls the legacy location_* columns off a
 // users row into a *ProfileLocation. Returns nil when lat/lon are NULL —
 // callers should treat that as "no profile city set" and fall through to
 // the next fallback. Label preference: users.location (typed city name) →
@@ -129,8 +127,7 @@ func (d DisplayPrefs) FormatClock(t time.Time) string {
 
 // FormatClockWithSeconds is FormatClock plus seconds — for the freshness
 // indicators on Weather + Finance where the user wants to see "data is
-// N seconds old," not just "fetched this minute." Matches the .NET
-// UserDisplayExtensions.FormatClockWithSeconds helper.
+// N seconds old," not just "fetched this minute."
 func (d DisplayPrefs) FormatClockWithSeconds(t time.Time) string {
 	local := t.In(d.resolveLocation())
 	if d.ClockFormat == 1 {
@@ -140,8 +137,7 @@ func (d DisplayPrefs) FormatClockWithSeconds(t time.Time) string {
 }
 
 // FormatDateTime renders a combined date + clock value, both in the
-// user's preferred format and time zone. The space separator matches the
-// .NET FormatDateTime output for cross-stack screen consistency.
+// user's preferred format and time zone.
 func (d DisplayPrefs) FormatDateTime(t time.Time) string {
 	return d.FormatDate(t) + " " + d.FormatClock(t)
 }
@@ -159,8 +155,7 @@ func (d DisplayPrefs) FormatDayClock(t time.Time) string {
 // FormatTemperature renders a celsius value in the user's preferred
 // unit. Used by the prominent "now" + feels-like lines on the Weather
 // screen where the unit label is unambiguous. Both mode shows both
-// values separated by a slash — matches .NET UserDisplayExtensions.
-// FormatTemperature.
+// values separated by a slash.
 func (d DisplayPrefs) FormatTemperature(celsius float64) string {
 	switch d.TemperatureUnit {
 	case TempUnitFahrenheit:
@@ -192,7 +187,7 @@ func celsiusToFahrenheit(c float64) float64 { return c*9.0/5.0 + 32.0 }
 // Sub-zero values get the negative sign from %.0f naturally.
 func formatTempValue(v float64) string {
 	// Use %.0f so 22.3 → "22", -3.7 → "-4". Note Go's %.0f rounds half
-	// away from zero, matching the .NET F0 specifier behavior.
+	// away from zero.
 	return fmt.Sprintf("%.0f", v)
 }
 

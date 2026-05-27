@@ -118,8 +118,8 @@ func TestEvaluateOutsideBets(t *testing.T) {
 }
 
 // TestZerosLoseAllOutside asserts the house-edge invariant: when 0 or 00
-// comes up, every outside wager loses, even Even (the .NET stack had a
-// subtle bug here once where 0 satisfied "even"; the test guards regress).
+// comes up, every outside wager loses, even Even (a subtle bug once let 0
+// satisfy "even"; the test guards against regressing).
 func TestZerosLoseAllOutside(t *testing.T) {
 	zeros := []Pocket{0, Pocket00}
 	outsideTypes := []BetType{

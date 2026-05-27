@@ -72,8 +72,7 @@ type RegisterDeps struct {
 }
 
 // CreateAccount inserts a users row + optional identity_credentials row in one
-// transaction, mirroring src/Night.Ms.SshServer/Tui/Screens/RegisterScreen.cs
-// CreateUserAsync. Returns the resulting Known principal — screens hand that
+// transaction. Returns the resulting Known principal — screens hand that
 // straight to session.Session.Identity and pick up where SignupRequired left
 // off.
 func CreateAccount(ctx context.Context, deps RegisterDeps, in RegisterInput) (Known, error) {
@@ -174,8 +173,8 @@ func CreateAccount(ctx context.Context, deps RegisterDeps, in RegisterInput) (Kn
 	}, nil
 }
 
-// isValidHandle mirrors RegisterScreen.IsValidHandle from the .NET project:
-// 3-32 chars of ASCII letters, digits, underscore, or dash.
+// isValidHandle accepts 3-32 chars of ASCII letters, digits, underscore, or
+// dash.
 func isValidHandle(handle string) bool {
 	if len(handle) < 3 || len(handle) > 32 {
 		return false

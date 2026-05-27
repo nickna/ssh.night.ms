@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`ssh.night.ms` is a Go BBS, originally ported from the .NET `Night.Ms.SshServer` (the predecessor lives in this repo's pre-cutover git history). The Go and .NET stacks target the **same Postgres schema** — `internal/data/initializer.go` detects a `.NET`-bootstrapped schema and force-marks golang-migrate at version 1 to adopt it in place, which is how the cutover preserved the prod data volume. When changing migrations, keep this cross-stack compatibility in mind in case rollback is needed (`deploy/CUTOVER.md` is the runbook).
-
-The single `nightms` binary serves both:
+`ssh.night.ms` is a Go BBS. The single `nightms` binary serves both:
 - An SSH listener (charmbracelet/wish + bubbletea) that drops authenticated users into a TUI lobby.
 - An HTTP listener (chi) for landing/login/profile pages plus a WebSocket bridge (`/ws/bbs`) that runs the **same** bubbletea root model in-browser.
 
@@ -50,14 +48,14 @@ sqlc generate
 
 Helper binaries under `cmd/`:
 - `seeduser -handle X -password Y [-sysop]` — insert a dev user. `run.ps1` shows the exact invocation on startup.
-- `loadtest seed|run|clean` — synthetic SSH load harness. Phase-7 gate is "200 sessions × 10 min × 0 failures" (see `deploy/CUTOVER.md`).
+- `loadtest seed|run|clean` — synthetic SSH load harness.
 - `smoketest -host h:p -user X -password Y -expect "..."` — one-shot SSH client that asserts a sentinel string in the rendered output. Useful for non-interactive screen checks.
 - `wsprobe` — exercises the `/ws/bbs` WebSocket bridge.
 - `ansiconvert` — tooling for the `data/art/*.ans` files.
 
 ## Architecture
 
-`cmd/nightms/main.go` is the composition root — there is no DI container. `main()` reads as a table of contents; each numbered phase is its own function. The startup order is load-bearing and matches the .NET app's:
+`cmd/nightms/main.go` is the composition root — there is no DI container. `main()` reads as a table of contents; each numbered phase is its own function. The startup order is load-bearing:
 
 1. `mustMigrate` — `data.RunMigrations` synchronously
 2. `mustOpenPool` — `*pgxpool.Pool` + `gen.Queries`
@@ -73,7 +71,7 @@ Don't reorder without checking that downstream invariants still hold (sysop boot
 
 ### Layered packages
 
-- `internal/config` — env-var binding (`NIGHTMS_*` and `BBS_*`). The same env vars work for both Go and .NET stacks, by design. Notable Go-only knobs: `NIGHTMS_LOG_LEVEL` (`debug|info|warn|error`, default `info`) and `NIGHTMS_DEBUG_ADDR` (optional `host:port` to mount `/debug/pprof` + `/debug/vars` — bind to localhost only).
+- `internal/config` — env-var binding (`NIGHTMS_*` and `BBS_*`). Notable knobs: `NIGHTMS_LOG_LEVEL` (`debug|info|warn|error`, default `info`) and `NIGHTMS_DEBUG_ADDR` (optional `host:port` to mount `/debug/pprof` + `/debug/vars` — bind to localhost only).
 - `internal/data` — migrations (`migrations/*.sql` embedded via `go:embed`), seed, and the sqlc-generated `gen` package. Use `Queries` for typed access; reach for `pgxpool.Pool` directly only when sqlc can't express the query.
 - `internal/auth` — argon2id hashing, lookup pipeline, Redis-backed rate limiter, OAuth (Google + Microsoft), sysop bootstrap. `Decision` is a closed union (`Known | SignupRequired | Banned | RateLimited | Refused`) — consumers type-switch on it rather than reading a Kind field. The rate limiter applies exponential backoff per-IP **and** per-handle (each lockout doubles the duration up to `NIGHTMS_LOCKOUT_BACKOFF_MAX`); after `NIGHTMS_PERSISTENT_BAN_THRESHOLD` IP lockouts in the sliding window, the IP is auto-promoted to a row in `security_ip_bans` via the `BanCache` (in-process map refreshed every 30s, push-invalidated over the Redis `security:ban-invalidate` channel).
 - `internal/security/netlimit` — connection-level DoS controls applied to the SSH listener by wrapping `net.Listener`: per-IP concurrent connection cap, per-IP new-connection token bucket (`golang.org/x/time/rate`), and a process-wide cap on in-flight unauthenticated handshakes (the in-process MaxStartups). All per-IP keys collapse IPv6 to /64 so a /64-holding attacker can't trivially evade the limiter. The `DeadlineConn` wrapper implements `LoginGraceTime` — the handshake deadline is cleared by the auth callback on a successful Known / SignupRequired decision.
@@ -93,15 +91,15 @@ Don't reorder without checking that downstream invariants still hold (sysop boot
 - `internal/imaging` — image fetch + half-block / quarter-block rendering. `imaging.Fetcher` is the raw HTTP+decode primitive; `imaging/asyncfetch.Pool` adds bounded concurrency + per-fetch timeout and is shared across all screens that paint inline images (chat) via `session.Core.Images`.
 - `internal/reader` — readability extraction. Used by the News screen to inline an HN story's article text when the user opens one.
 
-### Cross-stack rules to remember
+### Operational notes
 
-- Schema changes must keep the .NET stack readable (or be coordinated with a .NET-side migration). The Go side uses `schema_migrations` (golang-migrate); the .NET side uses `__EFMigrationsHistory`. Both tables coexist.
-- Connection-string format on the Go side is the URL form (`postgres://user:pw@host:port/db?sslmode=...`), **not** the libpq `Host=...;` form used by the .NET stack's env var.
-- `cookies`, host keys, profile pictures, and the local art gallery live under `/data` (or `data/` in dev). Re-using the .NET stack's volume preserves clients' `known_hosts` entries after cutover.
+- Connection string is the libpq URL form (`postgres://user:pw@host:port/db?sslmode=...`). Migrations run via golang-migrate against the `schema_migrations` table.
+- `cookies`, host keys, profile pictures, and the local art gallery live under `/data` (or `data/` in dev).
+- `internal/data/initializer.go` adopts a pre-existing schema (detected by populated tables but no `schema_migrations` row) by force-marking golang-migrate at version 1. Useful when standing up against a database an earlier build already populated.
 
 ## Deployment
 
-`Dockerfile` produces a ~750 MB `debian:bookworm-slim`-based image — the Carbonyl rich-mode bundle alone adds ~400 MB of stripped Chromium .so files. Before the rich-mode feature this was a ~5 MB scratch image; the size jump is the unavoidable cost of bundling a browser. `deploy/compose.yml` is the prod stack (app + Postgres + Redis on a private network). Host `:22 → :2222` and `:80 → :5080`; TLS terminates at Cloudflare (Flexible mode), so `NIGHTMS_WEB_SECURE_COOKIES=0` behind that proxy. The compose project name is `nightms`, matching the volume names inherited from the .NET stack so cutover was a drop-in replacement (see `deploy/CUTOVER.md`).
+`Dockerfile` produces a ~750 MB `debian:bookworm-slim`-based image — the Carbonyl rich-mode bundle alone adds ~400 MB of stripped Chromium .so files. Without rich-mode it would be a ~5 MB scratch image; the size jump is the unavoidable cost of bundling a browser. `deploy/compose.yml` is the prod stack (app + Postgres + Redis on a private network). Host `:22 → :2222` and `:80 → :5080`; TLS terminates at Cloudflare (Flexible mode), so `NIGHTMS_WEB_SECURE_COOKIES=0` behind that proxy. The compose project name is `nightms`.
 
 **Bundle prerequisite for `docker build`:** the Carbonyl runtime ships via Git LFS under `bundle/carbonyl-linux-x86_64.tar.xz` (~103 MB compressed, ~560 MB extracted). Clone with `git lfs install` then `git lfs pull` before building — CI must do the same. To regenerate after a Carbonyl source rebuild, run `scripts/package-carbonyl.sh [path-to-chromium/src/out/Release]`. Bundle layout + provenance: `bundle/README.md`.
 

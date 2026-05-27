@@ -109,10 +109,10 @@ type LeaderboardTopSingleWinsRow struct {
 	Handle   string
 }
 
-// Biggest single-hand net wins across all door games. The .NET stack relies
-// on a partial-index-like access pattern (game_rounds.net > 0 sorted desc);
-// without it, this scan would also dredge up the biggest losses at the
-// bottom of the same index, which we don't want here.
+// Biggest single-hand net wins across all door games. Relies on a partial-
+// index-like access pattern (game_rounds.net > 0 sorted desc); without it,
+// this scan would also dredge up the biggest losses at the bottom of the
+// same index, which we don't want here.
 //
 // Pre-cutover holdem-mp rows used to record one row per buy-in/cashout
 // session (entire window as a single Bet/Payout pair) — the per-hand

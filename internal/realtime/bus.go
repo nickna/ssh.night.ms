@@ -1,7 +1,5 @@
 // Package realtime is the Redis-backed pub/sub fabric for chat (and later:
-// presence, read state, wall broadcasts). Mirrors src/Night.Ms.SshServer/
-// Realtime/ from the .NET project — IRealtimeBus + RedisRealtimeBus +
-// ChatService + ChatMutationService.
+// presence, read state, wall broadcasts).
 package realtime
 
 import (
@@ -24,8 +22,8 @@ type Bus interface {
 //
 // Subscription model: one goroutine per topic per subscriber. Redis pub/sub
 // is fanout-by-default, so we don't need a process-wide subscriber; the per-
-// session subscription pattern matches what the .NET RedisRealtimeBus does
-// and keeps lifetimes tied to the SSH session ctx for clean teardown.
+// session subscription pattern keeps lifetimes tied to the SSH session ctx
+// for clean teardown.
 type RedisBus struct {
 	client *redis.Client
 	logger *slog.Logger

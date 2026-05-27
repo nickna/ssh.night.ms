@@ -16,14 +16,13 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/settings"
 )
 
-// RateLimitParams matches the .NET PasswordHashingOptions / lockout env keys
-// (NIGHTMS_LOCKOUT_*) plus the exponential-backoff + persistent-ban additions
-// from the Phase B hardening pass. Defaults: 5 per-handle fails / 20 per-IP
-// fails inside a 15-minute window trigger a 15-minute lockout. Each
-// successive lockout within 24h doubles the lock duration up to BackoffMax.
-// After PersistentBanThreshold lockouts within 24h the IP becomes eligible
-// for a sysop-visible persistent ban (handled by the OnPersistentBanEligible
-// callback wired in main).
+// RateLimitParams carries the lockout knobs (NIGHTMS_LOCKOUT_*) plus the
+// exponential-backoff + persistent-ban additions from the Phase B hardening
+// pass. Defaults: 5 per-handle fails / 20 per-IP fails inside a 15-minute
+// window trigger a 15-minute lockout. Each successive lockout within 24h
+// doubles the lock duration up to BackoffMax. After PersistentBanThreshold
+// lockouts within 24h the IP becomes eligible for a sysop-visible persistent
+// ban (handled by the OnPersistentBanEligible callback wired in main).
 type RateLimitParams struct {
 	HandleThreshold int
 	IPThreshold     int
@@ -47,9 +46,9 @@ type RateLimitParams struct {
 	LockcountWindow time.Duration
 }
 
-// DefaultRateLimitParams returns the same numbers the .NET stack defaults to,
-// so two stacks pointed at the same Redis would lock the same accounts at
-// the same thresholds during cutover. Adds the Phase B defaults.
+// DefaultRateLimitParams returns the same numbers the legacy stack defaults
+// to, so two stacks pointed at the same Redis would lock the same accounts
+// at the same thresholds during cutover. Adds the Phase B defaults.
 func DefaultRateLimitParams() RateLimitParams {
 	return RateLimitParams{
 		HandleThreshold:        5,
@@ -188,7 +187,7 @@ func (r *RedisRateLimiter) lockTTL(ctx context.Context, key string) (time.Durati
 
 // RecordFailure bumps the failure counters and may flip a lock on. The
 // counters' TTLs are reset to the window each time we INCR so the window is
-// effectively sliding (which matches the .NET behavior).
+// effectively sliding.
 //
 // Phase B: when a threshold trips, the lock duration is computed by INCRing
 // a sliding-TTL lockcount counter and applying the exponential backoff

@@ -348,11 +348,11 @@ func (c *Coordinator) snapshotFor(viewerUserID int64) TableSnapshot {
 // (CPUs included; the ledger filters them at write time so log lines stay
 // useful for debugging table activity).
 //
-// Details JSON intentionally matches the .NET shape — board as compact
-// "As/Td/5c" strings, payouts as {SeatIndex, Amount, Reason} — so a hand-
-// replay tool that decodes either stack's audit trail sees identical
-// fields. Reason is always "showdown" or "fold-walkover" on the Go side
-// (the engine doesn't track .NET's per-pot reason strings).
+// Details JSON shape — board as compact "As/Td/5c" strings, payouts as
+// {SeatIndex, Amount, Reason} — matches the legacy stack's audit trail so a
+// hand-replay tool sees identical fields. Reason is always "showdown" or
+// "fold-walkover" on the Go side (the engine doesn't track per-pot reason
+// strings).
 func (c *Coordinator) buildSettlement() Settlement {
 	seats := c.game.Seats()
 	payouts := c.game.Payouts()
@@ -417,7 +417,7 @@ func (c *Coordinator) buildSettlement() Settlement {
 	}
 }
 
-// encodeCardWire renders a card as the .NET wire format ("As", "Td", "5c")
+// encodeCardWire renders a card as the legacy wire format ("As", "Td", "5c")
 // so hand-history JSON is decodable by tooling written against either
 // stack. Suits are lower-case so the glyph stays one column.
 func encodeCardWire(c cards.Card) string {

@@ -4,7 +4,7 @@
 // SlotsCabinetState and re-passes it each frame; the renderer holds
 // no state across calls.
 //
-// Layout (38 cols × 13 rows, matching the .NET SlotsCabinetView):
+// Layout (38 cols × 13 rows):
 //
 //	row  0  ╔══...══╗                          outer border
 //	row  1  ║   ★ NIGHT.MS SLOTS ★    ║        marquee
@@ -28,8 +28,7 @@ import (
 )
 
 // SlotsCabinetWidth and SlotsCabinetHeight are the cabinet's exact cell
-// dimensions. Callers reserve this space in their layout (or pad around
-// it). Constants match SlotsCabinetView in the .NET project.
+// dimensions. Callers reserve this space in their layout (or pad around it).
 const (
 	SlotsCabinetWidth  = 38
 	SlotsCabinetHeight = 13

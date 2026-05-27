@@ -191,9 +191,9 @@ func (g *Game) StepBot() bool {
 	return g.afterAction()
 }
 
-// applyAction mutates state for one player's choice. The .NET stack's full
-// raise sizing isn't implemented — v1 raises by exactly one big blind to
-// keep the play simple and predictable for the CPU.
+// applyAction mutates state for one player's choice. Full raise sizing isn't
+// implemented — v1 raises by exactly one big blind to keep the play simple
+// and predictable for the CPU.
 func (g *Game) applyAction(seat int, a Action) {
 	toCall := g.bets[1-seat] - g.bets[seat]
 	switch a {

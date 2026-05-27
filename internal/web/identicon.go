@@ -11,9 +11,9 @@ import (
 )
 
 // GenerateIdenticon returns a PNG of a deterministic geometric avatar for
-// `handle`. Mirrors the .NET IdenticonRenderer shape: 5x5 cells mirrored to
-// 10 cols wide on a square canvas, with the foreground color seeded from the
-// hash so two handles never share an identicon by accident.
+// `handle`. 5x5 cells mirrored to 10 cols wide on a square canvas, with the
+// foreground color seeded from the hash so two handles never share an
+// identicon by accident.
 //
 // `size` is the total canvas pixel size; each cell becomes size/10 px. Sub-10
 // sizes round to a 10px minimum so cells still render as single pixels.

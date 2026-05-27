@@ -59,8 +59,7 @@ type GetCredentialByProviderSubjectParams struct {
 	Subject  string
 }
 
-// Provider is stored as the enum name string ("Ssh", "Google", "Microsoft") — see the
-// .NET side's HasConversion<string>() on IdentityCredential.Provider. We use the same form.
+// Provider is stored as the enum name string ("Ssh", "Google", "Microsoft").
 func (q *Queries) GetCredentialByProviderSubject(ctx context.Context, arg GetCredentialByProviderSubjectParams) (IdentityCredential, error) {
 	row := q.db.QueryRow(ctx, getCredentialByProviderSubject, arg.Provider, arg.Subject)
 	var i IdentityCredential
@@ -93,8 +92,8 @@ type InsertOAuthCredentialParams struct {
 }
 
 // Inserts an OAuth credential. Generic — provider is "Google", "Microsoft",
-// etc. (matches the .NET enum string form). subject is the provider's stable
-// per-user identifier (sub claim for Google, oid for Microsoft).
+// etc. subject is the provider's stable per-user identifier (sub claim for
+// Google, oid for Microsoft).
 func (q *Queries) InsertOAuthCredential(ctx context.Context, arg InsertOAuthCredentialParams) (IdentityCredential, error) {
 	row := q.db.QueryRow(ctx, insertOAuthCredential,
 		arg.UserID,
@@ -200,8 +199,8 @@ WHERE user_id = $1 AND provider = 'Ssh'
 ORDER BY created_at
 `
 
-// Provider is "Ssh" (the .NET CredentialProvider enum name); newest last so
-// the profile UI can show "added <date>" in a sensible order.
+// Provider is "Ssh"; newest last so the profile UI can show "added <date>"
+// in a sensible order.
 func (q *Queries) ListSshCredentialsForUser(ctx context.Context, userID int64) ([]IdentityCredential, error) {
 	rows, err := q.db.Query(ctx, listSshCredentialsForUser, userID)
 	if err != nil {

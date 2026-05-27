@@ -1,6 +1,5 @@
 -- name: GetCredentialByProviderSubject :one
--- Provider is stored as the enum name string ("Ssh", "Google", "Microsoft") — see the
--- .NET side's HasConversion<string>() on IdentityCredential.Provider. We use the same form.
+-- Provider is stored as the enum name string ("Ssh", "Google", "Microsoft").
 SELECT *
 FROM identity_credentials
 WHERE provider = $1
@@ -18,8 +17,8 @@ WHERE user_id = $1
 ORDER BY created_at;
 
 -- name: ListSshCredentialsForUser :many
--- Provider is "Ssh" (the .NET CredentialProvider enum name); newest last so
--- the profile UI can show "added <date>" in a sensible order.
+-- Provider is "Ssh"; newest last so the profile UI can show "added <date>"
+-- in a sensible order.
 SELECT id, user_id, provider, subject, metadata, label, created_at, last_used_at
 FROM identity_credentials
 WHERE user_id = $1 AND provider = 'Ssh'
@@ -35,8 +34,8 @@ RETURNING id, user_id, provider, subject, metadata, label, created_at, last_used
 
 -- name: InsertOAuthCredential :one
 -- Inserts an OAuth credential. Generic — provider is "Google", "Microsoft",
--- etc. (matches the .NET enum string form). subject is the provider's stable
--- per-user identifier (sub claim for Google, oid for Microsoft).
+-- etc. subject is the provider's stable per-user identifier (sub claim for
+-- Google, oid for Microsoft).
 INSERT INTO identity_credentials (user_id, provider, subject, metadata, label, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, user_id, provider, subject, metadata, label, created_at, last_used_at;

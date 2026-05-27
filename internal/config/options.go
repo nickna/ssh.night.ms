@@ -1,6 +1,5 @@
-// Package config carries the typed env-var binding for the server. Mirrors
-// NightMsOptions / PasswordHashingOptions from the .NET project, but inlined —
-// Go has no DI container, so it's just a struct constructed in main.
+// Package config carries the typed env-var binding for the server. Go has no
+// DI container, so it's just a struct constructed in main.
 package config
 
 import (
@@ -141,7 +140,7 @@ type SSHSecurityOptions struct {
 }
 
 // Load reads environment variables and falls back to sensible defaults that
-// match the .NET stack's defaults (so the same .env file works for both).
+// match the legacy stack's defaults (so the same .env file works for both).
 func Load() Options {
 	o := Options{
 		SSHAddr:     net.JoinHostPort("0.0.0.0", envOr("BBS_SSH_PORT", "2222")),
@@ -230,7 +229,7 @@ func parseLogLevel(s string) slog.Level {
 }
 
 // loadWebPublicHost parses NIGHTMS_WEB_BASE_URL into a bare host. Accepts
-// either shape — "night.ms" or "https://night.ms" — so the value the .NET
+// either shape — "night.ms" or "https://night.ms" — so the value the legacy
 // stack carried in this env var keeps working after cutover. Returns the
 // bare host (with port when one is present); callers prefix the scheme.
 func loadWebPublicHost(s string) string {

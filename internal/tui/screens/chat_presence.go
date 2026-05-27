@@ -38,9 +38,8 @@ func (m *Chat) scheduleOnlineRoster() tea.Cmd {
 	return tea.Tick(onlineRefreshInterval, func(time.Time) tea.Msg { return onlineTickMsg{} })
 }
 
-// refreshOnlineRoster fetches the global online-handles list. .NET tracks
-// per-channel presence via a Redis ZSET; the Go PresenceService is
-// process-global today, so we surface the same list for every channel and
+// refreshOnlineRoster fetches the global online-handles list. PresenceService
+// is process-global today, so we surface the same list for every channel and
 // let the right-rail label reflect global online count. If/when a per-channel
 // presence path lands, this is the only call site that needs swapping.
 func (m *Chat) refreshOnlineRoster() tea.Cmd {

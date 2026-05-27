@@ -1,5 +1,4 @@
-// Package multiplayer is the actor-model multi-seat Hold'em engine — the
-// .NET project's TableCoordinator + per-seat subscriptions ported to Go.
+// Package multiplayer is the actor-model multi-seat Hold'em engine.
 //
 // Threading model: each Table owns one goroutine that reads from a single
 // input channel and serializes every state mutation. Subscribers connect via

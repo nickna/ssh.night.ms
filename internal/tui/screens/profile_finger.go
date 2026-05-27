@@ -13,8 +13,7 @@ import (
 
 // viewFinger renders the read-only profile viewer used when the user opens
 // /finger @handle from chat. Layout: header on top, fields below in two
-// columns (label + value). Mirrors the .NET FingerScreen output but
-// rendered through Lipgloss so the colours match the rest of the TUI.
+// columns (label + value).
 func (m *Profile) viewFinger() string {
 	w := m.sess.Width
 	h := m.availableHeight()
@@ -50,8 +49,7 @@ func (m *Profile) viewFinger() string {
 	}
 	// Joined + last-seen render in the VIEWER's zone + format (read from
 	// the session-cached prefs). The subject's time-zone line below uses
-	// the subject's zone but the viewer's clock format — matches .NET
-	// FormatFinger semantics in ProfileService.cs.
+	// the subject's zone but the viewer's clock format.
 	viewerPrefs := m.sess.DisplayPrefs
 	addRow("joined", viewerPrefs.FormatDate(m.snap.CreatedAt))
 	if m.snap.LastSeenAt.IsZero() {

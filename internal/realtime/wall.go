@@ -14,10 +14,10 @@ import (
 // to every active session's local channel.
 const WallTopic = "system:wall"
 
-// WallMessage is the on-the-wire DTO. Mirrors src/Night.Ms.SshServer/Realtime/
-// WallBroadcastDto.cs — same field names so .NET-stack subscribers (if any
-// were still running mid-cutover) could decode Go-published rows. Cutover is
-// big-bang in practice, but keeping the wire compatible is cheap.
+// WallMessage is the on-the-wire DTO. Field names match the legacy stack's
+// wire shape so a legacy subscriber (if any were still running mid-cutover)
+// could decode rows we publish. Cutover is big-bang in practice, but keeping
+// the wire compatible is cheap.
 type WallMessage struct {
 	From       string    `json:"from"`
 	Message    string    `json:"message"`

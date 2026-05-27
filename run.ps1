@@ -7,9 +7,7 @@
 
 .DESCRIPTION
     Single-host dev loop. Requires Docker (Docker Desktop on Windows/macOS,
-    docker engine on Linux). Container names + ports match the .NET stack's
-    run.ps1, so you can use either stack against the same data (one at a
-    time — never both online together).
+    docker engine on Linux).
 
     Carbonyl rich-mode browser:
       * Linux native run: works out of the box. The Carbonyl bundle from

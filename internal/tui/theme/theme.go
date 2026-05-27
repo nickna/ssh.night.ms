@@ -44,7 +44,7 @@ var (
 		Foreground(lipgloss.Color(ColorAccentDim))
 
 	// Header is the bold-accent style used for the lobby welcome and other
-	// top-of-screen prompts. Matches the .NET BbsTheme.Header_ scheme.
+	// top-of-screen prompts.
 	Header = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorAccent)).
 		Bold(true)
@@ -68,8 +68,7 @@ var (
 			Padding(0, 1)
 
 	// SysopNotice is the flat-text variant shown below the lobby carousel
-	// when the user has the sysop bit. Mirrors the .NET BbsTheme.Success_
-	// scheme used for the same line in LobbyScreen.cs.
+	// when the user has the sysop bit.
 	SysopNotice = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorGreen)).
 			Bold(true)

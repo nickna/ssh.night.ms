@@ -19,10 +19,9 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Boards is the discussion-forum screen — the .NET LobbyNavigation.Boards
-// target. It owns its own internal mini-router (forum list -> topic list
-// -> thread). Esc walks back through the modes; Esc on the forum list
-// returns to the lobby.
+// Boards is the discussion-forum screen. It owns its own internal mini-router
+// (forum list -> topic list -> thread). Esc walks back through the modes;
+// Esc on the forum list returns to the lobby.
 type Boards struct {
 	sess *session.Session
 

@@ -20,8 +20,7 @@ import (
 var embeddedLobbyIcons embed.FS
 
 // LobbyIconProvider hands the carousel a small ANSI-art glyph for each card.
-// Mirrors the .NET ILobbyIconProvider/FileSystemLobbyIconProvider pair:
-// one <name>.ans per button under Dir, parsed once and cached. Missing or
+// One <name>.ans per button under Dir, parsed once and cached. Missing or
 // malformed files fall back to a built-in '?' placeholder so the carousel
 // always has something to draw.
 type LobbyIconProvider interface {

@@ -20,13 +20,13 @@ import (
 // session.GalleryEntry name resolves locally for the screens package.
 type artGalleryEntry = art.GalleryEntry
 
-// ProfileLocation is the user's .NET-era profile city, sourced from the
+// ProfileLocation is the user's legacy profile city, sourced from the
 // users.location / location_canonical / location_latitude / location_longitude
-// columns the .NET stack wrote to. Used as the fallback after PrimaryLocation
-// so users carrying data over from .NET don't see "no location" until they've
-// added an entry to user_saved_locations. Also fed into
-// LocationService.SeedFromProfile at login to backfill an explicit
-// saved-location row.
+// columns the legacy stack wrote to. Used as the fallback after
+// PrimaryLocation so users carrying data over from the legacy stack don't
+// see "no location" until they've added an entry to user_saved_locations.
+// Also fed into LocationService.SeedFromProfile at login to backfill an
+// explicit saved-location row.
 type ProfileLocation struct {
 	Label     string
 	Canonical string
@@ -66,7 +66,7 @@ type State struct {
 
 	// ProfileLocation is the legacy users.location_* fallback, loaded from
 	// the user row at login. Consulted by WeatherCoords() after
-	// PrimaryLocation so .NET-era profile data still drives the
+	// PrimaryLocation so legacy profile data still drives the
 	// weather/map screens for users who haven't yet added a saved
 	// location.
 	ProfileLocation *ProfileLocation

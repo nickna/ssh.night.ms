@@ -1,6 +1,5 @@
 // Package data owns the Postgres connection pool, schema migrations, and the
-// sqlc-generated query layer. Mirrors src/Night.Ms.SshServer/Persistence/
-// from the .NET project — minus the EF Core ceremony.
+// sqlc-generated query layer.
 package data
 
 import (
@@ -19,14 +18,13 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// RunMigrations applies any pending migrations to the target database. Mirrors
-// DatabaseInitializer.StartAsync from the .NET project.
+// RunMigrations applies any pending migrations to the target database.
 //
-// Cutover adoption: if the schema is already populated (e.g., the .NET stack
+// Cutover adoption: if the schema is already populated (e.g., a legacy stack
 // migrated it previously) but golang-migrate has no schema_migrations row, we
 // Force version 1 to adopt the existing tables in place. This avoids the
 // "relation users already exists" error that would otherwise block startup on
-// any DB that has ever seen the .NET app.
+// a pre-existing DB.
 func RunMigrations(ctx context.Context, connStr string, logger *slog.Logger) error {
 	bootstrapped, err := schemaAlreadyBootstrapped(ctx, connStr)
 	if err != nil {
@@ -55,7 +53,7 @@ func RunMigrations(ctx context.Context, connStr string, logger *slog.Logger) err
 		version, dirty, verErr := m.Version()
 		switch {
 		case errors.Is(verErr, migrate.ErrNilVersion):
-			logger.Info("migrations: adopting pre-existing schema (likely .NET-managed); force-marking version 1")
+			logger.Info("migrations: adopting pre-existing schema; force-marking version 1")
 			if err := m.Force(1); err != nil {
 				return fmt.Errorf("migrations: force adopt: %w", err)
 			}

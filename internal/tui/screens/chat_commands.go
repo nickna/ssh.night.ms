@@ -110,9 +110,9 @@ func (m *Chat) runDeleteLast() tea.Cmd {
 	}
 }
 
-// runSetPinLatest pin/unpins the channel's most-recent visible message. .NET
-// keys /pin off a position number; we use "latest" so the UX is one keystroke
-// and matches /react's authoring shape.
+// runSetPinLatest pin/unpins the channel's most-recent visible message. We
+// use "latest" so the UX is one keystroke and matches /react's authoring
+// shape.
 func (m *Chat) runSetPinLatest(pin bool) tea.Cmd {
 	channelID := m.active.ID
 	author := realtime.Author{

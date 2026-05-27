@@ -1,11 +1,10 @@
 package screens
 
 // IANAZones is the curated list of timezone IDs offered in the Profile
-// screen's timezone picker. Go's stdlib has no equivalent to .NET's
-// TimeZoneInfo.GetSystemTimeZones(), and shipping the entire tzdata listing
-// (~600 entries) would drown the searchable-list widget. This is the
-// hand-picked set that covers ≥99 % of real-world BBS users: every IANA
-// region's principal cities plus a handful of common fixed-offset aliases.
+// screen's timezone picker. Shipping the entire tzdata listing (~600 entries)
+// would drown the searchable-list widget. This is the hand-picked set that
+// covers ≥99 % of real-world BBS users: every IANA region's principal cities
+// plus a handful of common fixed-offset aliases.
 //
 // Sorted alphabetically so the typeahead filter and the linear cursor walk
 // produce a predictable order.

@@ -10,10 +10,8 @@ import (
 )
 
 // OnlineList renders the right-rail "online (N)" sidebar on the chat screen.
-// The .NET ChatScreen.cs tracks per-channel presence via a Redis ZSET; the Go
-// port uses the global PresenceService.OnlineHandles list (which is the
-// closest equivalent without adding a new per-channel data path) and shows
-// self pinned to the top with a "(you)" marker.
+// Backed by the global PresenceService.OnlineHandles list; self is pinned to
+// the top with a "(you)" marker.
 type OnlineList struct {
 	// Handles is the lowercased set of currently-online users, including
 	// self. Order is normalized inside View().
@@ -37,8 +35,7 @@ var (
 				Foreground(lipgloss.Color(theme.ColorDim))
 )
 
-// Width returns the column count the online sidebar occupies. Mirrors the
-// .NET SidebarWidth = 16 constant.
+// Width returns the column count the online sidebar occupies.
 func (OnlineList) Width() int { return onlineListWidth }
 
 // View paints `height` lines. Self is pinned to the top, then everyone else

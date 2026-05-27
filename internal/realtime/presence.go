@@ -12,8 +12,8 @@ import (
 
 // PresenceService tracks who is currently connected, backed by Redis keys
 // `presence:user:<handle>` with a short TTL refreshed by a per-session
-// heartbeat. Mirrors the .NET PresenceService — the same TTL grace window
-// (1 minute) lets a brief network blip not appear as a logout.
+// heartbeat. The TTL grace window (1 minute) lets a brief network blip not
+// appear as a logout.
 type PresenceService struct {
 	Client     *redis.Client
 	Logger     *slog.Logger

@@ -24,9 +24,9 @@ type RegisterCompletedMsg struct {
 	Known auth.Known
 }
 
-// Register is the TOFU signup form. Mirrors src/Night.Ms.SshServer/Tui/
-// Screens/RegisterScreen.cs: prefilled handle from the SSH username, password
-// + confirm, optional adopt-key checkbox when the client offered a key.
+// Register is the TOFU signup form. Prefilled handle from the SSH username,
+// password + confirm, optional adopt-key checkbox when the client offered a
+// key.
 type Register struct {
 	sess    *session.Session
 	signup  auth.SignupRequired
@@ -248,9 +248,8 @@ func (m *Register) View() string {
 		return "initializing..."
 	}
 	var b strings.Builder
-	// Banner first — matches the .NET RegisterScreen which paints the same
-	// ArtProvider header above the form. Helps brand-new users feel they're
-	// in the right place before they pick a handle.
+	// Banner first — helps brand-new users feel they're in the right place
+	// before they pick a handle.
 	if m.sess.LoginBanner != nil {
 		bn := m.sess.LoginBanner.Banner().Render(components.RenderCellGrid)
 		if bn != "" {

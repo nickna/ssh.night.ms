@@ -1,0 +1,63 @@
+ssh.night.ms
+Copyright (c) 2026 Nick Nassiri
+
+This product is licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party software distributed with this project
+================================================================================
+
+This repository redistributes pre-built binaries in addition to its own
+source code. Those binaries carry their own licenses and attribution
+requirements, summarized below.
+
+--------------------------------------------------------------------------------
+1. Carbonyl (bundle/carbonyl-linux-x86_64.tar.xz)
+--------------------------------------------------------------------------------
+
+The "rich-mode browser" feature ships pre-built Carbonyl binaries — a
+terminal-rendering frontend over the Chromium engine.
+
+Upstream Carbonyl (MIT License):
+    https://github.com/fathyb/carbonyl
+
+The bundled binary is built from a fork tracking Chromium ~M148:
+    https://github.com/nickna/carbonyl  (commit 68012ed8…)
+    Chromium SHA: f161c335…
+
+Because the bundle contains compiled Chromium components, it is subject to
+the Chromium project's licenses and third-party attribution requirements,
+in addition to Carbonyl's own MIT terms.
+
+Chromium is distributed under the BSD 3-Clause License with additional
+third-party attributions for hundreds of bundled libraries (V8, ICU, ANGLE,
+Skia, FFmpeg, Blink, etc.). The canonical, complete attribution text lives
+in the Chromium source tree:
+
+    LICENSE:                 https://chromium.googlesource.com/chromium/src/+/main/LICENSE
+    Third-party credits:     https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/resources/settings/about_page/about_page.html
+                             (compiled into every Chromium binary; accessible
+                             at chrome://credits inside the running browser)
+
+When this product is launched as a browser (the Web lobby entry), the user
+can press F1 / open chrome://credits to read the complete Chromium and
+third-party license attributions compiled into the binary itself.
+
+--------------------------------------------------------------------------------
+2. Go module dependencies (go.mod)
+--------------------------------------------------------------------------------
+
+This project depends on a number of Go modules listed in go.mod, each
+governed by its own license. None of the runtime dependencies are GPL or
+AGPL; all are permissive (MIT, BSD-2/3-Clause, Apache-2.0, or MPL-2.0).
+A full list with license text per module can be regenerated with:
+
+    go install github.com/google/go-licenses@latest
+    go-licenses report ./...
+
+--------------------------------------------------------------------------------
+3. Embedded art and fonts (data/art/)
+--------------------------------------------------------------------------------
+
+ANSI art files under data/art/ are original works for this project unless
+the file itself documents otherwise.

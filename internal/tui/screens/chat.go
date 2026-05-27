@@ -898,7 +898,7 @@ var (
 	chatGutterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 
 	// Status row chrome: dim "in #lobby topic:" framing + italic "| typing"
-	// suffix. Matches the .NET ChatPalette.Chrome shade.
+	// suffix.
 	chatStatusChrome       = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 	chatStatusChromeItalic = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim)).Italic(true)
 	// Mention flash — bright yellow + bold so it overwrites the dim chrome
@@ -964,8 +964,7 @@ func (m *Chat) View() string {
 
 // buildStatusRow assembles the styled "in #lobby  topic: <topic>  |  alice is
 // typing…" line shown between the chat body and the input. Self-mention flash
-// + transient error wins over typing and the static topic line. Mirrors
-// BbsChatStatusLine + BuildTopicStatusLine on the .NET side.
+// + transient error wins over typing and the static topic line.
 func (m *Chat) buildStatusRow() string {
 	if m.errMsg != "" {
 		return chatStatusStyle.Render("! " + m.errMsg)

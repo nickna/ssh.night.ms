@@ -1075,8 +1075,7 @@ func (m *Finance) detailStatsLine(d *finance.Detail) string {
 // ──────────── formatters ────────────
 
 // formatPrice picks digit counts so $0.0042 still shows precision while
-// $108,432.18 stays readable. Three-tier heuristic, matches what the .NET
-// FinanceScreen does.
+// $108,432.18 stays readable. Three-tier heuristic.
 func formatPrice(p float64) string {
 	switch {
 	case p >= 100:

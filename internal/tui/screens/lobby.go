@@ -16,9 +16,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Lobby is the carousel hub. Item set, hotkeys, and the conditional
-// alerts-key handling mirror src/Night.Ms.SshServer/Tui/Screens/LobbyScreen.cs;
-// the visual layout is a Bubble Tea-native take on the .NET LobbyCarouselView.
+// Lobby is the carousel hub.
 type Lobby struct {
 	sess     *session.Session
 	carousel *components.Carousel
@@ -137,7 +135,7 @@ func (m *Lobby) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.KeyMsg:
-		// Esc on the lobby is logout — same as .NET LobbyScreen.KeyDown.
+		// Esc on the lobby is logout.
 		if msg.String() == "esc" {
 			return m, nav.Navigate(nav.DestLogout)
 		}
@@ -165,9 +163,8 @@ func (m *Lobby) View() string {
 	}
 
 	// Banner — when configured we render the ANSI art; otherwise the title
-	// placeholder. Same fall-back chain as the .NET ArtProvider: color grids
-	// keep their per-cell styling, plain text picks up the dim Hint scheme
-	// .NET applies via BbsTheme.Hint on the fallback Label.
+	// placeholder. Color grids keep their per-cell styling; plain text picks
+	// up the dim Hint scheme.
 	var banner string
 	if m.sess.LoginBanner != nil {
 		lb := m.sess.LoginBanner.Banner()

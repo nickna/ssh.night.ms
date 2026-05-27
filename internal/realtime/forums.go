@@ -15,8 +15,8 @@ import (
 
 // ForumService wraps the forums + topics + posts queries with TUI-friendly
 // API-shape structs (no pgtype, no embedded *string pointers in the body).
-// Mirrors src/Night.Ms.SshServer/Realtime patterns but the underlying data
-// is request-response not pub/sub — forums don't subscribe to events yet.
+// The underlying data is request-response not pub/sub — forums don't
+// subscribe to events yet.
 type ForumService struct {
 	Queries *gen.Queries
 	Logger  *slog.Logger

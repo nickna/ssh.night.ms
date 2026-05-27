@@ -32,7 +32,6 @@ type LeaderboardService struct {
 }
 
 // TopSingleWins returns the biggest per-round net wins across all games.
-// Mirrors LeaderboardService.GetTopSingleWinsAsync in the .NET stack.
 func (s *LeaderboardService) TopSingleWins(ctx context.Context, top int) ([]LeaderboardEntry, error) {
 	rows, err := s.Queries.LeaderboardTopSingleWins(ctx, int32(top))
 	if err != nil {

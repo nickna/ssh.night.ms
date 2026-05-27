@@ -4,8 +4,7 @@ import "strings"
 
 // SubstituteEmoji rewrites :shortcode: tokens to their unicode glyphs. Unknown
 // shortcodes pass through untouched so a typo doesn't eat the rest of the
-// message. Mirrors the .NET EmojiTable.Substitute behavior including the 32-
-// char lookahead cap so pathological inputs stay cheap.
+// message. A 32-char lookahead cap keeps pathological inputs cheap.
 func SubstituteEmoji(text string) string {
 	if text == "" || !strings.Contains(text, ":") {
 		return text
@@ -65,7 +64,7 @@ func isShortcodeByte(c byte) bool {
 	return false
 }
 
-// emojiTable is the same curated set the .NET build ships. Keep entries
+// emojiTable is the curated set the build ships. Keep entries
 // terminal-friendly: every glyph must render as a single grapheme in the
 // monospace fonts BBS users typically have (Cascadia Mono, JetBrains Mono,
 // Iosevka, Menlo, Source Code Pro).

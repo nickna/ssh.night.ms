@@ -3,12 +3,11 @@ package auth
 import "time"
 
 // Decision is the result of an authentication lookup. Five concrete variants
-// (Known, SignupRequired, Banned, RateLimited, Refused) mirror the .NET
-// AuthDecision discriminated union from src/Night.Ms.SshTransport/AuthDecision.cs.
+// (Known, SignupRequired, Banned, RateLimited, Refused) form a closed union.
 //
-// Consumers (the wish auth middleware in particular) type-switch on the concrete
-// type rather than read a Kind field — Go's type switches are exhaustive enough
-// in practice and the pattern stays close to the C# original.
+// Consumers (the wish auth middleware in particular) type-switch on the
+// concrete type rather than read a Kind field — Go's type switches are
+// exhaustive enough in practice.
 type Decision interface{ isDecision() }
 
 // Known: the principal is authenticated. UserID is the row in users; Handle is the

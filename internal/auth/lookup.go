@@ -16,15 +16,13 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
 )
 
-// CredentialProviderSSH is the value of the identity_credentials.provider column
-// that the .NET stack writes for SSH keys. The .NET project stores the enum as
-// its string name (CredentialProvider.Ssh → "Ssh") via
-// .HasConversion<string>().HasMaxLength(32) in AppDbContext. We match exactly.
+// CredentialProviderSSH is the value of the identity_credentials.provider
+// column used for SSH keys. Matches the legacy stack's enum-as-string form
+// (varchar(32)) so a row produced by either stack is recognized.
 const CredentialProviderSSH = "Ssh"
 
-// Lookup runs the publickey / password decision tree shared by the SSH transport
-// and (later) the web /login/password endpoint. Mirrors src/Night.Ms.SshServer/
-// Auth/AuthLookupService.cs from the .NET project.
+// Lookup runs the publickey / password decision tree shared by the SSH
+// transport and (later) the web /login/password endpoint.
 //
 // Lifetime: process-singleton. Stateless; holds a pgxpool + hasher + rate
 // limiter + (optional) persistent-ban cache.
@@ -49,8 +47,7 @@ type Lookup struct {
 
 // ByPublicKey is the publickey auth path. Handle comes from the SSH username,
 // fingerprint is SHA256:base64(sha256(blob)) — the format produced by
-// golang.org/x/crypto/ssh.FingerprintSHA256, which matches what the .NET
-// OpenSshPublicKeyParser computes.
+// golang.org/x/crypto/ssh.FingerprintSHA256.
 //
 // sourceIP is consulted by the optional BanCache to short-circuit known-bad
 // IPs even when they present a valid key. Pass nil to skip the ban check

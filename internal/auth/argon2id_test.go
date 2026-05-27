@@ -33,7 +33,7 @@ func TestHasher_PHCWrongPassword(t *testing.T) {
 	}
 }
 
-// Synthesize a row in the .NET legacy shape (salt||hash bytes + algo descriptor
+// Synthesize a row in the legacy shape (salt||hash bytes + algo descriptor
 // string). Verifies the legacy path accepts it and signals NeedsRehash so the
 // caller knows to lazy-migrate to PHC on the next successful login.
 func TestHasher_LegacyRoundTrip(t *testing.T) {
@@ -126,7 +126,7 @@ func TestParseLegacyAlgo_BadInputs(t *testing.T) {
 
 // Sanity-check that argon2.Version (19) is the format version we emit, so a
 // future bump in x/crypto/argon2 produces a clear test failure rather than a
-// silent format mismatch with the .NET stack.
+// silent format mismatch with the legacy stack.
 func TestArgon2VersionIsAsExpected(t *testing.T) {
 	if argon2.Version != 19 {
 		t.Errorf("argon2.Version changed: got %d want 19. Update Hash format and verify cross-stack interop.", argon2.Version)

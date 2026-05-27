@@ -1,6 +1,5 @@
-// Command loadtest is the Go port of Night.Ms.Tools.LoadTest — a synthetic
-// SSH load harness used to verify "200 concurrent sessions, 10 minutes,
-// stable RSS".
+// Command loadtest is a synthetic SSH load harness used to verify "200
+// concurrent sessions, 10 minutes, stable RSS".
 //
 // Bots drive the TUI blindly through stdin (no screen-scrape). Scenarios:
 //

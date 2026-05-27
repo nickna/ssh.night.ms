@@ -1,7 +1,5 @@
-// Package chat: rendering helpers for chat message bodies. These mirror the
-// .NET MessageRenderer.AppendBodyRuns logic — `*bold*`, `_italic_`,
-// `` `code` ``, `@mention` (self vs. other), `:emoji:` — so the Go TUI paints
-// chat with the same visual vocabulary as the .NET original.
+// Package chat: rendering helpers for chat message bodies. Supports `*bold*`,
+// `_italic_`, `` `code` ``, `@mention` (self vs. other), and `:emoji:`.
 package chat
 
 import (
@@ -11,7 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// Color constants for the body palette. Match ChatPalette.cs:
+// Color constants for the body palette:
 //   - MentionOther — soft sky blue
 //   - MentionSelf  — bright yellow, bold (also flagged via SelfMentioned)
 //   - BoldFg       — pure white
@@ -49,8 +47,8 @@ type BodyToken struct {
 // case-insensitively against @mentions to decide BodyMentionSelf vs
 // BodyMentionOther. Returns the run list and whether selfHandle was mentioned.
 //
-// Mirrors the .NET MessageRenderer Inline regex but as a hand-written scan to
-// avoid Go regexp's lack of lookbehind. Rules:
+// Hand-written scan (rather than a regex) to avoid Go regexp's lack of
+// lookbehind. Rules:
 //   - `*foo*`   bold      — non-space immediately inside both stars, single line
 //   - `_foo_`   italic    — same shape with underscores
 //   - `` `foo` `` code    — anything except backtick/newline inside

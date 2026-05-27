@@ -1,7 +1,6 @@
 // Command ansiconvert turns a PNG/JPEG into a .ans file using half-block
 // rendering: each output cell covers two source pixels vertically (foreground
 // = top pixel, background = bottom pixel, glyph = U+2580 "upper half block").
-// Mirrors src/Night.Ms.Tools.AnsiConvert/Program.cs from the .NET stack.
 //
 // Usage:
 //
@@ -308,8 +307,7 @@ func nearest16(r, g, b uint8) int {
 }
 
 // palette16 is the classic Linux-console 16-color palette. Values chosen to
-// match the original Microsoft Windows colors so screenshots align with the
-// .NET stack's output.
+// match the original Microsoft Windows colors.
 var palette16 = [16][3]uint8{
 	{0, 0, 0},       // 0  black
 	{170, 0, 0},     // 1  red

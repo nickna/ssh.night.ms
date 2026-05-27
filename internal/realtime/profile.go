@@ -28,10 +28,9 @@ func NewProfileService(q *gen.Queries) *ProfileService {
 	return &ProfileService{Queries: q}
 }
 
-// ProfileSnapshot mirrors the .NET ProfileSnapshot record — the bag of
-// "everything /finger needs to render the user card". Counts come from
-// per-table COUNT(*) queries; for a BBS-scale user table the round-trips are
-// fine and avoid CTE complexity.
+// ProfileSnapshot is the bag of "everything /finger needs to render the user
+// card". Counts come from per-table COUNT(*) queries; for a BBS-scale user
+// table the round-trips are fine and avoid CTE complexity.
 type ProfileSnapshot struct {
 	UserID                     int64
 	Handle                     string
@@ -67,8 +66,8 @@ type ProfileUpdate struct {
 	RequireSshKey              bool
 }
 
-// Field length caps. Match the .NET ProfileService limits so a row written by
-// either stack passes the other's validation.
+// Field length caps. Match the legacy stack's ProfileService limits so a row
+// written by either stack passes the other's validation.
 const (
 	MaxRealNameLength   = 64
 	MaxLocationLength   = 64
@@ -79,8 +78,7 @@ const (
 
 // ErrRequiresAtLeastOneKey is returned by UpdateProfile when a caller asks to
 // enable RequireSshKey on an account that currently has zero registered SSH
-// keys. Surfaced verbatim by the Profile screen so the user sees the same
-// guidance the .NET version shows.
+// keys. Surfaced verbatim by the Profile screen.
 var ErrRequiresAtLeastOneKey = errors.New("profile: enabling require-ssh-key needs at least one registered key")
 
 // ErrInvalidProfileField is the catch-all for length/format failures during
@@ -306,8 +304,7 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID int64, hash 
 }
 
 // LogKeyAdd writes the audit_log row for an SSH key addition initiated from
-// the TUI. Mirrors the .NET KeysManagementScreen audit trail; the web add
-// path does not yet write an audit row (TODO).
+// the TUI. The web add path does not yet write an audit row (TODO).
 func (s *ProfileService) LogKeyAdd(ctx context.Context, userID int64, fingerprint string) error {
 	details, err := json.Marshal(map[string]string{
 		"provider":    "Ssh",
@@ -328,8 +325,7 @@ func (s *ProfileService) LogKeyAdd(ctx context.Context, userID int64, fingerprin
 }
 
 // LogKeyRemoval writes the audit_log row for an SSH key removal. The Profile
-// screen calls this after a successful DeleteCredentialByID so the trail
-// matches the .NET KeysManagementScreen.
+// screen calls this after a successful DeleteCredentialByID.
 func (s *ProfileService) LogKeyRemoval(ctx context.Context, userID int64, fingerprint string) error {
 	details, err := json.Marshal(map[string]string{
 		"provider":    "Ssh",

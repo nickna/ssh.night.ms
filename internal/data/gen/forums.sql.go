@@ -331,8 +331,7 @@ VALUES ('General', 'general discussion', 0)
 ON CONFLICT DO NOTHING
 `
 
-// Idempotent seed of the default forum. Matches what the .NET
-// DatabaseInitializer creates so the two stacks see the same row.
+// Idempotent seed of the default forum.
 func (q *Queries) SeedGeneralForum(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, seedGeneralForum)
 	return err

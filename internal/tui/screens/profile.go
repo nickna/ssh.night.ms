@@ -20,9 +20,9 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Profile is the TUI Profile destination — the .NET ProfileEditScreen +
-// PasswordChangeScreen + KeysManagementScreen + FingerScreen rolled into one
-// tea.Model with an internal mode state machine (mirrors the Boards pattern).
+// Profile is the TUI Profile destination — edit, password change, keys
+// management, and finger all rolled into one tea.Model with an internal mode
+// state machine (mirrors the Boards pattern).
 //
 // modeFinger renders someone else's profile when the constructor variant
 // NewProfileFinger is used (e.g., /finger @handle in chat). The other modes

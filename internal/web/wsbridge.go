@@ -174,7 +174,7 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		loadCancel()
 	}
-	// One-shot backfill of user_saved_locations from the .NET-era
+	// One-shot backfill of user_saved_locations from the legacy
 	// users.location_* columns. Mirrors the same block in transport so
 	// both surfaces converge on a single saved-location row after first
 	// login. SeedFromProfile is internally idempotent (re-checks the list)

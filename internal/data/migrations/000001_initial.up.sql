@@ -1,11 +1,11 @@
--- Initial schema for the Go port of ssh.night.ms.
+-- Initial schema for ssh.night.ms.
 --
--- Source: pg_dump --schema-only of a freshly-migrated .NET DB. We deliberately
--- do not translate the 33 EF migration files one-by-one; the shape they
+-- Source: pg_dump --schema-only of a freshly-migrated legacy DB. We deliberately
+-- do not translate the 33 source migration files one-by-one; the shape they
 -- collectively produce is the contract.
 --
 -- Differences vs the raw pg_dump output:
---   - The EF migration history table is omitted (golang-migrate uses its own).
+--   - The legacy migration history table is omitted (golang-migrate uses its own).
 --   - psql-only commands (\restrict, \unrestrict, search_path set_config) stripped.
 --   - SET statements relaxed to defaults; the migrator's connection already has
 --     sensible session settings.

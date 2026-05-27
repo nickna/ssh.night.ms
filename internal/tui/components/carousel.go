@@ -30,9 +30,9 @@ type CarouselItem struct {
 	Icon        *art.CellGrid
 }
 
-// Geometry constants mirror src/Night.Ms.SshServer/Tui/Views/LobbyCarouselView.cs.
-// The selected card is bigger and bottom-aligned with its neighbours; widths
-// are tuned so 5 visible cards fit on an 80-col terminal.
+// Geometry constants for the lobby carousel. The selected card is bigger and
+// bottom-aligned with its neighbours; widths are tuned so 5 visible cards fit
+// on an 80-col terminal.
 const (
 	carSelectedWidth     = 20
 	carSelectedHeight    = 7
@@ -47,7 +47,6 @@ const (
 )
 
 // Per-slot RGB alpha used to dim neighbour cards by distance. slot 0 = selected.
-// Same values as the .NET SlotAlpha table.
 var carSlotAlpha = [6]float64{1.00, 0.72, 0.48, 0.30, 0.18, 0.12}
 
 // cardGeom is one card's per-frame placement + alpha. Pixel-space coords
@@ -245,7 +244,7 @@ func (c *Carousel) move(delta int) {
 }
 
 // jumpTo picks the shorter wrap direction so the slide is the shortest
-// visible motion. Ties prefer rightward, same as the .NET path.
+// visible motion. Ties prefer rightward.
 func (c *Carousel) jumpTo(target int) {
 	if target == c.selected || len(c.Items) == 0 {
 		return

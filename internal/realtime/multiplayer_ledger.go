@@ -17,10 +17,8 @@ import (
 // human seat at the table, all inside a single transaction. Implements
 // multiplayer.Ledger so the registry can hand it to every Coordinator.
 //
-// Mirrors src/Night.Ms.SshServer/Doors/Multiplayer/MultiplayerGameLedger.cs
-// — same row shape, same ordering, same transactional guarantee. Wallet
-// debit/credit happens elsewhere (the Hold'em MP screen on buy-in/cash-out
-// today); this service touches only the audit tables.
+// Wallet debit/credit happens elsewhere (the Hold'em MP screen on
+// buy-in/cash-out today); this service touches only the audit tables.
 type MultiplayerLedger struct {
 	Pool    *pgxpool.Pool
 	Queries *gen.Queries

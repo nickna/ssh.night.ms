@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// BootstrapSysop implements the same idempotent escape-hatch as the .NET
-// SysopBootstrap hosted service. Reads NIGHTMS_BOOTSTRAP_SYSOP_HANDLE (and
-// optionally _PASSWORD) at startup; if present:
+// BootstrapSysop is the idempotent escape-hatch for promoting a sysop at
+// startup. Reads NIGHTMS_BOOTSTRAP_SYSOP_HANDLE (and optionally _PASSWORD); if
+// present:
 //
 //   - Only HANDLE set, user exists → promote IsSysop to true (no-op if already).
 //   - Only HANDLE set, user missing → no-op (register flow will promote).

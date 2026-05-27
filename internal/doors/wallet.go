@@ -17,10 +17,9 @@ import (
 // leaderboards.
 const DailyAllowance = 100
 
-// Wallet is the in-memory snapshot exposed to game screens. The two-bucket
-// design mirrors the .NET WalletService: daily credits refresh, winnings
-// persist. Bets debit daily first, then winnings; payouts always credit
-// winnings.
+// Wallet is the in-memory snapshot exposed to game screens. Two-bucket
+// design: daily credits refresh, winnings persist. Bets debit daily first,
+// then winnings; payouts always credit winnings.
 type Wallet struct {
 	UserID         int64
 	DailyCredits   int32
@@ -28,8 +27,7 @@ type Wallet struct {
 	DailyRefreshed time.Time
 }
 
-// Total returns the spendable amount (in credits, where 1 credit == 1 cent
-// for the .NET-compat math).
+// Total returns the spendable amount (in credits, where 1 credit == 1 cent).
 func (w Wallet) Total() int64 { return int64(w.DailyCredits) + w.WinningsCents }
 
 // WalletService loads + persists Wallet rows.

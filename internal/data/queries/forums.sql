@@ -136,8 +136,7 @@ LEFT JOIN posts p
 GROUP BY t.forum_id;
 
 -- name: SeedGeneralForum :exec
--- Idempotent seed of the default forum. Matches what the .NET
--- DatabaseInitializer creates so the two stacks see the same row.
+-- Idempotent seed of the default forum.
 INSERT INTO forums (name, description, sort_order)
 VALUES ('General', 'general discussion', 0)
 ON CONFLICT DO NOTHING;

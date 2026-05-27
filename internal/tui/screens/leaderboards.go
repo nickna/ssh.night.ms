@@ -16,10 +16,9 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Leaderboards is the .NET LeaderboardScreen ported to bubbletea. Three
-// views over game_rounds, switched with the number keys 1/2/3. Each view
-// loads on entry and reloads on tab switch so a player who just won big
-// can pop in and see themselves at the top.
+// Leaderboards is a three-view screen over game_rounds, switched with the
+// number keys 1/2/3. Each view loads on entry and reloads on tab switch so
+// a player who just won big can pop in and see themselves at the top.
 type Leaderboards struct {
 	sess *session.Session
 

@@ -1,5 +1,5 @@
 // Package auth holds password hashing, public-key lookup, rate limiting, and the
-// sysop bootstrap. It mirrors src/Night.Ms.SshServer/Auth/ from the .NET project.
+// sysop bootstrap.
 package auth
 
 import (
@@ -15,9 +15,9 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// Argon2Params holds the parameters fed to Argon2id. The defaults match the .NET
-// PasswordHashingOptions defaults so a row produced by either stack can be verified
-// by the other during the cutover window.
+// Argon2Params holds the parameters fed to Argon2id. The defaults match the
+// legacy stack's PasswordHashingOptions defaults so a row produced by either
+// stack can be verified by the other during the cutover window.
 type Argon2Params struct {
 	MemoryKB    uint32 // m=
 	Iterations  uint32 // t=
@@ -36,7 +36,7 @@ func DefaultArgon2Params() Argon2Params {
 	}
 }
 
-// Hasher wraps the Argon2id primitive with both .NET-legacy and PHC verify paths,
+// Hasher wraps the Argon2id primitive with both legacy and PHC verify paths,
 // plus a constant-wallclock VerifyDummy for timing-equivalence on unknown users.
 type Hasher struct {
 	params Argon2Params
@@ -50,7 +50,7 @@ func NewHasher(p Argon2Params) *Hasher { return &Hasher{params: p} }
 
 // Hash produces a PHC-encoded $argon2id$ string. We always write PHC for new rows;
 // the legacy "salt||hash + algo-string" format is read-only, used only to verify
-// rows produced by the .NET stack until lazy migration replaces them.
+// rows produced by an earlier deploy until lazy migration replaces them.
 //
 // Return shape:
 //   - hashBytes: the ASCII bytes of the PHC string. Written into users.password_hash (bytea).
@@ -89,7 +89,7 @@ type VerifyResult struct {
 	NeedsRehash bool
 }
 
-// Verify accepts both .NET-legacy (algo-string + salt||hash bytes) and PHC (bytes
+// Verify accepts both legacy (algo-string + salt||hash bytes) and PHC (bytes
 // are the PHC string, algo unused).
 //
 // Detection:

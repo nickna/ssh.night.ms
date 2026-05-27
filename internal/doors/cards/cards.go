@@ -91,7 +91,7 @@ const (
 	RoyalFlush
 )
 
-// String is for paytable display, not protocol. Names match the .NET stack.
+// String is for paytable display, not protocol.
 func (h HandRank) String() string {
 	switch h {
 	case JacksOrBetter:

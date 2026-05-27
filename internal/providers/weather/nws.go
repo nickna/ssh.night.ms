@@ -11,10 +11,9 @@ import (
 	"time"
 )
 
-// Alert is one active National Weather Service alert at a lat/lon. The .NET
-// stack renders these on the lobby's Alerts destination + as a header strip
-// during severe events; the Go port surfaces them via the same Alerts
-// destination + a future opportunity to broadcast over the wall pipe.
+// Alert is one active National Weather Service alert at a lat/lon. Rendered
+// on the lobby's Alerts destination + as a header strip during severe events,
+// with a future opportunity to broadcast over the wall pipe.
 type Alert struct {
 	ID          string    // NWS feature id; stable for the lifetime of the alert
 	Event       string    // "Severe Thunderstorm Warning", "Tornado Watch", etc.

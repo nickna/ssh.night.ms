@@ -11,9 +11,8 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 )
 
-// SeedDefaults ensures the default channels and forums exist. Mirrors the
-// .NET DatabaseInitializer.SeedAsync — idempotent, runs once at startup
-// after migrations have completed.
+// SeedDefaults ensures the default channels and forums exist. Idempotent,
+// runs once at startup after migrations have completed.
 func SeedDefaults(ctx context.Context, queries *gen.Queries, logger *slog.Logger) error {
 	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	if err := queries.SeedLobbyChannel(ctx, now); err != nil {

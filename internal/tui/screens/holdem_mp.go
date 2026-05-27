@@ -361,9 +361,9 @@ func (m *HoldemMP) leaveTable() (tea.Model, tea.Cmd) {
 	m.mode = hmpLobby
 
 	// Credit the chips back to the wallet. The per-session game_rounds row
-	// the .NET stack used to write here is no longer recorded — multiplayer
-	// audit is now per-hand via the registry's settlement ledger, so a
-	// session-grain row would double-count on leaderboards.
+	// the legacy stack used to write here is no longer recorded —
+	// multiplayer audit is now per-hand via the registry's settlement
+	// ledger, so a session-grain row would double-count on leaderboards.
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	creditCmd := func() tea.Msg {

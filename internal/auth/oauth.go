@@ -12,8 +12,8 @@ import (
 )
 
 // OAuthProviderKind discriminates supported providers. The string value
-// also matches the identity_credentials.provider column convention from the
-// .NET stack ("Google", "Microsoft") — so a row inserted by either stack
+// matches the identity_credentials.provider column convention ("Google",
+// "Microsoft") used by the legacy stack — so a row inserted by either stack
 // works seamlessly with the other.
 type OAuthProviderKind string
 

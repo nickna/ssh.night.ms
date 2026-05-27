@@ -29,7 +29,6 @@ services:
       redis:
         condition: service_started
     environment:
-      # Go config uses URL connection strings (not the .NET "Host=...;" form).
       NIGHTMS_DB_CONN: "postgres://bbs:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/bbs?sslmode=disable"
       NIGHTMS_REDIS_CONN: "redis://redis:6379"
 

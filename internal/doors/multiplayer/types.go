@@ -9,10 +9,9 @@ package multiplayer
 import "context"
 
 // PlayerMovement is one seat's per-hand economic outcome. UserID == 0
-// indicates a CPU seat; the ledger filters those out at persist time.
-// Mirrors src/Night.Ms.SshServer/Doors/Multiplayer/PlayerMovement.cs in
-// shape so a hand-replay tool decoding either stack's audit trail sees
-// the same fields.
+// indicates a CPU seat; the ledger filters those out at persist time. Shape
+// matches the legacy stack's wire format so a hand-replay tool decoding
+// either stack's audit trail sees the same fields.
 type PlayerMovement struct {
 	UserID  int64
 	Handle  string

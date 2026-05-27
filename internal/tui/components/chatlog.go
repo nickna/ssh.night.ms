@@ -16,10 +16,7 @@ import (
 // ChatLog is the scrolling chat surface used by the Chat screen. Append-
 // only with width-driven word wrap, a stick-to-bottom scroll model, and an
 // indexByID map so edits/deletes patch in place without re-rendering the
-// whole log.
-//
-// Mirrors src/Night.Ms.SshServer/Tui/Views/ChatLogView.cs structurally; the
-// 5,000-entry cap matches that file's MaxEntries.
+// whole log. Capped at 5,000 entries.
 type ChatLog struct {
 	entries      []logEntry
 	byID         map[int64]int
@@ -136,8 +133,7 @@ type logEntry struct {
 	imageLines []string
 	// system is set when this entry isn't a real chat message but a screen-
 	// generated notice (/help, /pins, /search, etc.). System entries skip
-	// timestamp + handle chrome and render as a styled cyan info line that
-	// matches the .NET MessageRenderer.RenderSystem look.
+	// timestamp + handle chrome and render as a styled cyan info line.
 	system bool
 	// systemText is the raw text for a system entry, retained across width
 	// changes so SetSize can rewrap without losing the source.
@@ -323,9 +319,8 @@ func (c *ChatLog) rewrapByID(msgID int64) {
 }
 
 // SetSize re-flows the visible window to the new dimensions. If the width
-// changed every entry is re-wrapped (the .NET version does the same — the
-// alternative is a per-line wrap cache that doesn't pay for itself at
-// chat-message rate).
+// changed every entry is re-wrapped (the alternative is a per-line wrap
+// cache that doesn't pay for itself at chat-message rate).
 func (c *ChatLog) SetSize(width, height int) {
 	if width == c.width && height == c.height {
 		return
@@ -480,8 +475,7 @@ func (c *ChatLog) View() string {
 	visible := all[start:end]
 
 	// Pad with empty lines at the top so the log stays anchored to the bottom
-	// when it has fewer than `height` lines of content. This matches the
-	// .NET ChatLogView's bottom-anchored behavior.
+	// when it has fewer than `height` lines of content.
 	if pad := c.height - len(visible); pad > 0 {
 		filler := make([]string, pad)
 		visible = append(filler, visible...)
@@ -549,11 +543,9 @@ var (
 	chatSysopStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorYellow))
 	chatEditedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
 	chatDeletedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
-	// System info lines — /help output, /pins listings, error hints. Matches
-	// the .NET ChatPalette.SystemInfo cyan-grey.
+	// System info lines — /help output, /pins listings, error hints.
 	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorCyan))
-	// Reply chrome: dim "↳ @" + colored parent handle. Matches the .NET
-	// ChatPalette.Chrome + MentionOther split.
+	// Reply chrome: dim "↳ @" + colored parent handle.
 	chatReplyChrome   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 	chatReplyMention  = lipgloss.NewStyle().Foreground(lipgloss.Color(chat.ColorMentionOther))
 	chatReactionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorCyan))

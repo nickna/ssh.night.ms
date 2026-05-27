@@ -2,7 +2,7 @@
 // fair RNG draw per reel against the same symbol weight table; the paytable
 // awards a multiplier of the bet for three-of-a-kind or two-of-a-kind on
 // any line. Designed for the door-games leaderboards, so the house edge is
-// modest by .NET-stack convention (~3-5% over a long session).
+// modest (~3-5% over a long session).
 package slots
 
 import "github.com/nickna/ssh.night.ms/internal/doors"

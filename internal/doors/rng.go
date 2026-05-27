@@ -1,6 +1,6 @@
-// Package doors hosts the games framework + each game's implementation.
-// Mirrors src/Night.Ms.SshServer/Doors/ from the .NET project: a wallet,
-// a per-round ledger, a crypto-strength RNG, plus one tea.Model per game.
+// Package doors hosts the games framework + each game's implementation:
+// a wallet, a per-round ledger, a crypto-strength RNG, plus one tea.Model
+// per game.
 package doors
 
 import (

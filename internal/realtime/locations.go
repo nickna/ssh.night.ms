@@ -31,9 +31,9 @@ type SavedLocation struct {
 // "label already in use" message.
 var ErrLocationDuplicateLabel = errors.New("location label already in use")
 
-// MaxSavedLocationsPerUser caps how many rows a single user can hold. The
-// .NET stack capped at 12; we mirror that to keep the carousel-style picker
-// (when it lands) small enough to fit on a single screen.
+// MaxSavedLocationsPerUser caps how many rows a single user can hold. Kept
+// at 12 to keep the carousel-style picker (when it lands) small enough to
+// fit on a single screen.
 const MaxSavedLocationsPerUser = 12
 
 // ErrLocationLimitReached is returned by AddLocation when the user is
@@ -44,7 +44,7 @@ var ErrLocationLimitReached = errors.New("location limit reached")
 // LocationService is the back end of the Profile-screen Locations tab.
 // Methods are intentionally narrow — list + add + delete + primary — so
 // the surface stays auditable. Rename + reorder are deliberate omissions
-// for now; the .NET stack supported them and they remain a follow-up.
+// for now and remain a follow-up.
 type LocationService struct {
 	Queries *gen.Queries
 }
@@ -142,7 +142,7 @@ func (s *LocationService) Add(ctx context.Context, userID int64, label, canonica
 }
 
 // SeedFromProfile inserts a single saved-location row representing the
-// user's legacy .NET profile city (users.location_*). One-shot login-time
+// user's legacy profile city (users.location_*). One-shot login-time
 // backfill: a fresh List() check inside makes the call a no-op when the
 // user already has any saved rows, so a racing concurrent login won't
 // double-seed and an explicit user choice is never overwritten. Returns

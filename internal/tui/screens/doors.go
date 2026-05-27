@@ -13,10 +13,9 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/tui/theme"
 )
 
-// Doors is the games menu. It mirrors the .NET DoorsScreen visually by using
-// the shared lobby carousel control — same animation, same per-card icons,
-// just a different item set. Each card maps to a nav.Destination; app.go's
-// router instantiates the actual game screen.
+// Doors is the games menu. It uses the shared lobby carousel control — same
+// animation, same per-card icons, just a different item set. Each card maps
+// to a nav.Destination; app.go's router instantiates the actual game screen.
 type Doors struct {
 	sess     *session.Session
 	carousel *components.Carousel

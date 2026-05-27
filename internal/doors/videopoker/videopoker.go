@@ -1,8 +1,8 @@
 // Package videopoker implements 9/6 Jacks or Better — the gold-standard
-// payback variant the .NET stack ships. Deal five cards; the player holds
-// any subset; remaining cards are replaced from the same deck; the final
-// hand is evaluated against the paytable. House edge < 1% with perfect
-// strategy, which we don't enforce on the player.
+// payback variant. Deal five cards; the player holds any subset; remaining
+// cards are replaced from the same deck; the final hand is evaluated against
+// the paytable. House edge < 1% with perfect strategy, which we don't
+// enforce on the player.
 package videopoker
 
 import (
