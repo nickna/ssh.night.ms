@@ -21,50 +21,109 @@ import (
 
 // wsBridgeReadWriter adapts a websocket.Conn to io.ReadWriter so we can hand
 // it straight to bubbletea via tea.WithInput / tea.WithOutput. Binary frames
-// carry the terminal byte stream both directions; text frames are reserved
-// for JSON control messages (resize, etc.) and parsed by a separate goroutine.
+// carry the terminal byte stream both directions; text frames are JSON
+// control messages (resize, etc.) forwarded into the bubbletea program.
+//
+// coder/websocket forbids concurrent calls to conn.Read — "Only one Reader
+// may be open at a time." So readPump is the SOLE conn.Read goroutine; it
+// demultiplexes by message type, pushing binary frames into inbox for Read()
+// to drain and dispatching text frames as tea.WindowSizeMsg.
 type wsBridgeReadWriter struct {
 	conn *websocket.Conn
 	ctx  context.Context
 
-	// readBuf carries the tail of a binary frame we partially returned in a
-	// previous Read call. bubbletea's input loop calls Read with a small
-	// buffer, but a single keystroke (especially escape sequences) may span
-	// several Read calls.
+	// inbox carries binary frame payloads from readPump to Read. Closed by
+	// readPump on exit so Read can detect EOF.
+	inbox chan []byte
+
+	// readBuf carries the tail of a binary frame Read partially returned on
+	// a previous call. bubbletea's input loop reads with a small buffer, so
+	// a single frame often spans multiple Read calls. Only touched by Read,
+	// which bubbletea drives from a single goroutine.
 	readBuf []byte
-	readMu  sync.Mutex
+
+	// readErr is the first error observed by readPump, surfaced to Read once
+	// the inbox is drained.
+	errMu   sync.Mutex
+	readErr error
 
 	// writeMu serializes Write calls so concurrent bubbletea draws don't
 	// interleave bytes in flight to the same WS frame.
 	writeMu sync.Mutex
 }
 
-// Read returns terminal-byte-stream bytes from the next binary WS frame.
-// Text frames (control messages) are skipped — they're handled by the
-// resize loop in HandleBBS instead.
+func newWSBridgeReadWriter(conn *websocket.Conn, ctx context.Context) *wsBridgeReadWriter {
+	return &wsBridgeReadWriter{
+		conn:  conn,
+		ctx:   ctx,
+		inbox: make(chan []byte, 32),
+	}
+}
+
+// start spawns the single reader goroutine. The bubbletea program is needed
+// here so text-frame resize messages can be forwarded as WindowSizeMsg.
+// MUST be called exactly once, after the program has been constructed.
+func (w *wsBridgeReadWriter) start(program *tea.Program) {
+	go w.readPump(program)
+}
+
+func (w *wsBridgeReadWriter) readPump(program *tea.Program) {
+	defer close(w.inbox)
+	for {
+		mt, data, err := w.conn.Read(w.ctx)
+		if err != nil {
+			w.errMu.Lock()
+			w.readErr = err
+			w.errMu.Unlock()
+			return
+		}
+		switch mt {
+		case websocket.MessageBinary:
+			select {
+			case w.inbox <- data:
+			case <-w.ctx.Done():
+				w.errMu.Lock()
+				w.readErr = w.ctx.Err()
+				w.errMu.Unlock()
+				return
+			}
+		case websocket.MessageText:
+			var msg wsControlMsg
+			if json.Unmarshal(data, &msg) != nil {
+				continue
+			}
+			if msg.Type == "resize" {
+				cols, rows := clampDims(msg.Cols, msg.Rows)
+				program.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
+			}
+		}
+	}
+}
+
 func (w *wsBridgeReadWriter) Read(p []byte) (int, error) {
-	w.readMu.Lock()
-	defer w.readMu.Unlock()
 	if len(w.readBuf) > 0 {
 		n := copy(p, w.readBuf)
 		w.readBuf = w.readBuf[n:]
 		return n, nil
 	}
-	for {
-		mt, data, err := w.conn.Read(w.ctx)
-		if err != nil {
-			return 0, err
-		}
-		if mt != websocket.MessageBinary {
-			// Control frames are read by the parallel JSON loop; ignore them
-			// here so they don't get fed to bubbletea as random bytes.
-			continue
+	select {
+	case data, ok := <-w.inbox:
+		if !ok {
+			w.errMu.Lock()
+			err := w.readErr
+			w.errMu.Unlock()
+			if err != nil {
+				return 0, err
+			}
+			return 0, io.EOF
 		}
 		n := copy(p, data)
 		if n < len(data) {
 			w.readBuf = data[n:]
 		}
 		return n, nil
+	case <-w.ctx.Done():
+		return 0, w.ctx.Err()
 	}
 }
 
@@ -223,7 +282,7 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 		go h.deps.Presence.RunHeartbeat(r.Context(), known.Handle, known.UserID)
 	}
 
-	rw := &wsBridgeReadWriter{conn: conn, ctx: bridgeCtx}
+	rw := newWSBridgeReadWriter(conn, bridgeCtx)
 	program := tea.NewProgram(
 		tui.NewRoot(sess),
 		tea.WithInput(rw),
@@ -241,8 +300,9 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Carbonyl, and xterm.js wouldn't answer its terminal-capability probes.
 	sess.SetTeaProgram(program)
 
-	// Forward subsequent resize frames to the program via tea.Send.
-	go h.forwardResizes(bridgeCtx, conn, program)
+	// Single reader goroutine demuxes binary (terminal bytes for bubbletea)
+	// from text (JSON resize control frames forwarded as WindowSizeMsg).
+	rw.start(program)
 
 	if _, err := program.Run(); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 		h.deps.Logger.Info("wsbridge: program exited", "handle", known.Handle, "err", err)
@@ -288,29 +348,6 @@ func (h *handlers) waitForInitialResize(conn *websocket.Conn, parent context.Con
 		}
 		cols, rows := clampDims(msg.Cols, msg.Rows)
 		return cols, rows
-	}
-}
-
-// forwardResizes reads text frames for the lifetime of the bridge and pushes
-// every resize into the bubbletea program as a WindowSizeMsg.
-func (h *handlers) forwardResizes(ctx context.Context, conn *websocket.Conn, program *tea.Program) {
-	for {
-		mt, data, err := conn.Read(ctx)
-		if err != nil {
-			return
-		}
-		if mt != websocket.MessageText {
-			continue
-		}
-		var msg wsControlMsg
-		if json.Unmarshal(data, &msg) != nil {
-			continue
-		}
-		switch msg.Type {
-		case "resize":
-			cols, rows := clampDims(msg.Cols, msg.Rows)
-			program.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
-		}
 	}
 }
 
