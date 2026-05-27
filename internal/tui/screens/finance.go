@@ -62,6 +62,7 @@ const (
 	fmEditPrompt
 	fmConfirmDelete
 	fmDetail
+	fmReader
 )
 
 type financeFocus int
@@ -111,12 +112,19 @@ type Finance struct {
 	deletePending int64
 
 	// Detail-mode payload.
-	detail        *finance.Detail
-	detailKind    finance.Kind
-	detailSym     string
-	detailNews    []finance.Headline
-	detailLoading bool
-	detailErr     string
+	detail           *finance.Detail
+	detailKind       finance.Kind
+	detailSym        string
+	detailNews       []finance.Headline
+	detailNewsCursor int
+	detailLoading    bool
+	detailErr        string
+
+	// Reader-mode delegate + return-to breadcrumb. The reader can be opened
+	// from either the list view's news pane (return to fmList) or the Detail
+	// view's related-news list (return to fmDetail).
+	reader         *components.ArticleReader
+	readerReturnTo financeMode
 
 	// Status line content; cleared on next user action.
 	statusMsg  string
@@ -131,6 +139,7 @@ func NewFinance(sess *session.Session) tea.Model {
 		sess:    sess,
 		loading: true,
 		input:   in,
+		reader:  components.NewArticleReader(),
 	}
 }
 
@@ -508,6 +517,13 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail = msg.detail
 		m.detailNews = msg.news
+		if m.detailNewsCursor >= len(m.detailNews) {
+			m.detailNewsCursor = 0
+		}
+		return m, nil
+
+	case components.ArticleReaderLoadedMsg:
+		m.reader.Loaded(msg)
 		return m, nil
 
 	case nav.NavigateMsg:
@@ -527,6 +543,8 @@ func (m *Finance) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(k)
 	case fmDetail:
 		return m.handleDetailKey(k)
+	case fmReader:
+		return m.handleReaderKey(k)
 	default:
 		return m.handleListKey(k)
 	}
@@ -573,7 +591,9 @@ func (m *Finance) handleListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == ffRows {
 			return m, m.openDetail()
 		}
-		// In news focus, Enter would open a reader — punted to v1.1.
+		if m.focus == ffNews && m.newsCursor >= 0 && m.newsCursor < len(m.news) {
+			return m, m.openReader(m.news[m.newsCursor].URL, fmList)
+		}
 	case "up":
 		m.moveCursor(-1)
 		return m, nil
@@ -674,6 +694,7 @@ func (m *Finance) handleDetailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = fmList
 		m.detail = nil
 		m.detailNews = nil
+		m.detailNewsCursor = 0
 		m.detailErr = ""
 		return m, nil
 	case "r":
@@ -682,6 +703,42 @@ func (m *Finance) handleDetailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.detailErr = ""
 			return m, m.loadDetail(m.rows[m.rowCursor].item)
 		}
+	case "up", "k":
+		if m.detailNewsCursor > 0 {
+			m.detailNewsCursor--
+		}
+	case "down", "j":
+		if m.detailNewsCursor < len(m.detailNews)-1 {
+			m.detailNewsCursor++
+		}
+	case "enter":
+		if m.detailNewsCursor >= 0 && m.detailNewsCursor < len(m.detailNews) {
+			return m, m.openReader(m.detailNews[m.detailNewsCursor].URL, fmDetail)
+		}
+	}
+	return m, nil
+}
+
+func (m *Finance) openReader(target string, returnTo financeMode) tea.Cmd {
+	if target == "" {
+		return nil
+	}
+	m.readerReturnTo = returnTo
+	m.mode = fmReader
+	return m.reader.Load(m.sess.Ctx(), target)
+}
+
+func (m *Finance) handleReaderKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.reader.Update(k) {
+		return m, nil
+	}
+	switch k.String() {
+	case "esc", "q":
+		m.mode = fmList
+		if m.readerReturnTo == fmDetail {
+			m.mode = fmDetail
+		}
+		m.reader.Clear()
 	}
 	return m, nil
 }
@@ -718,8 +775,11 @@ func (m *Finance) View() string {
 	if m.sess.Width == 0 || m.sess.Height == 0 {
 		return "initializing..."
 	}
-	if m.mode == fmDetail {
+	switch m.mode {
+	case fmDetail:
 		return m.viewDetail()
+	case fmReader:
+		return m.viewReader()
 	}
 	return m.viewList()
 }
@@ -727,7 +787,7 @@ func (m *Finance) View() string {
 func (m *Finance) viewList() string {
 	var b strings.Builder
 
-	hint := "watchlist · A add · E edit · D del · K/J move · Enter detail · N news · R refresh · Esc back"
+	hint := "watchlist · A add · E edit · D del · K/J move · N news · Enter detail/article · R refresh · Esc back"
 	b.WriteString(financeTitle.Render("Finance") + "  " + financeHint.Render(hint))
 	b.WriteString("\n\n")
 
@@ -908,7 +968,7 @@ func (m *Finance) formatRow(r financeRow, sparkW int) string {
 
 func (m *Finance) viewDetail() string {
 	var b strings.Builder
-	hint := "R refresh · Esc back"
+	hint := "↑/↓ news · Enter article · R refresh · Esc back"
 	b.WriteString(financeTitle.Render("Finance ▸ "+m.detailSym) + "  " + financeHint.Render(hint))
 	b.WriteString("\n\n")
 	switch {
@@ -963,11 +1023,15 @@ func (m *Finance) viewDetail() string {
 		b.WriteString("\n")
 		b.WriteString(financeHdr.Render("── related news ─────────────────────────────────"))
 		b.WriteString("\n")
-		for _, h := range m.detailNews {
+		for i, h := range m.detailNews {
 			age := humanizeAge(time.Since(h.Published))
-			b.WriteString(financeNews.Render("  " + truncate(h.Title, 70)))
-			b.WriteString("  ")
-			b.WriteString(financeAge.Render("(" + age + ")"))
+			line := fmt.Sprintf("  %s  %s", truncate(h.Title, 70), financeAge.Render("("+age+")"))
+			if i == m.detailNewsCursor {
+				line = financeCur.Render(line)
+			} else {
+				line = financeNews.Render(line)
+			}
+			b.WriteString(line)
 			b.WriteString("\n")
 		}
 	}
@@ -1118,4 +1182,8 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func (m *Finance) viewReader() string {
+	return m.reader.View(m.sess.Width, m.sess.Height, "Finance › Reader")
 }
