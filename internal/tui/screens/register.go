@@ -297,16 +297,15 @@ func (m *Register) View() string {
 	submit := "Register"
 	cancel := "Disconnect"
 	submitFocus := m.maxFocus - 1
+	submitBtn := regBtn.Render(submit)
 	if m.focus == submitFocus {
-		b.WriteString("  " + regBtnFocus.Render(submit) + "  ")
-	} else {
-		b.WriteString("  " + regBtn.Render(submit) + "  ")
+		submitBtn = regBtnFocus.Render(submit)
 	}
+	cancelBtn := regBtn.Render(cancel)
 	if m.focus == m.maxFocus {
-		b.WriteString(regBtnFocus.Render(cancel) + "\n\n")
-	} else {
-		b.WriteString(regBtn.Render(cancel) + "\n\n")
+		cancelBtn = regBtnFocus.Render(cancel)
 	}
+	b.WriteString("  " + lipgloss.JoinHorizontal(lipgloss.Top, submitBtn, "  ", cancelBtn) + "\n\n")
 
 	if m.status != "" {
 		if strings.HasPrefix(m.status, "[!]") {
