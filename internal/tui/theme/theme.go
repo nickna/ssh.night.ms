@@ -28,9 +28,10 @@ const (
 	ColorSuitRed  = ColorRed
 	ColorSuitInk  = ColorText
 	ColorCardHeld = ColorYellow
-	ColorFeltBJ   = "#2E7D5B"
-	ColorFeltVP   = "#3A8FB7"
-	ColorFeltHE   = "#9E2B3C"
+	ColorFeltBJ        = "#2E7D5B"
+	ColorFeltVP        = "#3A8FB7"
+	ColorFeltHE        = "#9E2B3C"
+	ColorFeltRoulette  = "#7A1F2E" // dark wine red — distinct from Hold'em's brighter burgundy
 )
 
 var (

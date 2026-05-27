@@ -38,6 +38,11 @@ const (
 	// game_rounds stats and is reached from the same Doors carousel.
 	DestLeaderboards
 
+	// DestRoulette is the multiplayer roulette table — one global shared
+	// wheel every roulette player sees the same spin on. Reached from the
+	// Doors carousel.
+	DestRoulette
+
 	// DestWeb is the Carbonyl-backed full browser. Always shown in the
 	// lobby; the screen itself surfaces the reason if a launch can't
 	// actually happen (WS session, missing binary, kill switch off).
@@ -86,6 +91,8 @@ func (d Destination) Title() string {
 		return "Hold'em MP"
 	case DestLeaderboards:
 		return "Leaderboards"
+	case DestRoulette:
+		return "Roulette"
 	case DestWeb:
 		return "Web"
 	}

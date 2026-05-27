@@ -38,7 +38,11 @@ func NewDoors(sess *session.Session) tea.Model {
 		{Title: "Blackjack", Hotkey: 'b', Destination: nav.DestBlackjack, Icon: icon("blackjack")},
 		{Title: "Hold'em", Hotkey: 't', Destination: nav.DestHoldem, Icon: icon("holdem")},
 		{Title: "Hold'em MP", Hotkey: 'm', Destination: nav.DestHoldemMP, Icon: icon("holdem")},
-		{Title: "Leaderboards", Hotkey: 'r', Destination: nav.DestLeaderboards, Icon: icon("leaderboards")},
+		{Title: "Roulette", Hotkey: 'r', Destination: nav.DestRoulette, Icon: icon("roulette")},
+		// Leaderboards moved from 'r' → 'L' so Roulette claims the natural 'r'.
+		// Uppercase 'L' keeps it distinct from the carousel's lowercase 'l'
+		// (which the carousel control reserves as → / next).
+		{Title: "Leaderboards", Hotkey: 'L', Destination: nav.DestLeaderboards, Icon: icon("leaderboards")},
 	}
 	return &Doors{sess: sess, carousel: components.NewCarousel(items)}
 }

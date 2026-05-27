@@ -129,6 +129,12 @@ type PostRead struct {
 	LastReadPostID *int64
 }
 
+type RouletteState struct {
+	Name      string
+	Snapshot  []byte
+	UpdatedAt pgtype.Timestamptz
+}
+
 type SecurityEvent struct {
 	ID        int64
 	At        pgtype.Timestamptz

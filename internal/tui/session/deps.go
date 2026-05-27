@@ -10,6 +10,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
+	roulettemp "github.com/nickna/ssh.night.ms/internal/doors/roulette/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
@@ -95,6 +96,12 @@ type ArtDeps struct {
 // door screens.
 type GameDeps struct {
 	HoldemRegistry *multiplayer.Registry
+
+	// Roulette is the singleton multiplayer roulette coordinator. Lifetime
+	// is owned by main.go via roulettemp.Registry; screens reach the live
+	// coordinator through this pointer. Nil during early boot or when the
+	// registry is configured-out (tests).
+	Roulette *roulettemp.Coordinator
 
 	// Wallet is the process-wide WalletService each door game uses to load,
 	// debit, and credit credits and to record ledger entries. Stateless

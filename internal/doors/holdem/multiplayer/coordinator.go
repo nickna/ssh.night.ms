@@ -9,6 +9,7 @@ import (
 
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/cards"
+	gamesmp "github.com/nickna/ssh.night.ms/internal/doors/multiplayer"
 )
 
 // TableSnapshot is the broadcast wire-shape. Coordinator publishes one after
@@ -64,38 +65,14 @@ type Coordinator struct {
 	onSettlement func(s Settlement)
 }
 
-// PlayerMovement is one seat's per-hand economic outcome. UserID == 0
-// means the seat is a CPU; the ledger filters those out at persist time.
-// Mirrors src/Night.Ms.SshServer/Doors/Multiplayer/PlayerMovement.cs in
-// shape so a hand-replay tool decoding either stack's audit trail sees
-// the same fields.
-type PlayerMovement struct {
-	UserID  int64
-	Handle  string
-	Wagered int32 // total committed across all streets of this hand
-	Payout  int32 // chips won this hand (0 for losers)
-	Stack   int32 // chip stack after settlement
-}
-
-// Settlement is the payload onSettlement receives. The coordinator
-// constructs it from the engine's per-seat Committed + Payouts + Board
-// after a hand ends. Details is the JSON blob that lands in
-// multiplayer_hands.details — board cards + per-seat payouts.
-type Settlement struct {
-	TableID    int64
-	GameKey    string
-	HandNumber int64
-	Movements  []PlayerMovement
-	Details    []byte // JSON
-}
-
-// Ledger is the persistence contract the coordinator depends on. Defined
-// here so the multiplayer package doesn't have to import a concrete
-// ledger implementation; the registry's wiring closure adapts whichever
-// realtime-layer service the host wires up.
-type Ledger interface {
-	SettleHand(ctx context.Context, s Settlement) error
-}
+// PlayerMovement / Settlement / Ledger are aliases for the shared
+// internal/doors/multiplayer types — lifted out of this package so a second
+// multiplayer game (roulette) can write multiplayer_hands rows without
+// importing the Hold'em coordinator. Call sites keep using the original
+// names; the alias makes the move source-compatible.
+type PlayerMovement = gamesmp.PlayerMovement
+type Settlement = gamesmp.Settlement
+type Ledger = gamesmp.Ledger
 
 // command is the union of operations the coordinator processes. Each carries
 // a reply chan so callers can wait for the result without locking the

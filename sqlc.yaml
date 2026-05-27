@@ -10,6 +10,7 @@ sql:
       - "internal/data/migrations/000006_system_settings.up.sql"
       - "internal/data/migrations/000008_web_browsing.up.sql"
       - "internal/data/migrations/000009_users_preferred_news_source.up.sql"
+      - "internal/data/migrations/000010_roulette_state.up.sql"
     queries: "internal/data/queries"
     gen:
       go:

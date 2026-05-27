@@ -390,6 +390,9 @@ func (m *Root) route(dest nav.Destination, arg string) (tea.Model, tea.Cmd) {
 	case nav.DestLeaderboards:
 		m.screen = screens.NewLeaderboards(m.sess)
 		return m, m.screen.Init()
+	case nav.DestRoulette:
+		m.screen = screens.NewRoulette(m.sess)
+		return m, m.screen.Init()
 	case nav.DestAlerts:
 		m.screen = screens.NewAlerts(m.sess)
 		return m, m.screen.Init()

@@ -25,6 +25,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/doors"
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
+	roulettemp "github.com/nickna/ssh.night.ms/internal/doors/roulette/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
@@ -114,7 +115,7 @@ func main() {
 	}
 	go settingsCache.Run(ctx)
 
-	sessionDeps, holdemReg := buildSessionDeps(ctx, pool, queries, hasher, redisClient, opts, logger)
+	sessionDeps, holdemReg, rouletteReg := buildSessionDeps(ctx, pool, queries, hasher, redisClient, opts, logger)
 
 	// Persistent-ban cache (Phase B): in-process map of active security_ip_bans
 	// rows, refreshed every 30s and push-invalidated via Redis pub/sub. Load
@@ -280,7 +281,7 @@ func main() {
 		"ssh_login_grace", opts.SSHSecurity.LoginGrace,
 		"ssh_max_conn_per_ip", opts.SSHSecurity.MaxConnPerIP)
 
-	runListeners(ctx, srv, sshListener, webSrv, holdemReg, logger)
+	runListeners(ctx, srv, sshListener, webSrv, holdemReg, rouletteReg, logger)
 }
 
 // runHealthcheck backs the Docker HEALTHCHECK in deploy/compose.yml. The
@@ -389,7 +390,7 @@ func buildSessionDeps(
 	redisClient *redis.Client,
 	opts config.Options,
 	logger *slog.Logger,
-) (session.Deps, *multiplayer.Registry) {
+) (session.Deps, *multiplayer.Registry, *roulettemp.Registry) {
 	// Each service gets a logger pre-tagged with component=<name>; downstream
 	// log lines inherit the tag without each call site having to repeat it.
 	// slog.Logger.With is cheap (it just allocates a child handler with the
@@ -410,6 +411,23 @@ func buildSessionDeps(
 		logger.Warn("holdem: restore tables", "err", err)
 	}
 	cancel()
+
+	// Roulette singleton coordinator. The registry restores the rolling
+	// history from roulette_state on boot, then Coordinator.Run starts the
+	// phase machine — the wheel runs forever, even with zero subscribers.
+	walletSvc := &doors.WalletService{Queries: queries}
+	rouletteReg := roulettemp.NewRegistry(
+		ctx, queries, mpLedger,
+		&roulettemp.WalletAdapter{Svc: walletSvc},
+		doors.CryptoRng{},
+		logger.With("component", "roulette-mp"),
+	)
+	restoreCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+	if err := rouletteReg.Restore(restoreCtx); err != nil {
+		logger.Warn("roulette: restore state", "err", err)
+	}
+	cancel()
+	go rouletteReg.Coordinator().Run(ctx)
 
 	deps := session.Deps{
 		Core: session.CoreDeps{
@@ -435,14 +453,15 @@ func buildSessionDeps(
 		Art:       buildArt(opts, logger),
 		Games: session.GameDeps{
 			HoldemRegistry: holdemReg,
-			Wallet:         &doors.WalletService{Queries: queries},
+			Roulette:       rouletteReg.Coordinator(),
+			Wallet:         walletSvc,
 		},
 		Policy: session.PolicyDeps{
 			BootstrapSysopHandle: opts.BootstrapSysopHandle,
 			MinPasswordLength:    8,
 		},
 	}
-	return deps, holdemReg
+	return deps, holdemReg, rouletteReg
 }
 
 // attachSecurity bolts the BanCache + settings.Cache onto an already-built
@@ -590,7 +609,7 @@ func buildArt(opts config.Options, logger *slog.Logger) session.ArtDeps {
 // sshListener is the netlimit-wrapped TCP listener already bound to the SSH
 // address; transport serves on it via ServeWithListener so the per-IP gates
 // run before the SSH handshake.
-func runListeners(ctx context.Context, srv *transport.Server, sshListener net.Listener, webSrv *web.Server, holdemReg *multiplayer.Registry, logger *slog.Logger) {
+func runListeners(ctx context.Context, srv *transport.Server, sshListener net.Listener, webSrv *web.Server, holdemReg *multiplayer.Registry, rouletteReg *roulettemp.Registry, logger *slog.Logger) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ServeWithListener(sshListener) }()
 	go func() {
@@ -606,6 +625,9 @@ func runListeners(ctx context.Context, srv *transport.Server, sshListener net.Li
 		defer cancel()
 		if err := holdemReg.Persist(shutCtx); err != nil {
 			logger.Warn("holdem: persist on shutdown", "err", err)
+		}
+		if err := rouletteReg.Persist(shutCtx); err != nil {
+			logger.Warn("roulette: persist on shutdown", "err", err)
 		}
 		_ = srv.Shutdown(shutCtx)
 		_ = webSrv.Shutdown(shutCtx)
