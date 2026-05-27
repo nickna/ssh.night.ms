@@ -68,9 +68,6 @@ func NewLobby(sess *session.Session) tea.Model {
 			Title: "Sysop", Hotkey: 's', Destination: nav.DestSysop, Icon: icon("sysop"),
 		})
 	}
-	items = append(items, components.CarouselItem{
-		Title: "Logout", Hotkey: 'l', Destination: nav.DestLogout, Icon: icon("logout"),
-	})
 	// Log the constructed item list once per session-attach so a missing
 	// carousel card never has to be diagnosed by guesswork. INFO so it's on
 	// by default in prod; trivially small even at high session churn.
@@ -140,9 +137,7 @@ func (m *Lobby) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.KeyMsg:
-		// Esc on the lobby is logout — same as .NET LobbyScreen.KeyDown. The
-		// 'l' hotkey jumps to the Logout card in the carousel; the user still
-		// has to press Enter from there. Esc skips that step.
+		// Esc on the lobby is logout — same as .NET LobbyScreen.KeyDown.
 		if msg.String() == "esc" {
 			return m, nav.Navigate(nav.DestLogout)
 		}
