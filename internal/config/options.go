@@ -93,10 +93,14 @@ type Options struct {
 	// OAuth refresh + encryption knobs. OAuthTokenSecret overrides the
 	// default (HKDF of WebCookieSecret) so token encryption can be rotated
 	// independent of session cookies. Refresher cadence + look-ahead govern
-	// the background "renew before expiry" loop.
-	OAuthRefreshInterval time.Duration
-	OAuthRefreshLeadTime time.Duration
-	OAuthTokenSecret     []byte
+	// the background "renew before expiry" loop. BatchSize + Workers tune
+	// per-tick throughput — defaults handle O(100) linked accounts; bump
+	// both if a sign-up wave clusters too many expiries into one window.
+	OAuthRefreshInterval  time.Duration
+	OAuthRefreshLeadTime  time.Duration
+	OAuthRefreshBatchSize int
+	OAuthRefreshWorkers   int
+	OAuthTokenSecret      []byte
 
 	// ORSAPIKey enables the Map screen's directions affordance when set.
 	// Empty disables routing — the map still works for browsing.
@@ -224,6 +228,8 @@ func Load() Options {
 		GoogleDeviceClientSecret: os.Getenv("NIGHTMS_GOOGLE_DEVICE_CLIENT_SECRET"),
 		OAuthRefreshInterval:     durationEnv("NIGHTMS_OAUTH_REFRESH_INTERVAL", 60*time.Second),
 		OAuthRefreshLeadTime:     durationEnv("NIGHTMS_OAUTH_REFRESH_LEAD_TIME", 10*time.Minute),
+		OAuthRefreshBatchSize:    int(uintEnv("NIGHTMS_OAUTH_REFRESH_BATCH_SIZE", 50)),
+		OAuthRefreshWorkers:      int(uintEnv("NIGHTMS_OAUTH_REFRESH_WORKERS", 4)),
 		OAuthTokenSecret:         hexBytesEnv("NIGHTMS_OAUTH_TOKEN_SECRET"),
 		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
 		Carbonyl: CarbonylOptions{

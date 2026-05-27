@@ -163,6 +163,7 @@ Per-user Google + Microsoft account linking that feeds future Gmail / Drive / Ou
 - `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` — shared between both flows.
 - `OAUTH_REDIRECT_BASE` — externally-reachable origin for the auth-code callbacks. Defaults to `http://<WebPublicHost>:<port>` for dev.
 - `OAUTH_REFRESH_INTERVAL` (default `60s`) / `OAUTH_REFRESH_LEAD_TIME` (default `10m`) — refresher cadence + how far ahead of expiry to renew.
+- `OAUTH_REFRESH_BATCH_SIZE` (default `50`) / `OAUTH_REFRESH_WORKERS` (default `4`) — per-tick row cap + worker pool size. Bump together when a sign-up wave packs more expiries than `BATCH_SIZE` into one `LEAD_TIME` window (each tick processes at most `BATCH_SIZE` rows, so the practical ceiling per window is `BATCH_SIZE × (LEAD_TIME / INTERVAL)`).
 - `OAUTH_TOKEN_SECRET` — hex, ≥32 B; optional. When set, sealer key derives from this; otherwise from the cookie secret.
 
 **Auth-code branches removed.** The old `/auth/finish` "pick a handle" signup form and the "Sign in with Google/Microsoft" buttons on the login page are gone. `oauthStart` requires an active session; `oauthCallback` resolves to one of three branches via `auth.ResolveExistingLink` (re-auth on same user, error on other user, fresh-link tx on new). Pre-flight check before deploying this cleanup to a fresh database: `SELECT COUNT(*) FROM users u WHERE u.password_hash IS NULL AND NOT EXISTS (SELECT 1 FROM identity_credentials c WHERE c.user_id = u.id AND c.provider = 'Ssh');` — must be 0 (any matches would be locked out by the cleanup).

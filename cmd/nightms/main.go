@@ -225,6 +225,8 @@ func main() {
 			Logger:    logger.With("component", "oauth-refresh"),
 			Interval:  opts.OAuthRefreshInterval,
 			LeadTime:  opts.OAuthRefreshLeadTime,
+			BatchSize: opts.OAuthRefreshBatchSize,
+			Workers:   opts.OAuthRefreshWorkers,
 		})
 		if err != nil {
 			logger.Error("oauth refresher init", "err", err)
