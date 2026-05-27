@@ -95,13 +95,18 @@
     ws.send(new TextEncoder().encode(data));
   });
 
-  // Resize follows window changes. Debounce so a slow drag doesn't spam.
+  // Resize follows window changes AND user-driven resize of the terminal
+  // box (CSS resize: both on .terminal). A single debounce shared between
+  // the two sources keeps a slow drag from spamming WS frames. The
+  // ResizeObserver also covers font-load reflow and devtools toggles.
   let resizeTimer = null;
-  window.addEventListener("resize", () => {
+  function refit() {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       fit.fit();
       sendResize();
     }, 80);
-  });
+  }
+  window.addEventListener("resize", refit);
+  new ResizeObserver(refit).observe(termEl);
 })();

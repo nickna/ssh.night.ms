@@ -105,7 +105,10 @@ footer { padding: 1em 2em; border-top: 1px solid var(--dim); color: var(--muted)
 
 /* Terminal page. The xterm host needs an explicit size; we let it fill the
    available column inside .main, with a 24-row default if the FitAddon
-   hasn't measured yet. */
+   hasn't measured yet. The 720px page cap is fine for prose pages but
+   crowds the monospace grid here — widen via :has() so only this page
+   gets the larger canvas. */
+body:has(.terminal-wrap) main { max-width: min(95vw, 1400px); }
 .terminal-wrap h1 { color: var(--accent); margin-bottom: 0.2em; }
 .terminal-wrap .muted { margin-top: 0; margin-bottom: 1em; }
 .terminal {
@@ -113,7 +116,12 @@ footer { padding: 1em 2em; border-top: 1px solid var(--dim); color: var(--muted)
   border: 1px solid var(--dim);
   padding: 0.4em;
   min-height: 24em;
+  min-width: 320px;
   height: 70vh;
+  width: 100%;
+  max-width: 100%;
+  resize: both;
+  overflow: hidden;
 }
 .terminal-wrap .status {
   display: inline-block;
