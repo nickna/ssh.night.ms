@@ -80,6 +80,24 @@ type Options struct {
 	MicrosoftClientSecret string
 	OAuthRedirectBase     string
 
+	// Device-flow client for Google. Google's device endpoint rejects
+	// regular Web-application OAuth clients (returns disabled_client) — a
+	// separate "TVs and Limited Input devices" client must be registered in
+	// Google Cloud Console and its credentials supplied here. When either is
+	// empty, the TUI add-account flow surfaces "linking from terminal is
+	// unavailable" rather than erroring; the web /profile/connections page
+	// still works via the auth-code redirect.
+	GoogleDeviceClientID     string
+	GoogleDeviceClientSecret string
+
+	// OAuth refresh + encryption knobs. OAuthTokenSecret overrides the
+	// default (HKDF of WebCookieSecret) so token encryption can be rotated
+	// independent of session cookies. Refresher cadence + look-ahead govern
+	// the background "renew before expiry" loop.
+	OAuthRefreshInterval time.Duration
+	OAuthRefreshLeadTime time.Duration
+	OAuthTokenSecret     []byte
+
 	// ORSAPIKey enables the Map screen's directions affordance when set.
 	// Empty disables routing — the map still works for browsing.
 	ORSAPIKey string
@@ -197,11 +215,16 @@ func Load() Options {
 			PerIPConnBurst:      int(uintEnv("NIGHTMS_SSH_CONN_BURST_PER_IP", 20)),
 			MaxUnauthHandshakes: int(uintEnv("NIGHTMS_SSH_MAX_UNAUTH_HANDSHAKES", 100)),
 		},
-		GoogleClientID:        os.Getenv("NIGHTMS_GOOGLE_CLIENT_ID"),
-		GoogleClientSecret:    os.Getenv("NIGHTMS_GOOGLE_CLIENT_SECRET"),
-		MicrosoftClientID:     os.Getenv("NIGHTMS_MICROSOFT_CLIENT_ID"),
-		MicrosoftClientSecret: os.Getenv("NIGHTMS_MICROSOFT_CLIENT_SECRET"),
-		OAuthRedirectBase:     os.Getenv("NIGHTMS_OAUTH_REDIRECT_BASE"),
+		GoogleClientID:           os.Getenv("NIGHTMS_GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:       os.Getenv("NIGHTMS_GOOGLE_CLIENT_SECRET"),
+		MicrosoftClientID:        os.Getenv("NIGHTMS_MICROSOFT_CLIENT_ID"),
+		MicrosoftClientSecret:    os.Getenv("NIGHTMS_MICROSOFT_CLIENT_SECRET"),
+		OAuthRedirectBase:        os.Getenv("NIGHTMS_OAUTH_REDIRECT_BASE"),
+		GoogleDeviceClientID:     os.Getenv("NIGHTMS_GOOGLE_DEVICE_CLIENT_ID"),
+		GoogleDeviceClientSecret: os.Getenv("NIGHTMS_GOOGLE_DEVICE_CLIENT_SECRET"),
+		OAuthRefreshInterval:     durationEnv("NIGHTMS_OAUTH_REFRESH_INTERVAL", 60*time.Second),
+		OAuthRefreshLeadTime:     durationEnv("NIGHTMS_OAUTH_REFRESH_LEAD_TIME", 10*time.Minute),
+		OAuthTokenSecret:         hexBytesEnv("NIGHTMS_OAUTH_TOKEN_SECRET"),
 		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
 		Carbonyl: CarbonylOptions{
 			BinPath: envOr("NIGHTMS_CARBONYL_BIN_PATH", "/opt/carbonyl/carbonyl"),
@@ -332,4 +355,33 @@ func uintEnv(key string, fallback uint32) uint32 {
 		panic(fmt.Sprintf("config: %s must be a uint, got %q: %v", key, v, err))
 	}
 	return uint32(n)
+}
+
+// durationEnv parses a Go duration string ("60s", "5m", "1h30m"). Panics on
+// malformed input — these knobs are operator-set, not user-set.
+func durationEnv(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		panic(fmt.Sprintf("config: %s must be a duration like '60s' / '10m', got %q: %v", key, v, err))
+	}
+	return d
+}
+
+// hexBytesEnv decodes a hex-encoded secret env var into bytes. Returns
+// nil when unset (callers fall back to a default key source). Panics on
+// malformed hex so a typo is caught at boot, not at first use.
+func hexBytesEnv(key string) []byte {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	b, err := hex.DecodeString(v)
+	if err != nil {
+		panic(fmt.Sprintf("config: %s must be hex, got %q: %v", key, v, err))
+	}
+	return b
 }

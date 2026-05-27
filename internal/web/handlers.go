@@ -36,13 +36,6 @@ type pageData struct {
 	CSRFField template.HTML
 	Error     string
 
-	// OAuth fields are populated by handlers that need them; the layout
-	// template ignores unused fields. Keeping them on pageData avoids a
-	// page-specific data struct for each one-off template.
-	OAuthEnabledGoogle    bool
-	OAuthEnabledMicrosoft bool
-	OAuthFinish           *oauthFinishView
-
 	// Flash is a one-shot status surface used by OAuth-driven redirects.
 	FlashKind string
 	FlashText string
@@ -53,16 +46,6 @@ type pageData struct {
 
 	// Rename sub-page model.
 	Rename *renameData
-}
-
-// oauthFinishView is the template view-model for the "pick a handle" page
-// shown after a brand-new OAuth signup. Suggested handle comes from the
-// email user-part or display name.
-type oauthFinishView struct {
-	Provider        string
-	Email           string
-	Name            string
-	SuggestedHandle string
 }
 
 type webIdentity struct {
@@ -106,12 +89,10 @@ func identityFrom(r *http.Request) *webIdentity {
 
 func (h *handlers) basePage(r *http.Request, title string) pageData {
 	page := pageData{
-		Title:                 title,
-		Host:                  h.cfg.PublicHost,
-		Identity:              identityFrom(r),
-		CSRFField:             csrf.TemplateField(r),
-		OAuthEnabledGoogle:    h.oauth.Google != nil,
-		OAuthEnabledMicrosoft: h.oauth.Microsoft != nil,
+		Title:     title,
+		Host:      h.cfg.PublicHost,
+		Identity:  identityFrom(r),
+		CSRFField: csrf.TemplateField(r),
 	}
 	return page
 }

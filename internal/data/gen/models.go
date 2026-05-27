@@ -112,6 +112,20 @@ type MultiplayerHand struct {
 	SettledAt pgtype.Timestamptz
 }
 
+type OauthToken struct {
+	CredentialID          int64
+	EncryptedAccessToken  []byte
+	EncryptedRefreshToken []byte
+	AccessExpiresAt       pgtype.Timestamptz
+	Scopes                []string
+	TokenType             string
+	NeedsReauth           bool
+	LastRefreshedAt       pgtype.Timestamptz
+	RefreshFailureCount   int32
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+}
+
 type Post struct {
 	ID           int64
 	TopicID      int64

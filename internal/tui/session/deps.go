@@ -6,6 +6,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/auth/devicecode"
+	"github.com/nickna/ssh.night.ms/internal/auth/tokenseal"
 	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/doors"
@@ -52,6 +54,16 @@ type CoreDeps struct {
 	// screen that paints URLs (chat etc.) so a paste-storm in one can't
 	// starve the others' network budget.
 	Images *asyncfetch.Pool
+
+	// OAuthSealer encrypts/decrypts OAuth tokens at rest. Nil when neither
+	// NIGHTMS_OAUTH_TOKEN_SECRET nor a cookie secret is available — screens
+	// gate on nil for the rare misconfigured case.
+	OAuthSealer *tokenseal.Sealer
+
+	// OAuthDeviceCode drives the TUI account-linking flow. Nil when no
+	// OAuth client is configured at all; the profile screen surfaces a
+	// "linking is unavailable" message.
+	OAuthDeviceCode *devicecode.Service
 }
 
 // RealtimeDeps groups the Postgres + Redis-backed live services.

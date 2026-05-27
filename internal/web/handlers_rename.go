@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/nickna/ssh.night.ms/internal/auth"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 )
 
@@ -49,7 +50,7 @@ func (h *handlers) renamePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := strings.TrimSpace(r.PostFormValue("handle"))
-	if !isValidHandle(next) {
+	if !auth.IsValidHandle(next) {
 		h.renderRenameError(w, r, id.Handle, "Handle must be 3-32 chars: letters, digits, underscore, dash.")
 		return
 	}

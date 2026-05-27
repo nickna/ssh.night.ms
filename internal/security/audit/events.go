@@ -171,6 +171,110 @@ func (e ConnRejectedOverlimit) Severity() string          { return SeverityWarn 
 func (e ConnRejectedOverlimit) Subject() (string, string) { return "", e.IP }
 func (e ConnRejectedOverlimit) Details() any              { return map[string]any{"reason": e.Reason} }
 
+// OAuthLinked fires when a user successfully attaches a Google or
+// Microsoft account to their SSH identity. Method discriminates the entry
+// path ("browser" via the /auth/{provider}/callback redirect, "device"
+// via the TUI device-code flow) so the sysop UI can spot anomalies — a
+// flurry of "browser" links from one IP range, etc.
+type OAuthLinked struct {
+	Handle          string
+	IP              string
+	Provider        string
+	ProviderSubject string // the stable per-account ID at the IdP (Google sub, MS oid)
+	Method          string // "browser" | "device"
+}
+
+func (e OAuthLinked) EventType() string         { return "oauth_linked" }
+func (e OAuthLinked) Severity() string          { return SeverityInfo }
+func (e OAuthLinked) Subject() (string, string) { return e.Handle, e.IP }
+func (e OAuthLinked) Details() any {
+	return map[string]any{"provider": e.Provider, "provider_subject": e.ProviderSubject, "method": e.Method}
+}
+
+// OAuthUnlinked fires when a user removes a linked OAuth account, either
+// from the TUI profile screen or the web /profile/connections page.
+type OAuthUnlinked struct {
+	Handle          string
+	IP              string
+	Provider        string
+	ProviderSubject string
+}
+
+func (e OAuthUnlinked) EventType() string         { return "oauth_unlinked" }
+func (e OAuthUnlinked) Severity() string          { return SeverityInfo }
+func (e OAuthUnlinked) Subject() (string, string) { return e.Handle, e.IP }
+func (e OAuthUnlinked) Details() any {
+	return map[string]any{"provider": e.Provider, "provider_subject": e.ProviderSubject}
+}
+
+// OAuthRefreshed fires from the background refresher when an access
+// token is successfully renewed. Routine — info severity — but the
+// before/after timestamps are useful for diagnosing slow drift.
+type OAuthRefreshed struct {
+	Provider        string
+	ProviderSubject string
+	PrevExpiresAt   time.Time
+	NewExpiresAt    time.Time
+}
+
+func (e OAuthRefreshed) EventType() string         { return "oauth_refreshed" }
+func (e OAuthRefreshed) Severity() string          { return SeverityInfo }
+func (e OAuthRefreshed) Subject() (string, string) { return "", "" }
+func (e OAuthRefreshed) Details() any {
+	return map[string]any{
+		"provider":         e.Provider,
+		"provider_subject": e.ProviderSubject,
+		"prev_expires_at":  e.PrevExpiresAt.UTC().Format(time.RFC3339),
+		"new_expires_at":   e.NewExpiresAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// OAuthRefreshFailed fires on a transient refresh failure (provider 5xx,
+// 429, network blip). The refresher bumps refresh_failure_count without
+// flipping needs_reauth until the count crosses the threshold — so a
+// single emit here is informational, not actionable.
+type OAuthRefreshFailed struct {
+	Provider        string
+	ProviderSubject string
+	ErrCode         string
+	ErrMsg          string
+	AttemptCount    int
+}
+
+func (e OAuthRefreshFailed) EventType() string         { return "oauth_refresh_failed" }
+func (e OAuthRefreshFailed) Severity() string          { return SeverityWarn }
+func (e OAuthRefreshFailed) Subject() (string, string) { return "", "" }
+func (e OAuthRefreshFailed) Details() any {
+	return map[string]any{
+		"provider":         e.Provider,
+		"provider_subject": e.ProviderSubject,
+		"err_code":         e.ErrCode,
+		"err_msg":          e.ErrMsg,
+		"attempt_n":        e.AttemptCount,
+	}
+}
+
+// OAuthReauthRequired fires when the refresher gives up on a row — either
+// the provider returned invalid_grant (refresh token revoked or expired)
+// or the soft-failure counter crossed the threshold. The token row gets
+// needs_reauth=true and the profile UI surfaces a "re-authorize" badge.
+type OAuthReauthRequired struct {
+	Provider        string
+	ProviderSubject string
+	Reason          string
+}
+
+func (e OAuthReauthRequired) EventType() string         { return "oauth_reauth_required" }
+func (e OAuthReauthRequired) Severity() string          { return SeverityWarn }
+func (e OAuthReauthRequired) Subject() (string, string) { return "", "" }
+func (e OAuthReauthRequired) Details() any {
+	return map[string]any{
+		"provider":         e.Provider,
+		"provider_subject": e.ProviderSubject,
+		"reason":           e.Reason,
+	}
+}
+
 // HandshakeFailed fires from the SSH server's ConnectionFailedCallback —
 // captures bad MACs, version-string scanners, slowloris-timed-out conns,
 // protocol-downgrade probes. None of these reach the auth callbacks, so

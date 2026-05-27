@@ -127,12 +127,47 @@ The SSH listener is exposed direct to the public internet (no L4 proxy in front,
 - `NIGHTMS_PERSISTENT_BAN_THRESHOLD` — IP lockcount that auto-promotes to a `security_ip_bans` row. Default 3.
 - `NIGHTMS_PERSISTENT_BAN_DURATION_SECONDS` — TTL applied to auto-promoted ban rows. Default 86400. Sysop-issued `ban-ip` commands take an explicit duration.
 
-**Audit (`internal/security/audit`):** structured `Event`s land in `security_events` (Postgres, async + buffered) and slog JSON (synchronous, never lost). Event types: `auth_success`, `auth_failure`, `lockout_handle`, `lockout_ip`, `persistent_ban_auto`, `persistent_ban_manual`, `persistent_ban_revoke`, `conn_rejected_overlimit`, `handshake_failed`. `NIGHTMS_AUDIT_BUFFER_SIZE` (default 2048) sizes the in-process buffer; drops increment the `audit_events_dropped_total` expvar.
+**Audit (`internal/security/audit`):** structured `Event`s land in `security_events` (Postgres, async + buffered) and slog JSON (synchronous, never lost). Event types: `auth_success`, `auth_failure`, `lockout_handle`, `lockout_ip`, `persistent_ban_auto`, `persistent_ban_manual`, `persistent_ban_revoke`, `conn_rejected_overlimit`, `handshake_failed`, `oauth_linked`, `oauth_unlinked`, `oauth_refreshed`, `oauth_refresh_failed`, `oauth_reauth_required`. `NIGHTMS_AUDIT_BUFFER_SIZE` (default 2048) sizes the in-process buffer; drops increment the `audit_events_dropped_total` expvar.
 
 **Sysop UI (`internal/tui/screens/sysop*.go`):** three tabs cycled with `Tab` (or `1`/`2`/`3` when the input is empty):
 - **Events** (`sysop_events.go`, default landing tab) — unified chronological feed merging `audit_log` (sysop actions) and `security_events` rows via a Postgres `UNION ALL`. Keyset-paginated (`ListUnifiedEvents`), with cursor + PgUp/PgDn navigation, auto-load-more as the cursor approaches the bottom, and a detail modal (Enter) showing the full jsonb payload + related events (same handle/ip within ±5 min via `ListUnifiedEventsRelated`). The textinput at the bottom is a live-debounced filter (150ms quiet window) parsed by `parseFilters` (`sysop_events_filter.go`) into chips: `severity:warn handle:alice ip:1.2.3.4 kind:auth_failure source:audit since:1h until:2026-05-23 text:foo`. Filtered queries take the hand-written `data.ListUnifiedEventsFiltered` path (`internal/data/events_filtered.go`); the dim names are a closed allowlist to bound the SQL surface. `/` re-grabs filter focus from list-navigation mode; `Esc` clears the filter when it's non-empty, otherwise falls through to the page-level back-to-lobby.
 - **Users** (`sysop.go::renderUsers`) — alphabetical user list with flag column (S/B/K). Commands at the prompt: `ban`, `unban`, `sysop`, `unsysop`, `clear-passwordless`, `wall`.
 - **Bans** (`sysop_bans.go`) — active `security_ip_bans` rows. Commands: `ban-ip <ip> [duration] [reason]`, `unban-ip <ip>`. Both go through `auth.BanCache` which push-invalidates over the Redis `security:ban-invalidate` channel so multiple replicas converge in <1s.
+
+## OAuth account linking
+
+Per-user Google + Microsoft account linking that feeds future Gmail / Drive / Outlook / OneDrive integrations. OAuth is **link-only** — there is no "sign in with Google" path. An SSH-authenticated user attaches OAuth identities; tokens are sealed at rest and renewed in the background.
+
+**Two link entry points, one storage layer.**
+- Web (`/profile/connections`): auth-code redirect flow via `/auth/{provider}/start` → IdP → `/auth/{provider}/callback`. Suitable for users already in a browser.
+- SSH TUI (Profile screen → "connected accounts"): OAuth 2.0 device code (RFC 8628) via `internal/auth/devicecode`. Shows the user a short code + a verification URL; they enter the code in any browser, TUI polls and updates. The WebSocket-bridged web terminal uses the same in-process service — no HTTP surface needed.
+
+**Storage.**
+- `identity_credentials` (existing, migration `000001`) — the (provider, subject) UNIQUE index enforces "one OAuth identity → one SSH user" at the SQL level. Both surfaces surface `LinkLookupOtherUser` as "That {provider} account is linked to a different handle."
+- `oauth_tokens` (migration `000011`) — 1:1 with `identity_credentials.id` via FK + ON DELETE CASCADE. Columns: `encrypted_access_token bytea`, `encrypted_refresh_token bytea` (nullable), `access_expires_at`, `scopes text[]`, `needs_reauth bool`, `refresh_failure_count int`, `last_refreshed_at`. Partial index `(access_expires_at) WHERE needs_reauth = false AND encrypted_refresh_token IS NOT NULL` drives the refresher's "soon-expiring" scan.
+
+**Encryption (`internal/auth/tokenseal`).** AES-256-GCM with a key derived via HKDF-SHA256 from either `NIGHTMS_OAUTH_TOKEN_SECRET` (hex, ≥32 B) or — when unset — the existing cookie secret. Domain-separated via the info string `"nightms/oauth-token-v1"`. Sealed-blob layout: `[1B version=0x01][12B nonce][ciphertext+tag]`. **Operational consequence:** rotating the cookie secret invalidates every stored token unless `NIGHTMS_OAUTH_TOKEN_SECRET` was set independently — set it in prod for a rotation path.
+
+**Refresher (`internal/auth/oauthrefresh`).** `go refresher.Run(ctx)` in `main.go` alongside `banCache.Run`. Per-tick (default `NIGHTMS_OAUTH_REFRESH_INTERVAL=60s`): `ListExpiringTokens` for rows expiring within `NIGHTMS_OAUTH_REFRESH_LEAD_TIME` (default `10m`), fan out to a 4-worker pool, decrypt refresh token, call `provider.RefreshToken`, re-seal + `UpsertOAuthToken`. Failure classification via `errors.As(&oauth2.RetrieveError)`: `invalid_grant`/`invalid_request` = hard fail (flip `needs_reauth`), 5xx/429/network = soft fail (bump `refresh_failure_count`; flip `needs_reauth` after ≥5 consecutive). The `COALESCE` in `UpsertOAuthToken` handles Microsoft's rotated refresh tokens AND Google's preserved-on-success behavior in one statement.
+
+**Device-flow service (`internal/auth/devicecode`).** Flow state lives in Redis under `oauth:device:flow:{flow_id}` (TTL = device-code expiry) + `oauth:device:user:{user_id}:{provider}` for the single-in-flight invariant. Begin rate-limited per user to 6 starts per minute via `oauth:device:begin:{user_id}`. The `Poll` state machine maps provider responses to `ResultPending` / `ResultSlowDown` (bump interval +5s) / `ResultApproved` / `ResultDenied` / `ResultExpired` / `ResultDuplicate`. On Approved: `ResolveExistingLink` switches between fresh insert (in a tx with the token row) and re-auth upsert.
+
+**Operator setup (cannot work without these).**
+1. **Google**: register a *second* OAuth client of type "TVs and Limited Input devices" in Google Cloud Console — the regular Web-application client rejects device flow with `disabled_client`. Supply credentials as `NIGHTMS_GOOGLE_DEVICE_CLIENT_ID` + `NIGHTMS_GOOGLE_DEVICE_CLIENT_SECRET`. When unset, the TUI's add-Google flow surfaces "linking from terminal is unavailable" and the user is directed to the web `/profile/connections` page.
+2. **Microsoft**: in the Azure app registration, enable "Allow public client flows" — the same client ID handles both browser (with secret) and device (without secret) flows.
+3. **Google scopes**: the broad scope set (`gmail.readonly`, `drive.readonly`, `documents.readonly` on top of openid/email/profile) requires consent-screen approval once the OAuth project leaves "Testing" mode. Until then, only listed test users can complete the flow.
+
+**Env vars** (all `NIGHTMS_*`):
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — browser auth-code Google client.
+- `GOOGLE_DEVICE_CLIENT_ID` / `GOOGLE_DEVICE_CLIENT_SECRET` — separate device-flow Google client (see operator setup).
+- `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` — shared between both flows.
+- `OAUTH_REDIRECT_BASE` — externally-reachable origin for the auth-code callbacks. Defaults to `http://<WebPublicHost>:<port>` for dev.
+- `OAUTH_REFRESH_INTERVAL` (default `60s`) / `OAUTH_REFRESH_LEAD_TIME` (default `10m`) — refresher cadence + how far ahead of expiry to renew.
+- `OAUTH_TOKEN_SECRET` — hex, ≥32 B; optional. When set, sealer key derives from this; otherwise from the cookie secret.
+
+**Auth-code branches removed.** The old `/auth/finish` "pick a handle" signup form and the "Sign in with Google/Microsoft" buttons on the login page are gone. `oauthStart` requires an active session; `oauthCallback` resolves to one of three branches via `auth.ResolveExistingLink` (re-auth on same user, error on other user, fresh-link tx on new). Pre-flight check before deploying this cleanup to a fresh database: `SELECT COUNT(*) FROM users u WHERE u.password_hash IS NULL AND NOT EXISTS (SELECT 1 FROM identity_credentials c WHERE c.user_id = u.id AND c.provider = 'Ssh');` — must be 0 (any matches would be locked out by the cleanup).
+
+**Audit events.** `oauth_linked` / `oauth_unlinked` fire from both link surfaces with `method: "browser" | "device"`. `oauth_refreshed` fires from each successful refresh; `oauth_refresh_failed` (soft) and `oauth_reauth_required` (hard or threshold-crossed) fire from the refresher and surface in the sysop events feed.
 
 ## Rich-mode browser (Carbonyl)
 

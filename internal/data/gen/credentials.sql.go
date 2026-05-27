@@ -47,6 +47,31 @@ func (q *Queries) DeleteCredentialByID(ctx context.Context, arg DeleteCredential
 	return result.RowsAffected(), nil
 }
 
+const getCredentialByID = `-- name: GetCredentialByID :one
+SELECT id, user_id, provider, subject, metadata, label, created_at, last_used_at
+FROM identity_credentials
+WHERE id = $1
+`
+
+// Look up a credential by primary key. Used by the unlink path to read
+// provider + subject for the audit event and the best-effort RevokeToken
+// call before the DELETE wipes the row.
+func (q *Queries) GetCredentialByID(ctx context.Context, id int64) (IdentityCredential, error) {
+	row := q.db.QueryRow(ctx, getCredentialByID, id)
+	var i IdentityCredential
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Provider,
+		&i.Subject,
+		&i.Metadata,
+		&i.Label,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
 const getCredentialByProviderSubject = `-- name: GetCredentialByProviderSubject :one
 SELECT id, user_id, provider, subject, metadata, label, created_at, last_used_at
 FROM identity_credentials
@@ -72,6 +97,47 @@ func (q *Queries) GetCredentialByProviderSubject(ctx context.Context, arg GetCre
 		&i.Label,
 		&i.CreatedAt,
 		&i.LastUsedAt,
+	)
+	return i, err
+}
+
+const getOAuthTokenByCredentialID = `-- name: GetOAuthTokenByCredentialID :one
+SELECT credential_id, encrypted_access_token, encrypted_refresh_token,
+       access_expires_at, scopes, token_type,
+       needs_reauth, last_refreshed_at, refresh_failure_count
+FROM oauth_tokens
+WHERE credential_id = $1
+`
+
+type GetOAuthTokenByCredentialIDRow struct {
+	CredentialID          int64
+	EncryptedAccessToken  []byte
+	EncryptedRefreshToken []byte
+	AccessExpiresAt       pgtype.Timestamptz
+	Scopes                []string
+	TokenType             string
+	NeedsReauth           bool
+	LastRefreshedAt       pgtype.Timestamptz
+	RefreshFailureCount   int32
+}
+
+// Fetches the sealed token row for a credential. Used by:
+//   - the refresher (to decrypt + refresh a single row)
+//   - the unlink path (to revoke at the provider before delete)
+//   - future Gmail/Drive/etc clients
+func (q *Queries) GetOAuthTokenByCredentialID(ctx context.Context, credentialID int64) (GetOAuthTokenByCredentialIDRow, error) {
+	row := q.db.QueryRow(ctx, getOAuthTokenByCredentialID, credentialID)
+	var i GetOAuthTokenByCredentialIDRow
+	err := row.Scan(
+		&i.CredentialID,
+		&i.EncryptedAccessToken,
+		&i.EncryptedRefreshToken,
+		&i.AccessExpiresAt,
+		&i.Scopes,
+		&i.TokenType,
+		&i.NeedsReauth,
+		&i.LastRefreshedAt,
+		&i.RefreshFailureCount,
 	)
 	return i, err
 }
@@ -115,6 +181,43 @@ func (q *Queries) InsertOAuthCredential(ctx context.Context, arg InsertOAuthCred
 		&i.LastUsedAt,
 	)
 	return i, err
+}
+
+const insertOAuthToken = `-- name: InsertOAuthToken :exec
+INSERT INTO oauth_tokens (
+    credential_id, encrypted_access_token, encrypted_refresh_token,
+    access_expires_at, scopes, token_type,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $7
+)
+`
+
+type InsertOAuthTokenParams struct {
+	CredentialID          int64
+	EncryptedAccessToken  []byte
+	EncryptedRefreshToken []byte
+	AccessExpiresAt       pgtype.Timestamptz
+	Scopes                []string
+	TokenType             string
+	CreatedAt             pgtype.Timestamptz
+}
+
+// Used by the initial-link path inside the same transaction as
+// InsertOAuthCredential. encrypted_refresh_token may be NULL when the
+// provider didn't return one (Google omits it without prompt=consent;
+// Microsoft always returns one with offline_access).
+func (q *Queries) InsertOAuthToken(ctx context.Context, arg InsertOAuthTokenParams) error {
+	_, err := q.db.Exec(ctx, insertOAuthToken,
+		arg.CredentialID,
+		arg.EncryptedAccessToken,
+		arg.EncryptedRefreshToken,
+		arg.AccessExpiresAt,
+		arg.Scopes,
+		arg.TokenType,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const insertSshCredential = `-- name: InsertSshCredential :one
@@ -192,6 +295,134 @@ func (q *Queries) ListCredentialsForUser(ctx context.Context, userID int64) ([]I
 	return items, nil
 }
 
+const listExpiringTokens = `-- name: ListExpiringTokens :many
+SELECT
+    c.id           AS credential_id,
+    c.provider     AS provider,
+    c.subject      AS subject,
+    t.encrypted_refresh_token,
+    t.access_expires_at,
+    t.refresh_failure_count
+FROM oauth_tokens t
+JOIN identity_credentials c ON c.id = t.credential_id
+WHERE t.needs_reauth = false
+  AND t.encrypted_refresh_token IS NOT NULL
+  AND t.access_expires_at < (now() + $1::interval)
+ORDER BY t.access_expires_at ASC
+LIMIT $2
+`
+
+type ListExpiringTokensParams struct {
+	LeadTime  pgtype.Interval
+	BatchSize int32
+}
+
+type ListExpiringTokensRow struct {
+	CredentialID          int64
+	Provider              string
+	Subject               string
+	EncryptedRefreshToken []byte
+	AccessExpiresAt       pgtype.Timestamptz
+	RefreshFailureCount   int32
+}
+
+// Drives the refresher's per-tick scan. Returns rows that will expire
+// within $1 from now and are still eligible (not needs_reauth, has a
+// refresh token). Includes the encrypted refresh token + provider so the
+// worker can decrypt + call the right RefreshToken endpoint. LIMIT caps
+// the batch so a backlog can't stall the loop.
+func (q *Queries) ListExpiringTokens(ctx context.Context, arg ListExpiringTokensParams) ([]ListExpiringTokensRow, error) {
+	rows, err := q.db.Query(ctx, listExpiringTokens, arg.LeadTime, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpiringTokensRow
+	for rows.Next() {
+		var i ListExpiringTokensRow
+		if err := rows.Scan(
+			&i.CredentialID,
+			&i.Provider,
+			&i.Subject,
+			&i.EncryptedRefreshToken,
+			&i.AccessExpiresAt,
+			&i.RefreshFailureCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOAuthCredentialsForUser = `-- name: ListOAuthCredentialsForUser :many
+SELECT
+    c.id, c.provider, c.subject, c.metadata, c.label,
+    c.created_at, c.last_used_at,
+    t.access_expires_at, t.needs_reauth, t.last_refreshed_at,
+    t.scopes, t.refresh_failure_count
+FROM identity_credentials c
+LEFT JOIN oauth_tokens t ON t.credential_id = c.id
+WHERE c.user_id = $1
+  AND c.provider IN ('Google', 'Microsoft')
+ORDER BY c.created_at
+`
+
+type ListOAuthCredentialsForUserRow struct {
+	ID                  int64
+	Provider            string
+	Subject             string
+	Metadata            []byte
+	Label               *string
+	CreatedAt           pgtype.Timestamptz
+	LastUsedAt          pgtype.Timestamptz
+	AccessExpiresAt     pgtype.Timestamptz
+	NeedsReauth         *bool
+	LastRefreshedAt     pgtype.Timestamptz
+	Scopes              []string
+	RefreshFailureCount *int32
+}
+
+// Joined identity_credentials × oauth_tokens view for the linked-accounts
+// UI. LEFT JOIN so a credential row without (yet) a token row still
+// surfaces — that state shouldn't happen post-Phase 2 but the join is
+// defensive against partial inserts.
+func (q *Queries) ListOAuthCredentialsForUser(ctx context.Context, userID int64) ([]ListOAuthCredentialsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listOAuthCredentialsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOAuthCredentialsForUserRow
+	for rows.Next() {
+		var i ListOAuthCredentialsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.Subject,
+			&i.Metadata,
+			&i.Label,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.AccessExpiresAt,
+			&i.NeedsReauth,
+			&i.LastRefreshedAt,
+			&i.Scopes,
+			&i.RefreshFailureCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSshCredentialsForUser = `-- name: ListSshCredentialsForUser :many
 SELECT id, user_id, provider, subject, metadata, label, created_at, last_used_at
 FROM identity_credentials
@@ -230,6 +461,65 @@ func (q *Queries) ListSshCredentialsForUser(ctx context.Context, userID int64) (
 	return items, nil
 }
 
+const markTokenRefreshFailed = `-- name: MarkTokenRefreshFailed :exec
+UPDATE oauth_tokens
+SET refresh_failure_count = refresh_failure_count + 1,
+    needs_reauth          = $2,
+    updated_at            = $3
+WHERE credential_id = $1
+`
+
+type MarkTokenRefreshFailedParams struct {
+	CredentialID int64
+	NeedsReauth  bool
+	UpdatedAt    pgtype.Timestamptz
+}
+
+// Soft-failure path: bump the failure counter; the caller decides whether
+// to also flip needs_reauth (caller passes the desired state in $2).
+func (q *Queries) MarkTokenRefreshFailed(ctx context.Context, arg MarkTokenRefreshFailedParams) error {
+	_, err := q.db.Exec(ctx, markTokenRefreshFailed, arg.CredentialID, arg.NeedsReauth, arg.UpdatedAt)
+	return err
+}
+
+const oAuthTokenStats = `-- name: OAuthTokenStats :many
+SELECT
+    c.provider,
+    COUNT(*) FILTER (WHERE t.needs_reauth = false)::bigint AS active,
+    COUNT(*) FILTER (WHERE t.needs_reauth = true)::bigint  AS needs_reauth
+FROM oauth_tokens t
+JOIN identity_credentials c ON c.id = t.credential_id
+GROUP BY c.provider
+`
+
+type OAuthTokenStatsRow struct {
+	Provider    string
+	Active      int64
+	NeedsReauth int64
+}
+
+// Periodic stats query feeding the expvar gauges. Grouped by provider so
+// the dashboard can split "Google active / needs reauth" from Microsoft.
+func (q *Queries) OAuthTokenStats(ctx context.Context) ([]OAuthTokenStatsRow, error) {
+	rows, err := q.db.Query(ctx, oAuthTokenStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OAuthTokenStatsRow
+	for rows.Next() {
+		var i OAuthTokenStatsRow
+		if err := rows.Scan(&i.Provider, &i.Active, &i.NeedsReauth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const touchCredentialLastUsed = `-- name: TouchCredentialLastUsed :exec
 UPDATE identity_credentials
 SET last_used_at = $2
@@ -243,5 +533,60 @@ type TouchCredentialLastUsedParams struct {
 
 func (q *Queries) TouchCredentialLastUsed(ctx context.Context, arg TouchCredentialLastUsedParams) error {
 	_, err := q.db.Exec(ctx, touchCredentialLastUsed, arg.ID, arg.LastUsedAt)
+	return err
+}
+
+const upsertOAuthToken = `-- name: UpsertOAuthToken :exec
+INSERT INTO oauth_tokens (
+    credential_id, encrypted_access_token, encrypted_refresh_token,
+    access_expires_at, scopes, token_type,
+    needs_reauth, last_refreshed_at, refresh_failure_count,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10
+)
+ON CONFLICT (credential_id) DO UPDATE SET
+    encrypted_access_token  = EXCLUDED.encrypted_access_token,
+    encrypted_refresh_token = COALESCE(EXCLUDED.encrypted_refresh_token, oauth_tokens.encrypted_refresh_token),
+    access_expires_at       = EXCLUDED.access_expires_at,
+    scopes                  = EXCLUDED.scopes,
+    token_type              = EXCLUDED.token_type,
+    needs_reauth            = EXCLUDED.needs_reauth,
+    last_refreshed_at       = EXCLUDED.last_refreshed_at,
+    refresh_failure_count   = EXCLUDED.refresh_failure_count,
+    updated_at              = EXCLUDED.updated_at
+`
+
+type UpsertOAuthTokenParams struct {
+	CredentialID          int64
+	EncryptedAccessToken  []byte
+	EncryptedRefreshToken []byte
+	AccessExpiresAt       pgtype.Timestamptz
+	Scopes                []string
+	TokenType             string
+	NeedsReauth           bool
+	LastRefreshedAt       pgtype.Timestamptz
+	RefreshFailureCount   int32
+	CreatedAt             pgtype.Timestamptz
+}
+
+// Used by both the re-auth path (TUI device-code or browser callback on an
+// existing credential) and by the refresher loop. The COALESCE on
+// encrypted_refresh_token preserves the prior refresh token when the
+// provider didn't rotate it on this exchange — both Google ("usually
+// doesn't rotate") and Microsoft ("always rotates") are handled correctly.
+func (q *Queries) UpsertOAuthToken(ctx context.Context, arg UpsertOAuthTokenParams) error {
+	_, err := q.db.Exec(ctx, upsertOAuthToken,
+		arg.CredentialID,
+		arg.EncryptedAccessToken,
+		arg.EncryptedRefreshToken,
+		arg.AccessExpiresAt,
+		arg.Scopes,
+		arg.TokenType,
+		arg.NeedsReauth,
+		arg.LastRefreshedAt,
+		arg.RefreshFailureCount,
+		arg.CreatedAt,
+	)
 	return err
 }

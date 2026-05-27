@@ -8,13 +8,6 @@
     <label>password <input type="password" name="password" required></label>
     <button type="submit">log in</button>
   </form>
-  {{if or .OAuthEnabledGoogle .OAuthEnabledMicrosoft}}
-  <p class="muted">or sign in with:</p>
-  <ul class="oauth-providers">
-    {{if .OAuthEnabledGoogle}}<li><a href="/auth/google/start">Google</a></li>{{end}}
-    {{if .OAuthEnabledMicrosoft}}<li><a href="/auth/microsoft/start">Microsoft</a></li>{{end}}
-  </ul>
-  {{end}}
   <p class="muted">no account yet? connect via ssh first: <code>ssh -p 2222 yourhandle@{{.Host}}</code></p>
 </section>
 {{end}}

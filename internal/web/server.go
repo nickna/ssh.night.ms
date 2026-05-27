@@ -21,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/security/audit"
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
 )
 
@@ -74,13 +75,18 @@ type Deps struct {
 	// The login template hides buttons for unconfigured providers; OAuth
 	// routes return 404 for them.
 	OAuth OAuthProviders
+
+	// Audit is the structured-event recorder. Used by the OAuth link /
+	// unlink handlers to surface user-driven account changes in the sysop
+	// events feed. Nil-safe — callers check before recording.
+	Audit audit.Recorder
 }
 
 // NewDeps assembles a Deps from the canonical session.Deps and the web-only
 // extras (Lookup, Redis, OAuth). Mirrors the Session.Core / Session.Realtime
 // into the embedded views so handler call sites can stay on the short field
 // names (h.deps.Pool, h.deps.Chat) without main.go having to set them twice.
-func NewDeps(s session.Deps, lookup *auth.Lookup, redis *redis.Client, oauth OAuthProviders) Deps {
+func NewDeps(s session.Deps, lookup *auth.Lookup, redis *redis.Client, oauth OAuthProviders, auditRec audit.Recorder) Deps {
 	return Deps{
 		Session:      s,
 		CoreDeps:     s.Core,
@@ -88,6 +94,7 @@ func NewDeps(s session.Deps, lookup *auth.Lookup, redis *redis.Client, oauth OAu
 		Lookup:       lookup,
 		Redis:        redis,
 		OAuth:        oauth,
+		Audit:        auditRec,
 	}
 }
 
@@ -190,14 +197,13 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 		r.Get("/profile/rename", h.renameGet)
 		r.Post("/profile/rename", h.renamePost)
 
-		// OAuth routes. /auth/{provider}/start kicks the dance; /callback
-		// validates state + finalizes login or link; /finish is the "pick
-		// a handle" page for first-time OAuth signups. CSRF protection is
-		// inherited from this group.
+		// OAuth account-linking routes. /auth/{provider}/start requires an
+		// active session and kicks the link dance; /callback validates state
+		// and attaches the credential to the signed-in user. There is no
+		// "log in with Google" path — OAuth is for linking Gmail/Drive/etc.
+		// access to an existing SSH account.
 		r.Get("/auth/{provider}/start", h.oauthStart)
 		r.Get("/auth/{provider}/callback", h.oauthCallback)
-		r.Get("/auth/finish", h.oauthFinishGet)
-		r.Post("/auth/finish", h.oauthFinishPost)
 	})
 
 	// /u/{handle}/avatar.png is outside the CSRF group — it's a GET image

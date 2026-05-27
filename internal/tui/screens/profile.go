@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/auth/devicecode"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/realtime"
@@ -91,6 +93,18 @@ type Profile struct {
 	// Keys modal cursor.
 	keysCursor int
 
+	// OAuth modal state — list of Google/Microsoft accounts linked to this
+	// SSH user, plus the device-code flow state while linking a new one.
+	// oauthCreds is hydrated by oauthLoadedMsg; oauthFlow is non-nil only
+	// while modeOAuthDevice is active.
+	oauthCreds          []gen.ListOAuthCredentialsForUserRow
+	oauthCursor         int
+	oauthErr            string
+	oauthBusy           bool
+	oauthFlow           *devicecode.Flow
+	oauthFlowProvider   auth.OAuthProviderKind
+	oauthFlowStatus     string
+
 	// Add-key modal inputs. Built fresh in openAddKey so a cancelled attempt
 	// leaves no residue. addKeyFocus: 0=public-key, 1=label.
 	addKeyPublic textinput.Model
@@ -134,6 +148,9 @@ const (
 	modeLocations
 	modeConfirm
 	modeFinger
+	modeOAuth       // linked-accounts list
+	modeOAuthAdd    // provider picker before kicking off a device flow
+	modeOAuthDevice // showing user code + polling
 )
 
 // NewProfile builds the Profile screen pointed at the logged-in user.
@@ -152,9 +169,10 @@ func NewProfileFinger(sess *session.Session, handle string) tea.Model {
 //
 
 type profileLoadedMsg struct {
-	snap *realtime.ProfileSnapshot
-	keys []gen.IdentityCredential
-	err  error
+	snap   *realtime.ProfileSnapshot
+	keys   []gen.IdentityCredential
+	oauth  []gen.ListOAuthCredentialsForUserRow
+	err    error
 }
 
 type profileSavedMsg struct{ err error }
@@ -209,7 +227,10 @@ func (m *Profile) loadSelf() tea.Cmd {
 		if err != nil {
 			return profileLoadedMsg{snap: snap, err: err}
 		}
-		return profileLoadedMsg{snap: snap, keys: keys}
+		// OAuth list is best-effort — a failure here shouldn't block the
+		// profile page render. The list is hidden behind a button anyway.
+		oauth, _ := queries.ListOAuthCredentialsForUser(ctx, userID)
+		return profileLoadedMsg{snap: snap, keys: keys, oauth: oauth}
 	}
 }
 
@@ -297,6 +318,10 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snap = msg.snap
 		m.keys = msg.keys
+		m.oauthCreds = msg.oauth
+		if m.oauthCursor >= len(m.oauthCreds) {
+			m.oauthCursor = 0
+		}
 		if m.mode != modeFinger {
 			m.hydrate()
 		}
@@ -433,6 +458,70 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cancel()
 		return m, m.reloadLocations()
 
+	case oauthListReloadedMsg:
+		if msg.err != nil {
+			m.oauthErr = "load failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.oauthCreds = msg.rows
+		if m.oauthCursor >= len(m.oauthCreds) {
+			m.oauthCursor = 0
+		}
+		return m, nil
+
+	case oauthFlowStartedMsg:
+		m.oauthBusy = false
+		if msg.err != nil {
+			m.oauthErr = oauthBeginErrorMessage(msg.err)
+			m.mode = modeOAuthAdd
+			return m, nil
+		}
+		m.oauthFlow = msg.flow
+		m.oauthFlowProvider = msg.provider
+		m.oauthFlowStatus = ""
+		m.mode = modeOAuthDevice
+		return m, m.scheduleOAuthPoll(msg.flow.Interval)
+
+	case oauthPollTickMsg:
+		// Stale tick after the user cancelled or the flow already
+		// resolved — silently drop.
+		if m.oauthFlow == nil || msg.flowID != m.oauthFlow.ID {
+			return m, nil
+		}
+		return m, m.pollOAuthFlow()
+
+	case oauthPollResultMsg:
+		if msg.err != nil {
+			m.oauthFlowStatus = "poll error: " + msg.err.Error()
+			return m, m.scheduleOAuthPoll(3 * time.Second)
+		}
+		switch msg.result.Kind {
+		case devicecode.ResultApproved:
+			m.notice = fmt.Sprintf("%s account linked.", m.oauthFlowProvider)
+			m.noticeKind = "ok"
+			m.oauthFlow = nil
+			m.oauthFlowStatus = ""
+			m.mode = modeOAuth
+			return m, m.reloadOAuth()
+		case devicecode.ResultDuplicate, devicecode.ResultDenied, devicecode.ResultExpired:
+			m.oauthFlowStatus = oauthStatusForResult(msg.result.Kind)
+			return m, nil
+		case devicecode.ResultPending, devicecode.ResultSlowDown:
+			m.oauthFlowStatus = oauthStatusForResult(msg.result.Kind)
+			return m, m.scheduleOAuthPoll(msg.result.NextPollAfter)
+		}
+		return m, nil
+
+	case oauthUnlinkedMsg:
+		if msg.err != nil {
+			m.notice = "unlink failed: " + msg.err.Error()
+			m.noticeKind = "err"
+			return m, nil
+		}
+		m.notice = "connected account unlinked."
+		m.noticeKind = "ok"
+		return m, m.reloadOAuth()
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -457,14 +546,20 @@ func (m *Profile) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(k)
 	case modeFinger:
 		return m.handleFingerKey(k)
+	case modeOAuth:
+		return m.handleOAuthKey(k)
+	case modeOAuthAdd:
+		return m.handleOAuthAddKey(k)
+	case modeOAuthDevice:
+		return m.handleOAuthDeviceKey(k)
 	}
 	return m, nil
 }
 
 // profileTabStops is the number of focusable widgets on the profile tab.
 // Order: realName, location, bio, tz, tempUnit, clock, dateFmt,
-// SaveBtn, PasswordBtn, KeysBtn, ViewSelfBtn, LocationsBtn.
-const profileTabStops = 12
+// SaveBtn, PasswordBtn, KeysBtn, ViewSelfBtn, LocationsBtn, ConnectionsBtn.
+const profileTabStops = 13
 
 // settingsTabStops: suppressKeys, requireSsh, SaveBtn.
 const settingsTabStops = 3
@@ -564,6 +659,8 @@ func (m *Profile) handleProfileTabKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nav.NavigateWith(nav.DestProfile, m.sess.Identity.Handle)
 		case 11:
 			return m, m.openLocations()
+		case 12:
+			return m, m.openOAuth()
 		}
 	case "left":
 		switch m.focusIndex {
@@ -726,6 +823,13 @@ func (m *Profile) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if id > 0 {
 			return m, m.deleteLocation(id)
 		}
+	case strings.HasPrefix(kind, "removeOAuth:"):
+		idStr := strings.TrimPrefix(kind, "removeOAuth:")
+		var id int64
+		fmt.Sscanf(idStr, "%d", &id)
+		if id > 0 {
+			return m, m.unlinkOAuth(id)
+		}
 	}
 	return m, nil
 }
@@ -784,6 +888,21 @@ func (m *Profile) View() string {
 		base := m.renderTabs()
 		dim := components.DimSGR(base, theme.ColorDim)
 		modal := m.renderConfirmModal()
+		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
+	case modeOAuth:
+		base := m.renderTabs()
+		dim := components.DimSGR(base, theme.ColorDim)
+		modal := m.renderOAuthModal()
+		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
+	case modeOAuthAdd:
+		base := m.renderTabs()
+		dim := components.DimSGR(base, theme.ColorDim)
+		modal := m.renderOAuthAddModal()
+		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
+	case modeOAuthDevice:
+		base := m.renderTabs()
+		dim := components.DimSGR(base, theme.ColorDim)
+		modal := m.renderOAuthDeviceModal()
 		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
 	}
 	return ""
@@ -877,12 +996,17 @@ func (m *Profile) renderProfileLeft() string {
 	if m.sess.PrimaryLocation != nil {
 		locsLabel = fmt.Sprintf("saved locations… (%s)", m.sess.PrimaryLocation.Label)
 	}
+	oauthLabel := "connected accounts…"
+	if n := len(m.oauthCreds); n > 0 {
+		oauthLabel = fmt.Sprintf("connected accounts… (%d linked)", n)
+	}
 
 	saveBtn := m.styleButton("save", m.focusIndex == 7)
 	pwBtn := m.styleButton(pwLabel, m.focusIndex == 8)
 	keysBtn := m.styleButton(keysLabel, m.focusIndex == 9)
 	viewBtn := m.styleButton(viewLabel, m.focusIndex == 10)
 	locsBtn := m.styleButton(locsLabel, m.focusIndex == 11)
+	oauthBtn := m.styleButton(oauthLabel, m.focusIndex == 12)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		identity,
@@ -894,6 +1018,7 @@ func (m *Profile) renderProfileLeft() string {
 		keysBtn,
 		viewBtn,
 		locsBtn,
+		oauthBtn,
 	)
 }
 

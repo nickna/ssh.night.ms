@@ -19,6 +19,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
+	"github.com/nickna/ssh.night.ms/internal/auth/devicecode"
+	"github.com/nickna/ssh.night.ms/internal/auth/oauthrefresh"
+	"github.com/nickna/ssh.night.ms/internal/auth/tokenseal"
 	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/config"
 	"github.com/nickna/ssh.night.ms/internal/data"
@@ -162,6 +165,74 @@ func main() {
 
 	attachSecurity(&sessionDeps, banCache, settingsCache)
 
+	// OAuth: token-encryption sealer + device-code service + background
+	// refresher. The sealer uses NIGHTMS_OAUTH_TOKEN_SECRET if set, else
+	// HKDF-derives from the cookie secret (which means rotating the cookie
+	// secret invalidates every stored OAuth token unless the operator also
+	// supplies NIGHTMS_OAUTH_TOKEN_SECRET).
+	oauthMasterKey := opts.OAuthTokenSecret
+	if len(oauthMasterKey) == 0 {
+		oauthMasterKey = opts.WebCookieSecret
+	}
+	oauthSealer, err := tokenseal.New(oauthMasterKey)
+	if err != nil {
+		logger.Error("oauth sealer init", "err", err)
+		os.Exit(1)
+	}
+
+	// Device-flow providers. Google needs a *separate* "TVs and Limited
+	// Input devices" OAuth client because its device endpoint rejects
+	// regular Web-application clients with disabled_client. Microsoft
+	// reuses the same client (must have "Allow public client flows" =
+	// true in Azure app registration). If a provider's device client
+	// isn't configured the corresponding TUI branch surfaces "unavailable"
+	// to the user.
+	deviceProviders := map[auth.OAuthProviderKind]*auth.OAuthProvider{}
+	if opts.GoogleDeviceClientID != "" {
+		deviceProviders[auth.OAuthGoogle] = auth.NewGoogleProvider(
+			opts.GoogleDeviceClientID, opts.GoogleDeviceClientSecret, "")
+	}
+	if opts.MicrosoftClientID != "" {
+		deviceProviders[auth.OAuthMicrosoft] = auth.NewMicrosoftProvider(
+			opts.MicrosoftClientID, opts.MicrosoftClientSecret, "")
+	}
+	if len(deviceProviders) > 0 {
+		deviceSvc := &devicecode.Service{
+			Pool:      devicecode.PoolAdapter{Pool: pool, Queries: queries},
+			Queries:   queries,
+			Redis:     redisClient,
+			Sealer:    oauthSealer,
+			Providers: deviceProviders,
+			Audit:     auditRecorder,
+			Logger:    logger.With("component", "oauth-device"),
+		}
+		sessionDeps.Core.OAuthDeviceCode = deviceSvc
+	}
+	sessionDeps.Core.OAuthSealer = oauthSealer
+
+	// Background refresher. Renews access tokens before they expire so
+	// future Gmail/Drive/Outlook/OneDrive integrations don't 401. Soft-
+	// failure threshold is 5 ticks (matches the package default).
+	// Same provider map as the device flow, since refresh uses
+	// client_id/client_secret + refresh_token regardless of how the
+	// initial token was obtained.
+	if len(deviceProviders) > 0 {
+		refresher, err := oauthrefresh.New(oauthrefresh.Config{
+			Queries:   queries,
+			Sealer:    oauthSealer,
+			Providers: deviceProviders,
+			Audit:     auditRecorder,
+			Logger:    logger.With("component", "oauth-refresh"),
+			Interval:  opts.OAuthRefreshInterval,
+			LeadTime:  opts.OAuthRefreshLeadTime,
+		})
+		if err != nil {
+			logger.Error("oauth refresher init", "err", err)
+			os.Exit(1)
+		}
+		go refresher.Run(ctx)
+	}
+
 	// Carbonyl "rich mode" browser runner. Process singleton — Launch fans
 	// out per-session children. Returns (nil, ErrBinaryMissing) when the
 	// binary isn't on disk; that's the soft-disable path so the BBS still
@@ -266,7 +337,7 @@ func main() {
 		SecureCookies:  opts.WebSecureCookies,
 		SessionTimeout: 30 * 24 * time.Hour,
 		PFPDir:         opts.PFPDir,
-	}, web.NewDeps(sessionDeps, lookup, redisClient, buildOAuthProviders(opts)))
+	}, web.NewDeps(sessionDeps, lookup, redisClient, buildOAuthProviders(opts), auditRecorder))
 	if err != nil {
 		logger.Error("web init", "err", err)
 		os.Exit(1)

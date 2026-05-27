@@ -83,7 +83,7 @@ func CreateAccount(ctx context.Context, deps RegisterDeps, in RegisterInput) (Kn
 		return Known{}, &RegistrationErr{Kind: RegErrSignupsDisabled}
 	}
 	handle := strings.TrimSpace(in.Handle)
-	if !isValidHandle(handle) {
+	if !IsValidHandle(handle) {
 		return Known{}, &RegistrationErr{Kind: RegErrHandleInvalid}
 	}
 	minLen := deps.MinPasswordLength
@@ -173,9 +173,10 @@ func CreateAccount(ctx context.Context, deps RegisterDeps, in RegisterInput) (Kn
 	}, nil
 }
 
-// isValidHandle accepts 3-32 chars of ASCII letters, digits, underscore, or
-// dash.
-func isValidHandle(handle string) bool {
+// IsValidHandle accepts 3-32 chars of ASCII letters, digits, underscore, or
+// dash. Exported so web-layer handlers (rename, OAuth linking) can validate
+// without duplicating the rule.
+func IsValidHandle(handle string) bool {
 	if len(handle) < 3 || len(handle) > 32 {
 		return false
 	}
