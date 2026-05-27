@@ -145,9 +145,12 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(smallBodyLimit)
 	r.Use(h.attachIdentity)
+	// middleware.Timeout is NOT applied at the root because /ws/bbs is a
+	// long-lived bubbletea session, not a 30-second request. It's installed
+	// inside the timedGroup below, which scopes it to the regular HTTP
+	// surface and leaves the WebSocket bridge unconstrained.
 
 	// gorilla/csrf v1.7+ assumes HTTPS by default and enforces Origin / Referer
 	// matching strictly. For dev (and TLS-terminated-at-proxy deployments) we
@@ -181,60 +184,70 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 			"127.0.0.1:" + portFromAddr(cfg.Addr),
 		}),
 	)
-	r.Group(func(r chi.Router) {
-		r.Use(csrfMiddleware)
-		r.Get("/", h.landing)
-		r.Get("/login", h.loginGet)
-		r.Post("/login", h.loginPost)
-		r.Post("/logout", h.logoutPost)
-		r.Post("/logout-all", h.logoutAllPost)
-		r.Get("/profile/sessions", h.sessionsView)
-		r.Post("/profile/sessions/{sid}/revoke", h.sessionsRevoke)
-		r.Get("/terminal", h.terminalPage)
-		r.Get("/profile", h.profileView)
-		r.Get("/profile/password", h.passwordGet)
-		r.Post("/profile/password", h.passwordPost)
-		r.Get("/profile/keys", h.keysGet)
-		r.Post("/profile/keys", h.keysAdd)
-		r.Post("/profile/keys/{id}/delete", h.keysDelete)
-		r.Get("/profile/picture", h.pictureGet)
-		r.Post("/profile/picture", h.picturePost)
-		r.Post("/profile/picture/clear", h.pictureClear)
-		r.Get("/u/{handle}", h.publicProfile)
-		r.Get("/profile/connections", h.connectionsView)
-		r.Post("/profile/connections/{id}/unlink", h.connectionsUnlink)
-		r.Get("/profile/rename", h.renameGet)
-		r.Post("/profile/rename", h.renamePost)
-
-		// OAuth account-linking routes. /auth/{provider}/start requires an
-		// active session and kicks the link dance; /callback validates state
-		// and attaches the credential to the signed-in user. There is no
-		// "log in with Google" path — OAuth is for linking Gmail/Drive/etc.
-		// access to an existing SSH account.
-		r.Get("/auth/{provider}/start", h.oauthStart)
-		r.Get("/auth/{provider}/callback", h.oauthCallback)
-	})
-
-	// /u/{handle}/avatar.png is outside the CSRF group — it's a GET image
-	// endpoint with no state mutation, and we'd rather not pay the cookie
-	// dance on every <img src> request from third-party renderers.
-	r.Get("/u/{handle}/avatar", h.avatar)
-
-	// /ws/bbs intentionally sits OUTSIDE the CSRF group — WebSocket upgrades
-	// authenticate via the session cookie (loaded by attachIdentity above)
-	// and the gorilla/csrf middleware would otherwise insist on a token in
-	// the GET that initiates the upgrade. Browser-side same-origin policy +
-	// the Origin check in coder/websocket cover the CSRF angle.
+	// /ws/bbs intentionally sits OUTSIDE both the CSRF and the 30s Timeout
+	// group below. WebSocket upgrades authenticate via the session cookie
+	// (loaded by attachIdentity above) and gorilla/csrf would otherwise
+	// insist on a token in the GET that initiates the upgrade. The Timeout
+	// middleware is even more disqualifying: it wraps r.Context() with a
+	// 30s deadline, which would tear the bubbletea session down mid-keystroke.
+	// Browser same-origin policy + the Origin check in coder/websocket cover
+	// the CSRF angle.
 	r.Get("/ws/bbs", h.handleBBSWebSocket)
 
-	// /healthz backs the Docker HEALTHCHECK. Plain 200/"ok" — checking DB
-	// or Redis here would couple container liveness to dependencies and
-	// flap the status on transient hiccups.
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok\n"))
-	})
+	// Everything else gets the 30s request-context Timeout. Static-file
+	// serves, the healthz probe, and the avatar/CSRF routes all complete
+	// well inside that budget.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(30 * time.Second))
 
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+		r.Group(func(r chi.Router) {
+			r.Use(csrfMiddleware)
+			r.Get("/", h.landing)
+			r.Get("/login", h.loginGet)
+			r.Post("/login", h.loginPost)
+			r.Post("/logout", h.logoutPost)
+			r.Post("/logout-all", h.logoutAllPost)
+			r.Get("/profile/sessions", h.sessionsView)
+			r.Post("/profile/sessions/{sid}/revoke", h.sessionsRevoke)
+			r.Get("/terminal", h.terminalPage)
+			r.Get("/profile", h.profileView)
+			r.Get("/profile/password", h.passwordGet)
+			r.Post("/profile/password", h.passwordPost)
+			r.Get("/profile/keys", h.keysGet)
+			r.Post("/profile/keys", h.keysAdd)
+			r.Post("/profile/keys/{id}/delete", h.keysDelete)
+			r.Get("/profile/picture", h.pictureGet)
+			r.Post("/profile/picture", h.picturePost)
+			r.Post("/profile/picture/clear", h.pictureClear)
+			r.Get("/u/{handle}", h.publicProfile)
+			r.Get("/profile/connections", h.connectionsView)
+			r.Post("/profile/connections/{id}/unlink", h.connectionsUnlink)
+			r.Get("/profile/rename", h.renameGet)
+			r.Post("/profile/rename", h.renamePost)
+
+			// OAuth account-linking routes. /auth/{provider}/start requires an
+			// active session and kicks the link dance; /callback validates state
+			// and attaches the credential to the signed-in user. There is no
+			// "log in with Google" path — OAuth is for linking Gmail/Drive/etc.
+			// access to an existing SSH account.
+			r.Get("/auth/{provider}/start", h.oauthStart)
+			r.Get("/auth/{provider}/callback", h.oauthCallback)
+		})
+
+		// /u/{handle}/avatar.png is outside the CSRF group — it's a GET image
+		// endpoint with no state mutation, and we'd rather not pay the cookie
+		// dance on every <img src> request from third-party renderers.
+		r.Get("/u/{handle}/avatar", h.avatar)
+
+		// /healthz backs the Docker HEALTHCHECK. Plain 200/"ok" — checking DB
+		// or Redis here would couple container liveness to dependencies and
+		// flap the status on transient hiccups.
+		r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("ok\n"))
+		})
+
+		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
