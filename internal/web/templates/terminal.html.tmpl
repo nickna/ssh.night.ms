@@ -1,7 +1,7 @@
 {{define "body"}}
 <section class="terminal-wrap">
   <h1>terminal</h1>
-  <p class="muted">live BBS session over a WebSocket — same screens as ssh -p 2222.</p>
+  <p class="muted">live BBS session over a WebSocket — same screens as {{.SSHCmd}}.</p>
   <div id="status" class="status">connecting…</div>
   <div id="term" class="terminal"></div>
 </section>

@@ -40,7 +40,11 @@ type Config struct {
 	// operator running SSH on a direct DNS name and HTTP behind Cloudflare
 	// can advertise the correct connection string. Falls back to PublicHost
 	// when empty.
-	SSHHost        string
+	SSHHost string
+	// SSHPort is the externally-reachable SSH port shown alongside SSHHost.
+	// Defaults to the bind port (parsed from Addr) when empty; when set to
+	// "22" the templates omit the -p flag entirely.
+	SSHPort        string
 	CookieSecret   []byte // ≥ 32 bytes; used by cookie sign + CSRF middleware
 	SecureCookies  bool   // set Secure flag on cookies (true behind TLS)
 	SessionTimeout time.Duration
@@ -122,6 +126,11 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	}
 	if cfg.SSHHost == "" {
 		cfg.SSHHost = cfg.PublicHost
+	}
+	if cfg.SSHPort == "" {
+		// Bind-port fallback so the displayed command matches the dev port
+		// when the operator hasn't set NIGHTMS_SSH_PORT explicitly.
+		cfg.SSHPort = portFromAddr(cfg.Addr)
 	}
 	tpl, err := parseTemplates()
 	if err != nil {

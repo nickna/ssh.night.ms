@@ -336,6 +336,7 @@ func main() {
 		Addr:           opts.HTTPAddr,
 		PublicHost:     opts.WebPublicHost,
 		SSHHost:        opts.WebSSHHost,
+		SSHPort:        opts.WebSSHPort,
 		CookieSecret:   opts.WebCookieSecret,
 		SecureCookies:  opts.WebSecureCookies,
 		SessionTimeout: 30 * 24 * time.Hour,

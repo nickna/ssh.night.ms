@@ -107,6 +107,8 @@ Don't reorder without checking that downstream invariants still hold (sysop boot
 
 `NIGHTMS_WEB_BASE_URL` is the web origin — used for CSRF trusted origins, the `/ws/bbs` Origin allowlist, and OAuth callback defaults. `NIGHTMS_SSH_HOST` is the host advertised in the "ssh -p 2222 you@&lt;host&gt;" snippets rendered on landing/login/profile pages. Set this when SSH and HTTP terminate on different hostnames — e.g. SSH direct at `ssh.night.ms` while HTTP runs behind Cloudflare at `k.night.ms`. Falls back to the bare host from `NIGHTMS_WEB_BASE_URL` when unset, which is correct for single-host deployments. Both accept either a bare host or a full URL — the scheme is stripped either way.
 
+`NIGHTMS_SSH_PORT` is the externally-reachable SSH port shown alongside `NIGHTMS_SSH_HOST` in those same snippets. Defaults to the bind port (`BBS_SSH_PORT`, i.e. `2222` for `./run.ps1`) so dev keeps showing `ssh -p 2222 …`. Set it explicitly when host port-forwarding remaps the bind — e.g. prod compose binds container `:2222` to host `:22`, so `NIGHTMS_SSH_PORT=22` makes the page render `ssh you@host`. The `-p` flag is omitted entirely when the value is `22` (the SSH default).
+
 ## Security
 
 The SSH listener is exposed direct to the public internet (no L4 proxy in front, unlike HTTP which terminates at Cloudflare). Hardening lives in three layers; each is independently overridable via env vars:

@@ -14,6 +14,6 @@
   <main>
     {{template "body" .}}
   </main>
-  <footer><span class="muted">ssh -p 2222 {{if .Identity}}{{.Identity.Handle}}{{else}}you{{end}}@{{.Host}}</span></footer>
+  <footer><span class="muted">{{.SSHCmd}} {{if .Identity}}{{.Identity.Handle}}{{else}}you{{end}}@{{.Host}}</span></footer>
 </body>
 </html>{{end}}

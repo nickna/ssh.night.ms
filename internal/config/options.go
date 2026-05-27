@@ -53,6 +53,13 @@ type Options struct {
 	// k.night.ms). Defaults to WebPublicHost when NIGHTMS_SSH_HOST is unset,
 	// preserving the old single-host behavior.
 	WebSSHHost       string
+	// WebSSHPort is the externally-reachable SSH port shown to users in those
+	// same snippets. Distinct from the bind port (BBS_SSH_PORT) because the
+	// container may bind to a non-privileged port while the host forwards the
+	// canonical :22 in front of it (see deploy/compose.yml). Defaults to the
+	// bind port via NIGHTMS_SSH_PORT, so dev keeps showing "-p 2222" without
+	// extra config. When the value is "22" the templates drop the -p flag.
+	WebSSHPort       string
 	WebCookieSecret  []byte // hex-decoded; pass-through to web.Config
 	WebSecureCookies bool
 	PFPDir           string // profile picture storage directory
@@ -257,6 +264,19 @@ func Load() Options {
 		o.WebSSHHost = loadWebPublicHost(raw)
 	} else {
 		o.WebSSHHost = o.WebPublicHost
+	}
+	if raw := os.Getenv("NIGHTMS_SSH_PORT"); raw != "" {
+		o.WebSSHPort = raw
+	} else {
+		// Bind-port fallback keeps the dev experience unchanged: SSHAddr is
+		// "0.0.0.0:2222" out of the box, so users typing "ssh -p 2222 ..."
+		// against a fresh ./run.ps1 still copy the right command.
+		_, port, err := net.SplitHostPort(o.SSHAddr)
+		if err == nil {
+			o.WebSSHPort = port
+		} else {
+			o.WebSSHPort = "2222"
+		}
 	}
 	return o
 }

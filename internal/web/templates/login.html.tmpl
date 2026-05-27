@@ -8,6 +8,6 @@
     <label>password <input type="password" name="password" required></label>
     <button type="submit">log in</button>
   </form>
-  <p class="muted">no account yet? connect via ssh first: <code>ssh -p 2222 yourhandle@{{.Host}}</code></p>
+  <p class="muted">no account yet? connect via ssh first: <code>{{.SSHCmd}} yourhandle@{{.Host}}</code></p>
 </section>
 {{end}}

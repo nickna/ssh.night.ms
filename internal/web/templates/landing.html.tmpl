@@ -3,11 +3,11 @@
   {{if .Identity}}
     <h1>welcome back, @{{.Identity.Handle}}</h1>
     <p class="lead">jump into the <a href="/terminal">in-browser terminal</a> or <a href="/profile">manage your profile</a>.</p>
-    <p><code>ssh -p 2222 {{.Identity.Handle}}@{{.Host}}</code></p>
+    <p><code>{{.SSHCmd}} {{.Identity.Handle}}@{{.Host}}</code></p>
   {{else}}
     <h1>night.ms</h1>
     <p class="lead">an ssh-based bbs. <a href="/login">log in</a> to manage your profile, or just hop straight to the terminal.</p>
-    <p><code>ssh -p 2222 yourhandle@{{.Host}}</code></p>
+    <p><code>{{.SSHCmd}} yourhandle@{{.Host}}</code></p>
   {{end}}
 </section>
 {{end}}

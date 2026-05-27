@@ -3,6 +3,6 @@
   <img class="avatar avatar-lg" src="/u/{{.Handle}}/avatar?size=128" alt="@{{.Handle}}" width="128" height="128">
   <h1>@{{.Handle}}{{if .IsSysop}} <span class="badge">SYSOP</span>{{end}}</h1>
   <p class="muted">joined {{.JoinedAt}}.</p>
-  <p>connect: <code>ssh -p 2222 {{.Handle}}@{{.Host}}</code></p>
+  <p>connect: <code>{{.SSHCmd}} {{.Handle}}@{{.Host}}</code></p>
 </section>
 {{end}}

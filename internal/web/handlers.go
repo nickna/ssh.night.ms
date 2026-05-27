@@ -30,8 +30,14 @@ type identityKey struct{}
 // signed-out users. CSRFField renders the hidden form input gorilla/csrf
 // validates on POST.
 type pageData struct {
-	Title     string
-	Host      string
+	Title string
+	Host  string
+	// SSHCmd is the connection-command prefix rendered before "<handle>@<host>"
+	// in templates — "ssh" when the externally-reachable port is the SSH
+	// default (22), else "ssh -p <port>". Lets every template emit a single
+	// {{.SSHCmd}} {{.Handle}}@{{.Host}} snippet without re-deriving the port
+	// formatting in five places.
+	SSHCmd    string
 	Identity  *webIdentity
 	CSRFField template.HTML
 	Error     string
@@ -88,13 +94,17 @@ func identityFrom(r *http.Request) *webIdentity {
 }
 
 func (h *handlers) basePage(r *http.Request, title string) pageData {
-	page := pageData{
+	sshCmd := "ssh"
+	if h.cfg.SSHPort != "" && h.cfg.SSHPort != "22" {
+		sshCmd = "ssh -p " + h.cfg.SSHPort
+	}
+	return pageData{
 		Title:     title,
 		Host:      h.cfg.SSHHost,
+		SSHCmd:    sshCmd,
 		Identity:  identityFrom(r),
 		CSRFField: csrf.TemplateField(r),
 	}
-	return page
 }
 
 func (h *handlers) render(w http.ResponseWriter, page string, data pageData) {
