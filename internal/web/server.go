@@ -33,8 +33,14 @@ var staticFS embed.FS
 
 // Config is the web-server slice of process configuration.
 type Config struct {
-	Addr           string // ":5080"
-	PublicHost     string // host string surfaced in pages (e.g. "night.ms")
+	Addr       string // ":5080"
+	PublicHost string // web origin used for CSRF trusted origins, WS Origin checks (e.g. "k.night.ms")
+	// SSHHost is the host string rendered into "ssh -p 2222 you@<host>"
+	// snippets in the templates. Allowed to differ from PublicHost so an
+	// operator running SSH on a direct DNS name and HTTP behind Cloudflare
+	// can advertise the correct connection string. Falls back to PublicHost
+	// when empty.
+	SSHHost        string
 	CookieSecret   []byte // ≥ 32 bytes; used by cookie sign + CSRF middleware
 	SecureCookies  bool   // set Secure flag on cookies (true behind TLS)
 	SessionTimeout time.Duration
@@ -113,6 +119,9 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	}
 	if deps.Redis == nil {
 		return nil, fmt.Errorf("web: redis client required for session store")
+	}
+	if cfg.SSHHost == "" {
+		cfg.SSHHost = cfg.PublicHost
 	}
 	tpl, err := parseTemplates()
 	if err != nil {

@@ -46,6 +46,13 @@ type Options struct {
 	BootstrapSysopPassword string
 
 	WebPublicHost    string
+	// WebSSHHost is the host string rendered into "ssh -p 2222 you@<host>"
+	// snippets on the landing/login/profile pages. Distinct from WebPublicHost
+	// because the SSH listener and the HTTP listener can live on different
+	// names (e.g. SSH direct at ssh.night.ms, HTTP behind Cloudflare at
+	// k.night.ms). Defaults to WebPublicHost when NIGHTMS_SSH_HOST is unset,
+	// preserving the old single-host behavior.
+	WebSSHHost       string
 	WebCookieSecret  []byte // hex-decoded; pass-through to web.Config
 	WebSecureCookies bool
 	PFPDir           string // profile picture storage directory
@@ -246,6 +253,11 @@ func Load() Options {
 		},
 	}
 	o.WebCookieSecret = loadCookieSecret(o.HostKeyDir)
+	if raw := os.Getenv("NIGHTMS_SSH_HOST"); raw != "" {
+		o.WebSSHHost = loadWebPublicHost(raw)
+	} else {
+		o.WebSSHHost = o.WebPublicHost
+	}
 	return o
 }
 

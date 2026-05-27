@@ -90,7 +90,7 @@ func identityFrom(r *http.Request) *webIdentity {
 func (h *handlers) basePage(r *http.Request, title string) pageData {
 	page := pageData{
 		Title:     title,
-		Host:      h.cfg.PublicHost,
+		Host:      h.cfg.SSHHost,
 		Identity:  identityFrom(r),
 		CSRFField: csrf.TemplateField(r),
 	}

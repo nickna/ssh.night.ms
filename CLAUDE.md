@@ -105,6 +105,8 @@ Don't reorder without checking that downstream invariants still hold (sysop boot
 
 `NIGHTMS_COOKIE_SECRET` (hex, ≥ 32 bytes) is optional; when unset the app generates a key on first boot and persists it to `$NIGHTMS_HOST_KEY_DIR/cookie-secret` (mode 0600) so it survives restarts. With neither the env var nor a writable host-key dir, the fallback is an ephemeral key — fine for unit tests, breaks sessions on restart.
 
+`NIGHTMS_WEB_BASE_URL` is the web origin — used for CSRF trusted origins, the `/ws/bbs` Origin allowlist, and OAuth callback defaults. `NIGHTMS_SSH_HOST` is the host advertised in the "ssh -p 2222 you@&lt;host&gt;" snippets rendered on landing/login/profile pages. Set this when SSH and HTTP terminate on different hostnames — e.g. SSH direct at `ssh.night.ms` while HTTP runs behind Cloudflare at `k.night.ms`. Falls back to the bare host from `NIGHTMS_WEB_BASE_URL` when unset, which is correct for single-host deployments. Both accept either a bare host or a full URL — the scheme is stripped either way.
+
 ## Security
 
 The SSH listener is exposed direct to the public internet (no L4 proxy in front, unlike HTTP which terminates at Cloudflare). Hardening lives in three layers; each is independently overridable via env vars:

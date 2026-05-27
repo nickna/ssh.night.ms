@@ -45,6 +45,10 @@ services:
       # Accepts either a bare host ("night.ms") or a full URL
       # ("https://night.ms") — the app parses out the host either way.
       NIGHTMS_WEB_BASE_URL: "${NIGHTMS_WEB_BASE_URL:-night.ms}"
+      # Host advertised in "ssh -p 2222 you@<host>" page snippets. Set when
+      # the SSH and HTTP listeners are on different names. Empty = fall back
+      # to NIGHTMS_WEB_BASE_URL.
+      NIGHTMS_SSH_HOST: "${NIGHTMS_SSH_HOST:-}"
       # Optional. When unset the app generates a 32-byte key on first boot
       # and persists it to /data/host-keys/cookie-secret (mode 0600), so the
       # key survives container restarts and image updates. Set this only when
