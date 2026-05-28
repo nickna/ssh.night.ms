@@ -3,7 +3,6 @@ package screens
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -45,28 +44,24 @@ func (m *Profile) openLocations() tea.Cmd {
 }
 
 // resetLocationForm builds a fresh set of textinputs for the inline add
-// form. Called on entry and after a successful Add.
+// form. Called on entry and after a successful Add. The form is now two
+// fields: `place` (the city/region to geocode) and an optional `label`
+// alias the user can leave blank to default to the place's own Name.
 func (m *Profile) resetLocationForm() {
+	place := textinput.New()
+	place.CharLimit = 96
+	place.Width = 32
+	place.Placeholder = "city, region — e.g. San Francisco"
+
 	label := textinput.New()
 	label.CharLimit = 64
 	label.Width = 24
-	label.Placeholder = "Home, Office, …"
+	label.Placeholder = "leave blank to use the place name"
 
-	lat := textinput.New()
-	lat.CharLimit = 12
-	lat.Width = 12
-	lat.Placeholder = "40.7128"
-
-	lon := textinput.New()
-	lon.CharLimit = 12
-	lon.Width = 12
-	lon.Placeholder = "-74.0060"
-
+	m.locFormPlace = place
 	m.locFormLabel = label
-	m.locFormLat = lat
-	m.locFormLon = lon
 	m.locFormFocus = 0
-	m.locFormCanonical = ""
+	m.locSearchResults = nil
 }
 
 // reloadLocations refetches the user's full list. Used on entry and after
@@ -121,7 +116,7 @@ func (m *Profile) handleLocationsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.locAddOpen = true
 		m.locErr = ""
 		m.resetLocationForm()
-		m.locFormLabel.Focus()
+		m.locFormPlace.Focus()
 		return m, textinput.Blink
 	case "r":
 		if m.locCursor >= len(m.savedLocations) {
@@ -228,32 +223,27 @@ func (m *Profile) submitLocationRename() tea.Cmd {
 	}
 }
 
-// handleLocationsAddFormKey owns the inline add-form. Tab cycles the three
-// inputs; Enter submits; Esc cancels back to the list. Ctrl+F triggers a
-// geocoder lookup using whatever's in the label field; digit keys 1-9
-// while a search result list is visible auto-fill the form from that pick.
+// handleLocationsAddFormKey owns the inline add-form. The form has two
+// fields: place (the thing to geocode) and an optional label alias. Tab
+// cycles. Enter on the place field fires the geocoder, whose results
+// either auto-accept (single unambiguous hit) and commit the row, or
+// populate a 1-N picker. Digits 1-9 pick from that list. Esc clears the
+// picker first; a second Esc closes the form. There is no lat/lon entry
+// in the default flow — users type a place name and the geocoder figures
+// out the coordinates.
 func (m *Profile) handleLocationsAddFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Search-result picker — digits 1..N while results are visible select
-	// a candidate. Must run BEFORE the input-update fall-through or the
-	// label field would just absorb the digit. Label gets the short Name
-	// (e.g. "Paris") so the saved button label is concise; the long
-	// disambiguating form lands in locFormCanonical and persists to the
-	// row's canonical column for hover-style detail in the modal list.
+	// Picker-active branch: digits 1-N pick the corresponding hit. Must
+	// run BEFORE the input-update fall-through so the digit doesn't get
+	// typed into whichever field has focus.
 	if len(m.locSearchResults) > 0 {
 		switch s := k.String(); s {
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			idx := int(s[0] - '1')
 			if idx < len(m.locSearchResults) {
-				r := m.locSearchResults[idx]
-				m.locFormLabel.SetValue(r.Name)
-				m.locFormLabel.CursorEnd()
-				m.locFormLat.SetValue(fmt.Sprintf("%.4f", r.Latitude))
-				m.locFormLon.SetValue(fmt.Sprintf("%.4f", r.Longitude))
-				m.locFormCanonical = r.Canonical()
-				m.locSearchResults = nil
-				m.locErr = ""
-				return m, nil
+				return m, m.commitGeocodedLocation(m.locSearchResults[idx])
 			}
+		case "enter":
+			return m, m.commitGeocodedLocation(m.locSearchResults[0])
 		}
 	}
 	switch k.String() {
@@ -271,26 +261,22 @@ func (m *Profile) handleLocationsAddFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.locErr = ""
 		return m, nil
 	case "tab":
-		m.locFormFocus = (m.locFormFocus + 1) % 3
+		m.locFormFocus = (m.locFormFocus + 1) % 2
 		m.applyLocationFormFocus()
 		return m, textinput.Blink
 	case "shift+tab":
-		m.locFormFocus = (m.locFormFocus - 1 + 3) % 3
+		m.locFormFocus = (m.locFormFocus - 1 + 2) % 2
 		m.applyLocationFormFocus()
 		return m, textinput.Blink
-	case "ctrl+f":
-		return m, m.searchByLabel()
 	case "enter":
-		return m, m.submitLocationAdd()
+		return m, m.searchPlace()
 	}
 	var cmd tea.Cmd
 	switch m.locFormFocus {
 	case 0:
-		m.locFormLabel, cmd = m.locFormLabel.Update(k)
+		m.locFormPlace, cmd = m.locFormPlace.Update(k)
 	case 1:
-		m.locFormLat, cmd = m.locFormLat.Update(k)
-	case 2:
-		m.locFormLon, cmd = m.locFormLon.Update(k)
+		m.locFormLabel, cmd = m.locFormLabel.Update(k)
 	}
 	return m, cmd
 }
@@ -303,13 +289,13 @@ type locationSearchMsg struct {
 	err     error
 }
 
-// searchByLabel takes whatever's in the label field, fires the geocoder,
-// and lets the resulting locationSearchMsg handler populate the picker.
-// Whitespace-only / missing geocoder collapses to an inline error.
-func (m *Profile) searchByLabel() tea.Cmd {
-	query := strings.TrimSpace(m.locFormLabel.Value())
+// searchPlace fires the geocoder against the `place` input. The result
+// either auto-accepts (commits directly via Add) or populates the picker.
+// Empty input / missing geocoder collapses to an inline error.
+func (m *Profile) searchPlace() tea.Cmd {
+	query := strings.TrimSpace(m.locFormPlace.Value())
 	if query == "" {
-		m.locErr = "type a place name in the label field first, then Ctrl+F."
+		m.locErr = "type a place name in the first field."
 		return nil
 	}
 	svc := m.sess.Geocoder
@@ -330,46 +316,39 @@ func (m *Profile) searchByLabel() tea.Cmd {
 // applyLocationFormFocus mirrors the focus state into the textinputs so the
 // cursor blinks on exactly one at a time.
 func (m *Profile) applyLocationFormFocus() {
+	m.locFormPlace.Blur()
 	m.locFormLabel.Blur()
-	m.locFormLat.Blur()
-	m.locFormLon.Blur()
 	switch m.locFormFocus {
 	case 0:
-		m.locFormLabel.Focus()
+		m.locFormPlace.Focus()
 	case 1:
-		m.locFormLat.Focus()
-	case 2:
-		m.locFormLon.Focus()
+		m.locFormLabel.Focus()
 	}
 }
 
-// submitLocationAdd parses the three inputs and calls LocationService.Add.
-// Validation errors surface inline; back-end errors land via
-// locationMutatedMsg below.
-func (m *Profile) submitLocationAdd() tea.Cmd {
+// commitGeocodedLocation finalizes a row from a picked or auto-accepted
+// geocoder result. The label defaults to whatever the user typed in the
+// optional label field; if that's blank we fall back to the result's
+// `Name` so the row gets a sensible default ("Paris" rather than the
+// disambiguated "Paris, Île-de-France, France"). Canonical preserves the
+// full disambiguating form on the row regardless.
+func (m *Profile) commitGeocodedLocation(r geocoding.Result) tea.Cmd {
 	label := strings.TrimSpace(m.locFormLabel.Value())
-	latStr := strings.TrimSpace(m.locFormLat.Value())
-	lonStr := strings.TrimSpace(m.locFormLon.Value())
-	if label == "" || latStr == "" || lonStr == "" {
-		m.locErr = "label, latitude, and longitude are all required."
-		return nil
+	if label == "" {
+		label = strings.TrimSpace(r.Name)
 	}
-	lat, err := strconv.ParseFloat(latStr, 64)
-	if err != nil {
-		m.locErr = "latitude must be a number (e.g. 40.7128)."
-		return nil
-	}
-	lon, err := strconv.ParseFloat(lonStr, 64)
-	if err != nil {
-		m.locErr = "longitude must be a number (e.g. -74.0060)."
+	if label == "" {
+		m.locErr = "the chosen place has no Name; type a label."
 		return nil
 	}
 	svc := m.sess.Locations
 	userID := m.sess.Identity.UserID
-	canonical := m.locFormCanonical
+	canonical := r.Canonical()
+	lat := r.Latitude
+	lon := r.Longitude
 	m.working = true
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if svc == nil {
 			return locationMutatedMsg{err: errors.New("location service unavailable")}
@@ -491,9 +470,9 @@ func (m *Profile) renderLocationsModal() string {
 	var hint string
 	switch {
 	case m.locAddOpen && len(m.locSearchResults) > 0:
-		hint = "1-N pick · Ctrl+F search again · Esc clear results"
+		hint = "1-N pick · Enter take #1 · Esc clear results"
 	case m.locAddOpen:
-		hint = "Tab cycle inputs · Ctrl+F search by name · Enter submit · Esc cancel"
+		hint = "Tab cycle · Enter search by name · Esc cancel"
 	case m.locRenameOpen:
 		hint = "Enter save · Esc cancel"
 	default:
@@ -534,7 +513,9 @@ func (m *Profile) renderLocationRenameForm(_ int) string {
 	return strings.Join(rows, "\n")
 }
 
-// renderLocationAddForm draws the inline 3-input form when locAddOpen.
+// renderLocationAddForm draws the inline 2-input form when locAddOpen.
+// `place` is the primary field — what the user types into the geocoder;
+// `label` is the optional alias for the resulting row.
 func (m *Profile) renderLocationAddForm(_ int) string {
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccentDim))
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
@@ -545,9 +526,8 @@ func (m *Profile) renderLocationAddForm(_ int) string {
 		return labelStyle.Render(name)
 	}
 	rows := []string{
-		field(0, "label    ") + "  " + m.locFormLabel.View(),
-		field(1, "latitude ") + "  " + m.locFormLat.View(),
-		field(2, "longitude") + "  " + m.locFormLon.View(),
+		field(0, "place") + "  " + m.locFormPlace.View(),
+		field(1, "label") + "  " + m.locFormLabel.View(),
 		"",
 	}
 	return strings.Join(rows, "\n")

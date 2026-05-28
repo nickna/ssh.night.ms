@@ -55,10 +55,14 @@ type ProfileSnapshot struct {
 }
 
 // ProfileUpdate is the write-side counterpart to ProfileSnapshot — the bag of
-// fields the Profile screen submits on save. Empty RealName/Location/Bio mean
-// "clear the column" (sqlc maps "" → NULL via the *string overrides).
+// fields the Profile screen submits on save. Empty RealName/Bio mean "clear
+// the column" (sqlc maps "" → NULL via the *string overrides). Location is
+// not in this struct: the Profile-tab location field is owned by the
+// saved-locations layer (see LocationService.SetPrimaryFromGeocode), which
+// mirrors its label into users.location separately so legacy readers see
+// the same string they used to.
 type ProfileUpdate struct {
-	RealName, Location, Bio    string
+	RealName, Bio              string
 	TimeZoneID                 string
 	TemperatureUnit            int32
 	ClockFormat                int32
@@ -189,15 +193,11 @@ func (s *ProfileService) assembleSnapshot(ctx context.Context, user gen.User) (*
 // where the screen-side cache is stale.
 func (s *ProfileService) UpdateProfile(ctx context.Context, userID int64, u ProfileUpdate) error {
 	rn := strings.TrimSpace(u.RealName)
-	loc := strings.TrimSpace(u.Location)
 	bio := strings.TrimSpace(u.Bio)
 	tz := strings.TrimSpace(u.TimeZoneID)
 
 	if len(rn) > MaxRealNameLength {
 		return fmt.Errorf("%w: real_name longer than %d chars", ErrInvalidProfileField, MaxRealNameLength)
-	}
-	if len(loc) > MaxLocationLength {
-		return fmt.Errorf("%w: location longer than %d chars", ErrInvalidProfileField, MaxLocationLength)
 	}
 	if len(bio) > MaxBioLength {
 		return fmt.Errorf("%w: bio longer than %d chars", ErrInvalidProfileField, MaxBioLength)
@@ -231,7 +231,6 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userID int64, u Prof
 	params := gen.UpdateUserProfileParams{
 		ID:                         userID,
 		RealName:                   nullableTrimmed(rn),
-		Location:                   nullableTrimmed(loc),
 		Bio:                        nullableTrimmed(bio),
 		TimeZoneID:                 tz,
 		TemperatureUnit:            u.TemperatureUnit,

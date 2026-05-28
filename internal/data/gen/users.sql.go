@@ -184,6 +184,26 @@ func (q *Queries) RenameUserHandle(ctx context.Context, arg RenameUserHandlePara
 	return err
 }
 
+const setUserLocationLabel = `-- name: SetUserLocationLabel :exec
+UPDATE users
+SET location = $2
+WHERE id = $1
+`
+
+type SetUserLocationLabelParams struct {
+	ID       int64
+	Location *string
+}
+
+// Denormalized mirror of the user's primary saved-location label written
+// into users.location whenever the primary changes. Keeps legacy readers
+// (finger, sysop, etc.) correct without touching their queries. Pass an
+// empty / nil string to clear.
+func (q *Queries) SetUserLocationLabel(ctx context.Context, arg SetUserLocationLabelParams) error {
+	_, err := q.db.Exec(ctx, setUserLocationLabel, arg.ID, arg.Location)
+	return err
+}
+
 const setUserPreferredNewsSource = `-- name: SetUserPreferredNewsSource :exec
 UPDATE users
 SET preferred_news_source = $2
@@ -245,21 +265,19 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 const updateUserProfile = `-- name: UpdateUserProfile :exec
 UPDATE users
 SET real_name = $2,
-    location = $3,
-    bio = $4,
-    time_zone_id = $5,
-    temperature_unit = $6,
-    clock_format = $7,
-    date_format = $8,
-    suppress_key_adoption_prompts = $9,
-    require_ssh_key = $10
+    bio = $3,
+    time_zone_id = $4,
+    temperature_unit = $5,
+    clock_format = $6,
+    date_format = $7,
+    suppress_key_adoption_prompts = $8,
+    require_ssh_key = $9
 WHERE id = $1
 `
 
 type UpdateUserProfileParams struct {
 	ID                         int64
 	RealName                   *string
-	Location                   *string
 	Bio                        *string
 	TimeZoneID                 string
 	TemperatureUnit            int32
@@ -272,11 +290,12 @@ type UpdateUserProfileParams struct {
 // Updates every editable column from the TUI Profile screen in one round-trip.
 // The caller is expected to pass the full intended state (no partial updates);
 // nullable text columns map empty string → NULL via sqlc's *string overrides.
+// `location` is owned by the saved-locations layer now and mirrored via
+// SetUserLocationLabel; it does not appear here.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
 	_, err := q.db.Exec(ctx, updateUserProfile,
 		arg.ID,
 		arg.RealName,
-		arg.Location,
 		arg.Bio,
 		arg.TimeZoneID,
 		arg.TemperatureUnit,

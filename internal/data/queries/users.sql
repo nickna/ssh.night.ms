@@ -25,16 +25,26 @@ WHERE id = $1;
 -- Updates every editable column from the TUI Profile screen in one round-trip.
 -- The caller is expected to pass the full intended state (no partial updates);
 -- nullable text columns map empty string → NULL via sqlc's *string overrides.
+-- `location` is owned by the saved-locations layer now and mirrored via
+-- SetUserLocationLabel; it does not appear here.
 UPDATE users
 SET real_name = $2,
-    location = $3,
-    bio = $4,
-    time_zone_id = $5,
-    temperature_unit = $6,
-    clock_format = $7,
-    date_format = $8,
-    suppress_key_adoption_prompts = $9,
-    require_ssh_key = $10
+    bio = $3,
+    time_zone_id = $4,
+    temperature_unit = $5,
+    clock_format = $6,
+    date_format = $7,
+    suppress_key_adoption_prompts = $8,
+    require_ssh_key = $9
+WHERE id = $1;
+
+-- name: SetUserLocationLabel :exec
+-- Denormalized mirror of the user's primary saved-location label written
+-- into users.location whenever the primary changes. Keeps legacy readers
+-- (finger, sysop, etc.) correct without touching their queries. Pass an
+-- empty / nil string to clear.
+UPDATE users
+SET location = $2
 WHERE id = $1;
 
 -- name: RenameUserHandle :exec

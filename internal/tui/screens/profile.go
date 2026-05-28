@@ -52,36 +52,43 @@ type Profile struct {
 	clock    components.OptionSelector
 	dateFmt  components.OptionSelector
 
+	// locationSnapshot is what `location` was set to at hydrate time
+	// (mirrors sess.PrimaryLocation.Label or the legacy users.location).
+	// submitProfile compares against this to decide whether the location
+	// side of the save needs to fire at all.
+	locationSnapshot string
+
+	// pickerResults / pickerQuery back modeProfileLocationPicker: the
+	// geocode results we're asking the user to disambiguate, and the
+	// originally-typed string we'll use as the saved-location label when
+	// they pick.
+	pickerResults []geocoding.Result
+	pickerQuery   string
+
 	// Settings tab inputs.
 	suppressKeys components.Checkbox
 	requireSsh   components.Checkbox
 
-	// Locations modal state. savedLocations is the cached list; locCursor is
-	// the row focus for delete. locAddOpen toggles the inline 3-input add
-	// form (label / lat / lon); locFormFocus picks which input owns the
-	// cursor. locRenameOpen replaces the add form with a single-input
-	// rename form when 'r' is pressed; locRenameID is the target row.
-	// locSearchResults / locSearching back the Ctrl+F geocoder lookup —
-	// non-empty results are rendered as a 1-N numbered picker above the
-	// add form. locErr surfaces validation/back-end errors above the form.
-	savedLocations    []realtime.SavedLocation
-	locCursor         int
-	locAddOpen        bool
-	locRenameOpen     bool
-	locRenameID       int64
-	locFormLabel      textinput.Model
-	locFormLat        textinput.Model
-	locFormLon        textinput.Model
-	locFormFocus      int
-	// locFormCanonical is set by the geocoder picker when the user picks
-	// a result — preserves the disambiguating "Name, Admin1, Country"
-	// string so it lands in user_saved_locations.canonical even after the
-	// user edits the label to something shorter ("Office"). Cleared on
-	// form reset and on manual edits of the label.
-	locFormCanonical  string
-	locSearchResults  []geocoding.Result
-	locSearching      bool
-	locErr            string
+	// Locations modal state. savedLocations is the cached list; locCursor
+	// is the row focus for delete. locAddOpen toggles the inline add form
+	// (place + optional label); locFormFocus picks which input owns the
+	// cursor (0 = place, 1 = label). locRenameOpen replaces the add form
+	// with a single-input rename form when 'r' is pressed; locRenameID is
+	// the target row. locSearchResults / locSearching back the geocoder
+	// lookup fired on Enter; non-empty results are rendered as a 1-N
+	// numbered picker above the form. locErr surfaces validation /
+	// back-end errors above the form.
+	savedLocations   []realtime.SavedLocation
+	locCursor        int
+	locAddOpen       bool
+	locRenameOpen    bool
+	locRenameID      int64
+	locFormPlace     textinput.Model
+	locFormLabel     textinput.Model
+	locFormFocus     int
+	locSearchResults []geocoding.Result
+	locSearching     bool
+	locErr           string
 
 	// Password modal inputs.
 	pwCurrent    textinput.Model
@@ -148,9 +155,10 @@ const (
 	modeLocations
 	modeConfirm
 	modeFinger
-	modeOAuth       // linked-accounts list
-	modeOAuthAdd    // provider picker before kicking off a device flow
-	modeOAuthDevice // showing user code + polling
+	modeOAuth                 // linked-accounts list
+	modeOAuthAdd              // provider picker before kicking off a device flow
+	modeOAuthDevice           // showing user code + polling
+	modeProfileLocationPicker // geocoder disambiguation overlay during a Profile-tab save
 )
 
 // NewProfile builds the Profile screen pointed at the logged-in user.
@@ -194,6 +202,15 @@ type keyAddedMsg struct {
 type profileErrMsg struct {
 	stage string
 	err   error
+}
+
+// profileGeocodeMsg lands when the Ctrl+S save's geocode lookup completes.
+// Non-empty results enter modeProfileLocationPicker (or auto-accept the
+// top hit when the AutoAccept heuristic fires); errors / empty results
+// abort the save with an inline notice.
+type profileGeocodeMsg struct {
+	results []geocoding.Result
+	err     error
 }
 
 //
@@ -267,9 +284,21 @@ func (m *Profile) hydrate() {
 	loc := textinput.New()
 	loc.CharLimit = realtime.MaxLocationLength
 	loc.Width = 40
-	loc.Placeholder = "(optional)"
-	loc.SetValue(m.snap.Location)
+	loc.Placeholder = "city name — used by Weather"
+	// Source the field from the primary saved location when present so the
+	// freeform textinput and the saved-locations list show the same truth.
+	// Fall back to the legacy users.location string for users who haven't
+	// re-saved since this unification.
+	switch {
+	case m.sess.PrimaryLocation != nil:
+		loc.SetValue(m.sess.PrimaryLocation.Label)
+	default:
+		loc.SetValue(m.snap.Location)
+	}
 	m.location = loc
+	// Snapshot the location value as it was hydrated so submitProfile can
+	// tell whether the user actually edited it.
+	m.locationSnapshot = loc.Value()
 
 	bio := textarea.New()
 	bio.CharLimit = realtime.MaxBioLength
@@ -339,13 +368,55 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh the cached display prefs so the status bar + any
 		// subsequent /finger render pick up the new clock / zone / date
 		// format on this same session, no re-login required.
-		refreshCtx, cancel := m.sess.CtxWithTimeout(2*time.Second)
+		refreshCtx, cancel := m.sess.CtxWithTimeout(2 * time.Second)
 		if err := m.sess.RefreshDisplayPrefs(refreshCtx); err != nil {
 			m.sess.Logger.Warn("refresh display prefs", "err", err)
+		}
+		// PrimaryLocation may have moved if the save included a
+		// SetPrimaryFromGeocode / ClearPrimary side. Refresh it here so
+		// WeatherCoords picks up the new state and the next hydrate
+		// pre-populates the location field correctly.
+		if err := m.sess.RefreshPrimaryLocation(refreshCtx); err != nil {
+			m.sess.Logger.Warn("refresh primary location", "err", err)
 		}
 		cancel()
 		// Re-load so derived fields (HasPassword, counts) refresh.
 		return m, m.loadSelf()
+
+	case profileGeocodeMsg:
+		if msg.err != nil {
+			m.working = false
+			m.notice = "location lookup failed: " + msg.err.Error()
+			m.noticeKind = "err"
+			m.pickerQuery = ""
+			m.pickerResults = nil
+			return m, nil
+		}
+		if len(msg.results) == 0 {
+			m.working = false
+			m.notice = fmt.Sprintf("no places matched %q — try a broader name.", m.pickerQuery)
+			m.noticeKind = "err"
+			m.pickerQuery = ""
+			return m, nil
+		}
+		// Auto-accept clear winners; otherwise enter the picker so the
+		// user disambiguates Springfields and Parises.
+		if r, ok := geocoding.AutoAccept(m.pickerQuery, msg.results); ok {
+			m.pickerResults = nil
+			return m, m.dispatchProfileSave(locationAction{
+				kind:      locActionSetPrimary,
+				label:     m.pickerQuery,
+				canonical: r.Canonical(),
+				lat:       r.Latitude,
+				lon:       r.Longitude,
+			})
+		}
+		m.working = false
+		m.notice = ""
+		m.noticeKind = ""
+		m.pickerResults = msg.results
+		m.mode = modeProfileLocationPicker
+		return m, nil
 
 	case passwordChangedMsg:
 		m.working = false
@@ -427,6 +498,14 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.locErr = "no matches — try a different name."
 			m.locSearchResults = nil
 			return m, nil
+		}
+		// Auto-accept the top hit when it's an obvious winner; otherwise
+		// show the picker so the user disambiguates.
+		query := strings.TrimSpace(m.locFormPlace.Value())
+		if r, ok := geocoding.AutoAccept(query, msg.results); ok {
+			m.locSearchResults = nil
+			m.locErr = ""
+			return m, m.commitGeocodedLocation(*r)
 		}
 		m.locErr = ""
 		m.locSearchResults = msg.results
@@ -552,8 +631,62 @@ func (m *Profile) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleOAuthAddKey(k)
 	case modeOAuthDevice:
 		return m.handleOAuthDeviceKey(k)
+	case modeProfileLocationPicker:
+		return m.handleProfileLocationPickerKey(k)
 	}
 	return m, nil
+}
+
+// handleProfileLocationPickerKey owns the geocoder-disambiguation overlay
+// shown during a Profile-tab save. Digits 1-N pick the corresponding row;
+// Enter commits the top result (results[0]); Esc cancels the entire save,
+// leaving the user's edited fields in place so they can retry. Mirrors
+// the digit-pick UX from the Saved Locations modal at
+// profile_locations.go:243.
+func (m *Profile) handleProfileLocationPickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.pickerResults) == 0 {
+		// Stale state — bail back to the profile tab.
+		m.mode = modeTabProfile
+		return m, nil
+	}
+	switch s := k.String(); s {
+	case "esc":
+		m.mode = modeTabProfile
+		m.pickerResults = nil
+		m.pickerQuery = ""
+		m.notice = "save cancelled."
+		m.noticeKind = ""
+		return m, nil
+	case "enter":
+		r := m.pickerResults[0]
+		return m.commitPickedLocation(r)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		idx := int(s[0] - '1')
+		if idx < len(m.pickerResults) {
+			return m.commitPickedLocation(m.pickerResults[idx])
+		}
+	}
+	return m, nil
+}
+
+// commitPickedLocation finalizes the geocode pick — saves the row via
+// SetPrimaryFromGeocode + UpdateProfile, then drops back to modeTabProfile
+// while the dispatched cmd is in flight. profileSavedMsg lands the
+// success/error toast.
+func (m *Profile) commitPickedLocation(r geocoding.Result) (tea.Model, tea.Cmd) {
+	label := strings.TrimSpace(m.pickerQuery)
+	if label == "" {
+		label = r.Name
+	}
+	m.pickerResults = nil
+	m.mode = modeTabProfile
+	return m, m.dispatchProfileSave(locationAction{
+		kind:      locActionSetPrimary,
+		label:     label,
+		canonical: r.Canonical(),
+		lat:       r.Latitude,
+		lon:       r.Longitude,
+	})
 }
 
 // profileTabStops is the number of focusable widgets on the profile tab.
@@ -734,10 +867,20 @@ func (m *Profile) applyFocus() {
 	}
 }
 
-// submitProfile writes the current widget state through ProfileService.
-// Pulls fields from BOTH tabs since the model carries both unchanged-when-not-
-// edited (snap holds the original, but we mirror current widget state into
-// the ProfileUpdate either way).
+// submitProfile is the entry into the multi-stage save state machine. The
+// location field is a thin editor for the user's primary saved location;
+// changing it triggers a geocode + auto-accept-or-pick before the other
+// fields land through ProfileService.UpdateProfile. Three branches:
+//
+//   - location unchanged → fire UpdateProfile directly (today's behavior).
+//   - location cleared with an existing primary → confirm overlay; on Yes
+//     run ClearPrimary then UpdateProfile.
+//   - location changed to a non-empty value → geocode, disambiguate via
+//     modeProfileLocationPicker when needed, run SetPrimaryFromGeocode
+//     then UpdateProfile.
+//
+// All three converge on profileSavedMsg so the existing post-save
+// refresh-and-reload logic stays untouched.
 func (m *Profile) submitProfile() tea.Cmd {
 	if m.snap == nil {
 		return nil
@@ -745,13 +888,113 @@ func (m *Profile) submitProfile() tea.Cmd {
 	if m.working {
 		return nil
 	}
+
+	newLoc := strings.TrimSpace(m.location.Value())
+	prevLoc := strings.TrimSpace(m.locationSnapshot)
+
+	switch {
+	case newLoc == prevLoc:
+		// No location-side work; fire the flat update.
+		return m.dispatchProfileSave(locationAction{kind: locActionNoop})
+	case newLoc == "" && m.sess.PrimaryLocation != nil:
+		// User blanked the field — confirm before deleting the primary row.
+		m.confirm = components.NewConfirm(
+			"remove primary location",
+			fmt.Sprintf("remove %q? Weather will stop working until you set a new location.", m.sess.PrimaryLocation.Label),
+		)
+		m.confirmKind = "clearPrimaryLocation"
+		m.confirmReturnMode = modeTabProfile
+		m.mode = modeConfirm
+		return nil
+	case newLoc == "":
+		// Empty with no existing primary — nothing to clear; flat update.
+		return m.dispatchProfileSave(locationAction{kind: locActionNoop})
+	default:
+		// Geocode the typed string; the result handler decides whether to
+		// auto-accept or show the picker.
+		m.working = true
+		m.notice = "looking up location…"
+		m.noticeKind = ""
+		m.pickerQuery = newLoc
+		svc := m.sess.Geocoder
+		query := newLoc
+		return func() tea.Msg {
+			ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
+			defer cancel()
+			if svc == nil {
+				return profileGeocodeMsg{err: errors.New("geocoder unavailable")}
+			}
+			results, err := svc.Search(ctx, query, 5)
+			return profileGeocodeMsg{results: results, err: err}
+		}
+	}
+}
+
+// locActionKind discriminates the union below. locActionNoop skips the
+// saved-locations side of the save entirely.
+type locActionKind int
+
+const (
+	locActionNoop locActionKind = iota
+	locActionSetPrimary
+	locActionClearPrimary
+)
+
+// locationAction is the saved-locations work the chained save cmd will
+// perform before firing UpdateProfile. Stays internal to the screen.
+type locationAction struct {
+	kind      locActionKind
+	label     string
+	canonical string
+	lat       float64
+	lon       float64
+}
+
+// dispatchProfileSave returns the single tea.Cmd that does both the
+// location-side work (per `act`) AND the other-fields UpdateProfile call,
+// folding any error into a single profileSavedMsg. Sequencing both inside
+// one goroutine keeps the message graph small and means "saving…" cleanly
+// flips to "saved." once the whole transaction has landed.
+func (m *Profile) dispatchProfileSave(act locationAction) tea.Cmd {
 	m.working = true
 	m.notice = "saving…"
 	m.noticeKind = ""
+	update := m.buildProfileUpdate()
+	profSvc := m.sess.Profile
+	locSvc := m.sess.Locations
+	userID := m.sess.Identity.UserID
+	return func() tea.Msg {
+		ctx, cancel := m.sess.CtxWithTimeout(8 * time.Second)
+		defer cancel()
+		switch act.kind {
+		case locActionSetPrimary:
+			if locSvc == nil {
+				return profileSavedMsg{err: errors.New("location service unavailable")}
+			}
+			if _, err := locSvc.SetPrimaryFromGeocode(ctx, userID, act.label, act.canonical, act.lat, act.lon); err != nil {
+				return profileSavedMsg{err: err}
+			}
+		case locActionClearPrimary:
+			if locSvc == nil {
+				return profileSavedMsg{err: errors.New("location service unavailable")}
+			}
+			if err := locSvc.ClearPrimary(ctx, userID); err != nil {
+				return profileSavedMsg{err: err}
+			}
+		}
+		if err := profSvc.UpdateProfile(ctx, userID, update); err != nil {
+			return profileSavedMsg{err: err}
+		}
+		return profileSavedMsg{}
+	}
+}
 
+// buildProfileUpdate snapshots the current widget state into the
+// ProfileUpdate struct that UpdateProfile takes. Location is intentionally
+// omitted — the saved-locations layer owns that text now.
+func (m *Profile) buildProfileUpdate() realtime.ProfileUpdate {
 	update := realtime.ProfileUpdate{
 		RealName:                   strings.TrimSpace(m.realName.Value()),
-		Location:                   strings.TrimSpace(m.location.Value()),
 		Bio:                        strings.TrimSpace(m.bio.Value()),
 		TimeZoneID:                 m.tz.Selected(),
 		TemperatureUnit:            int32(m.tempUnit.Index),
@@ -763,13 +1006,7 @@ func (m *Profile) submitProfile() tea.Cmd {
 	if update.TimeZoneID == "" {
 		update.TimeZoneID = "UTC"
 	}
-	svc := m.sess.Profile
-	userID := m.sess.Identity.UserID
-	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
-		defer cancel()
-		return profileSavedMsg{err: svc.UpdateProfile(ctx, userID, update)}
-	}
+	return update
 }
 
 //
@@ -809,6 +1046,8 @@ func (m *Profile) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case kind == "requireSsh":
 		m.requireSsh.Toggle()
 		return m, nil
+	case kind == "clearPrimaryLocation":
+		return m, m.dispatchProfileSave(locationAction{kind: locActionClearPrimary})
 	case strings.HasPrefix(kind, "removeKey:"):
 		idStr := strings.TrimPrefix(kind, "removeKey:")
 		var id int64
@@ -903,6 +1142,11 @@ func (m *Profile) View() string {
 		base := m.renderTabs()
 		dim := components.DimSGR(base, theme.ColorDim)
 		modal := m.renderOAuthDeviceModal()
+		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
+	case modeProfileLocationPicker:
+		base := m.renderTabs()
+		dim := components.DimSGR(base, theme.ColorDim)
+		modal := m.renderProfileLocationPickerModal()
 		return components.Overlay(dim, modal, m.sess.Width, m.availableHeight())
 	}
 	return ""
@@ -1032,12 +1276,17 @@ func (m *Profile) renderProfileRight() string {
 
 	tzView := m.tz.View(7)
 
+	locationHint := lipgloss.NewStyle().Italic(true).
+		Foreground(lipgloss.Color(theme.ColorDim)).
+		Render("type a city — Weather + Map use this as your primary location")
+
 	rows := []string{
 		labelFor(0, "real name"),
 		m.realName.View(),
 		"",
 		labelFor(1, "location"),
 		m.location.View(),
+		locationHint,
 		"",
 		labelFor(2, "bio"),
 		m.bio.View(),
@@ -1064,6 +1313,40 @@ func (m *Profile) styleButton(label string, focused bool) string {
 //
 // Keys modal view
 //
+
+// renderProfileLocationPickerModal renders the disambiguation overlay
+// shown during a Profile-tab save when AutoAccept rejected the top hit.
+// Mirrors the digit-pick affordance the Saved Locations modal uses; the
+// label and hint line clarify what selecting a row will do — it's the
+// last step of the user's Ctrl+S save, not a parallel "search" affordance.
+func (m *Profile) renderProfileLocationPickerModal() string {
+	innerW := m.sess.Width - 12
+	if innerW > 80 {
+		innerW = 80
+	}
+	if innerW < 50 {
+		innerW = 50
+	}
+	header := lipgloss.NewStyle().Bold(true).
+		Foreground(lipgloss.Color(theme.ColorAccent)).
+		Render(fmt.Sprintf("which %q did you mean?", m.pickerQuery))
+	blurb := lipgloss.NewStyle().Italic(true).
+		Foreground(lipgloss.Color(theme.ColorDim)).Width(innerW).
+		Render("Press a number to pick. The chosen place becomes your primary saved location and Weather uses it from now on.")
+
+	rows := []string{header, blurb, ""}
+	numStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorYellow))
+	for i, r := range m.pickerResults {
+		rows = append(rows, fmt.Sprintf("  %s  %s  (%.4f, %.4f)",
+			numStyle.Render(fmt.Sprintf("%d", i+1)),
+			r.Canonical(), r.Latitude, r.Longitude))
+	}
+	rows = append(rows, "", lipgloss.NewStyle().Italic(true).
+		Foreground(lipgloss.Color(theme.ColorDim)).
+		Render("1-N pick · Enter take #1 · Esc cancel save"))
+
+	return theme.ModalFrame.Width(innerW + 6).Render(strings.Join(rows, "\n"))
+}
 
 func (m *Profile) renderConfirmModal() string {
 	if m.confirm == nil {
