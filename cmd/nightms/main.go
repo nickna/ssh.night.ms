@@ -154,13 +154,14 @@ func main() {
 	}
 
 	lookup := &auth.Lookup{
-		Pool:    pool,
-		Queries: queries,
-		Hasher:  hasher,
-		Limiter: rateLimiter,
-		Logger:  logger.With("component", "auth"),
-		Bans:    banCache,
-		Audit:   auditRecorder,
+		Pool:     pool,
+		Queries:  queries,
+		Hasher:   hasher,
+		Limiter:  rateLimiter,
+		Logger:   logger.With("component", "auth"),
+		Bans:     banCache,
+		Audit:    auditRecorder,
+		Denylist: auth.NewUsernameDenylist(opts.SSHSecurity.UsernameDenylist),
 	}
 
 	attachSecurity(&sessionDeps, banCache, settingsCache)

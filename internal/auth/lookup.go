@@ -39,6 +39,13 @@ type Lookup struct {
 	// can't get in until the ban expires or a sysop revokes it.
 	Bans *BanCache
 
+	// Denylist, when non-nil, rejects handles in its set with Refused before
+	// any rate-limiter / DB / Argon2id work runs. Used to discard brute-force
+	// noise for usernames that will never be valid (root, postgres, etc.).
+	// The denylist Refused is suppressed from the audit DB sink (slog only)
+	// to keep the sysop events feed from drowning under scanner traffic.
+	Denylist *UsernameDenylist
+
 	// Audit, when non-nil, receives an AuthSuccess / AuthFailure event for
 	// every terminal decision out of ByPublicKey / ByPassword. Nil here is
 	// the default for unit tests; production wires audit.NewPostgresRecorder.
@@ -59,6 +66,9 @@ type Lookup struct {
 func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm string, blob []byte, sourceIP net.Addr) (decision Decision) {
 	defer func() { l.emitAuthAudit(ctx, "publickey", handle, sourceIP, decision) }()
 	if d := l.checkPersistentBan(sourceIP); d != nil {
+		return d
+	}
+	if d := l.checkUsernameDenylist(handle); d != nil {
 		return d
 	}
 	if handle == "" {
@@ -132,6 +142,12 @@ func (l *Lookup) ByPassword(ctx context.Context, handle, secret string, sourceIP
 		// normal-failure path. An attacker who knows their IP is banned
 		// can't probe whether the cache caught it by timing.
 		l.Hasher.VerifyDummy(secret)
+		return d
+	}
+	// Denylist deliberately does NOT burn the dummy Argon2id — speed is
+	// the whole point of the gate, and the list (root, postgres, etc.) is
+	// public knowledge so timing leaks nothing useful.
+	if d := l.checkUsernameDenylist(handle); d != nil {
 		return d
 	}
 	if handle == "" {
@@ -244,6 +260,12 @@ func (l *Lookup) emitAuthAudit(ctx context.Context, method, handle string, sourc
 			Handle: handle, IP: ip, Method: method, Reason: "rate-limited",
 		})
 	case Refused:
+		// Denylist hits are scanner noise; the slog line in
+		// checkUsernameDenylist is the only structured record we keep so
+		// the security_events feed doesn't drown.
+		if d.Reason == denylistRefuseReason {
+			return
+		}
 		l.Audit.Record(ctx, audit.AuthFailure{
 			Handle: handle, IP: ip, Method: method, Reason: d.Reason,
 		})
@@ -254,6 +276,24 @@ func (l *Lookup) emitAuthAudit(ctx context.Context, method, handle string, sourc
 // decision when sourceIP — collapsed to its canonical key — has an active
 // row in security_ip_bans. Returns nil to mean "no ban; proceed". Centralized
 // here so both ByPublicKey and ByPassword share the same gate.
+// checkUsernameDenylist returns Refused when handle is on the denylist,
+// nil otherwise. The slog line emitted here is the only structured record
+// of the rejection — emitAuthAudit drops the matching security_events row.
+func (l *Lookup) checkUsernameDenylist(handle string) Decision {
+	if l.Denylist == nil || !l.Denylist.Denied(handle) {
+		return nil
+	}
+	if l.Logger != nil {
+		l.Logger.Info("auth: denylisted handle rejected", "handle", handle)
+	}
+	return Refused{Reason: denylistRefuseReason}
+}
+
+// denylistRefuseReason is the sentinel Reason string on the Refused
+// returned by checkUsernameDenylist. emitAuthAudit checks against it to
+// suppress the DB-side audit write for this specific rejection class.
+const denylistRefuseReason = "username denylisted"
+
 func (l *Lookup) checkPersistentBan(sourceIP net.Addr) Decision {
 	if l.Bans == nil || sourceIP == nil {
 		return nil

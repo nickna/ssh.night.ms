@@ -179,6 +179,14 @@ type SSHSecurityOptions struct {
 	// MaxUnauthHandshakes caps in-flight unauthenticated handshakes process-
 	// wide (the in-process MaxStartups). Zero disables. Default 100.
 	MaxUnauthHandshakes int
+
+	// UsernameDenylist is the list of handles refused at the auth layer
+	// before any Redis / Postgres / Argon2id work runs — used to discard
+	// brute-force noise targeting common system accounts (root, postgres,
+	// etc.). When NIGHTMS_SSH_USERNAME_DENYLIST is unset, defaults to
+	// auth.DefaultDeniedUsernames. Setting the env var to a comma-separated
+	// list replaces the defaults entirely; "none" disables the gate.
+	UsernameDenylist []string
 }
 
 // Load reads environment variables and falls back to sensible defaults that
@@ -232,6 +240,7 @@ func Load() Options {
 			PerIPConnRate:       floatEnv("NIGHTMS_SSH_CONN_RATE_PER_IP", 5),
 			PerIPConnBurst:      int(uintEnv("NIGHTMS_SSH_CONN_BURST_PER_IP", 20)),
 			MaxUnauthHandshakes: int(uintEnv("NIGHTMS_SSH_MAX_UNAUTH_HANDSHAKES", 100)),
+			UsernameDenylist:    parseUsernameDenylist(os.Getenv("NIGHTMS_SSH_USERNAME_DENYLIST")),
 		},
 		GoogleClientID:           os.Getenv("NIGHTMS_GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:       os.Getenv("NIGHTMS_GOOGLE_CLIENT_SECRET"),
@@ -422,4 +431,25 @@ func hexBytesEnv(key string) []byte {
 		panic(fmt.Sprintf("config: %s must be hex, got %q: %v", key, v, err))
 	}
 	return b
+}
+
+// parseUsernameDenylist resolves NIGHTMS_SSH_USERNAME_DENYLIST to the slice
+// passed to auth.NewUsernameDenylist. Unset → built-in defaults. "none"
+// (case-insensitive) → empty slice (gate disabled). Anything else is split
+// on commas and trimmed.
+func parseUsernameDenylist(raw string) []string {
+	if raw == "" {
+		return auth.DefaultDeniedUsernames
+	}
+	if strings.EqualFold(strings.TrimSpace(raw), "none") {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
