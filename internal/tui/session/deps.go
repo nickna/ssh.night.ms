@@ -75,6 +75,12 @@ type RealtimeDeps struct {
 	Forums       *realtime.ForumService
 	Locations    *realtime.LocationService
 	Leaderboards *realtime.LeaderboardService
+
+	// Kicker drives the sysop "kick / delete-user" connection-close fanout.
+	// Sessions register a Close func at construction time; SessionKicker.Kick
+	// invokes every matching registration locally and publishes to Redis so
+	// peer replicas do the same.
+	Kicker *realtime.SessionKicker
 }
 
 // ProviderDeps groups the outbound HTTP-cached integrations.

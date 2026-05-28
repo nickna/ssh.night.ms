@@ -54,6 +54,13 @@ RETURNING id, user_id, provider, subject, metadata, label, created_at, last_used
 DELETE FROM identity_credentials
 WHERE id = $1 AND user_id = $2;
 
+-- name: DeleteAllSshCredentialsForUser :execrows
+-- Sysop "remove SSH keys" action — wipes every SSH key for a target user
+-- in one statement. :execrows so the handler can report how many were
+-- removed.
+DELETE FROM identity_credentials
+WHERE user_id = $1 AND provider = 'Ssh';
+
 -- name: CountSshCredentialsForUser :one
 -- Used by the profile screen's lockout guard before enabling "Require SSH key"
 -- and before deleting a key in passwordless mode. Cast to int so sqlc emits

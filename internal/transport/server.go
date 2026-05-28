@@ -316,6 +316,23 @@ func programHandler(deps Deps, logger *slog.Logger) func(ssh.Session) *tea.Progr
 		program := tea.NewProgram(model, opts...)
 		if s != nil {
 			s.SetTeaProgram(program)
+			// Register the sysop-kick close hook so `kick <handle>` /
+			// `delete-user <handle>` can drop this connection from outside
+			// the per-session goroutine. Only gated on Known sessions —
+			// SignupRequired ones have no UserID yet, so there's nothing
+			// to address them by. Deregister fires when sess.Context()
+			// cancels (i.e. the SSH connection ends, whether normally or
+			// because we just kicked it).
+			if uid := s.Identity.UserID; uid != 0 && deps.Session.Realtime.Kicker != nil {
+				kickSess := sess
+				deregister := deps.Session.Realtime.Kicker.Register(uid, func() {
+					_ = kickSess.Close()
+				})
+				go func() {
+					<-kickSess.Context().Done()
+					deregister()
+				}()
+			}
 			if deps.Session.System.Carbonyl != nil {
 				// Capture sess (wish ssh.Session) + runner reference. The
 				// closure is what the browser screen calls; it constructs the

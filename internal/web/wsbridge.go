@@ -277,6 +277,17 @@ func (h *handlers) handleBBSWebSocket(w http.ResponseWriter, r *http.Request) {
 	// half-block fallback every time.
 	sess := session.New(h.deps.Session, st, bridgeCtx, graphics.Halfblock)
 
+	// Register the sysop-kick close hook so `kick <handle>` / `delete-user
+	// <handle>` can drop this connection from outside the bridge goroutine.
+	// Deregister on handler exit (defer) — by then the conn is already closing
+	// down naturally.
+	if h.deps.Kicker != nil {
+		deregister := h.deps.Kicker.Register(known.UserID, func() {
+			_ = conn.Close(websocket.StatusGoingAway, "session terminated by sysop")
+		})
+		defer deregister()
+	}
+
 	// Start the per-session presence heartbeat exactly like the SSH path does.
 	if h.deps.Presence != nil {
 		go h.deps.Presence.RunHeartbeat(r.Context(), known.Handle, known.UserID)

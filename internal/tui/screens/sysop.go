@@ -47,9 +47,11 @@ type Sysop struct {
 	status  string
 	cmd     textinput.Model
 
-	// pendingWall is set when the user typed "wall <msg>" — we render a
-	// confirm prompt and wait for Y/N before firing.
-	pendingWall string
+	// pending holds the destructive action awaiting Y/N confirmation. Set
+	// when the sysop types `wall`, `reset-password`, `remove-keys`, or
+	// `delete-user` — all four funnel through the same modal so the impact
+	// summary stays consistent. nil means no modal is showing.
+	pending *pendingAction
 
 	// metrics samples runtime stats every 2s via a tea.Tick.
 	metrics sysopMetrics
@@ -222,6 +224,14 @@ func (m *Sysop) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sysopEventsFilterTickMsg:
 		return m, m.maybeFireFilterReload()
 
+	case sysopPreflightMsg:
+		if msg.err != nil {
+			m.status = "[!] " + msg.err.Error()
+			return m, nil
+		}
+		m.pending = msg.action
+		return m, nil
+
 	case sysopCmdDoneMsg:
 		m.status = msg.status
 		if !msg.reload {
@@ -268,16 +278,18 @@ func (m *Sysop) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // wall confirmation) handle first; then per-tab navigation; then the
 // textinput consumes the remainder.
 func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Wall confirmation is modal — intercepts everything.
-	if m.pendingWall != "" {
+	// Pending-action confirmation is modal — intercepts everything until
+	// the sysop confirms (Y/Enter) or cancels (N/Esc).
+	if m.pending != nil {
 		switch strings.ToLower(msg.String()) {
 		case "y", "enter":
-			body := m.pendingWall
-			m.pendingWall = ""
-			return m, m.wallCmd(body)
+			p := m.pending
+			m.pending = nil
+			return m, m.runPending(p)
 		case "n", "esc":
-			m.pendingWall = ""
-			m.status = "wall broadcast cancelled."
+			p := m.pending
+			m.pending = nil
+			m.status = p.kind + " cancelled."
 			return m, nil
 		}
 		return m, nil
@@ -361,7 +373,15 @@ func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.status = "[!] wall message too long (max 500 chars)."
 				return m, nil
 			}
-			m.pendingWall = target
+			m.pending = &pendingAction{
+				kind:         "wall",
+				wallBody:     target,
+				confirmLabel: "send",
+				summary: []string{
+					"Wall broadcast to ALL sessions:",
+					"  \"" + target + "\"",
+				},
+			}
 			return m, nil
 		}
 		return m, m.dispatch(line)
@@ -385,12 +405,12 @@ func (m *Sysop) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // cycleTab moves the active tab by delta (positive = right). Wraps around
-// the 4-tab cycle. Resets the wall-confirm state so a half-typed command
-// on one tab doesn't leak into the next.
+// the 4-tab cycle. Resets the pending-confirmation state so a half-typed
+// destructive command on one tab doesn't leak into the next.
 func (m *Sysop) cycleTab(delta int) {
 	const n = 4
 	m.tab = sysopTab((int(m.tab) + delta + n) % n)
-	m.pendingWall = ""
+	m.pending = nil
 	m.applyTabFocus()
 }
 
@@ -404,7 +424,7 @@ func (m *Sysop) applyTabFocus() {
 		m.cmd.Placeholder = "filter: severity:warn handle:alice ip:1.2.3.4 since:1h text:foo"
 		m.eventsFocusFilter = true
 	case tabUsers:
-		m.cmd.Placeholder = "ban <handle> | sysop <handle> | wall <msg> | clear-passwordless <handle>"
+		m.cmd.Placeholder = "ban|unban|sysop|unsysop|reset-password|remove-keys|kick|delete-user <handle> · wall <msg>"
 	case tabBans:
 		m.cmd.Placeholder = "ban-ip <ip> [duration] [reason] | unban-ip <ip> | refresh"
 	case tabSettings:
@@ -427,9 +447,9 @@ func (m *Sysop) dispatch(line string) tea.Cmd {
 	switch verb {
 	case "help", "?":
 		return done(
-			"Users tab: ban | unban | sysop | unsysop | clear-passwordless | wall <msg>  ·  "+
+			"Users tab: ban|unban|sysop|unsysop|clear-passwordless|reset-password|remove-keys|kick|delete-user <handle> · wall <msg>  ·  "+
 				"Bans tab: ban-ip <ip> [duration] [reason] | unban-ip <ip>  ·  "+
-				"refresh | help  ·  Tab/1/2/3 to switch tabs · Esc back to lobby",
+				"refresh | help  ·  Tab/1/2/3/4 to switch tabs · Esc back to lobby",
 			false,
 		)
 	case "refresh":
@@ -447,6 +467,14 @@ func (m *Sysop) dispatch(line string) tea.Cmd {
 		return m.toggleCmd(target, "unsysop", false)
 	case "clear-passwordless":
 		return m.clearPasswordlessCmd(target)
+	case "reset-password":
+		return m.preflightUserCmd(target, "reset-password")
+	case "remove-keys":
+		return m.preflightUserCmd(target, "remove-keys")
+	case "kick":
+		return m.kickCmd(target)
+	case "delete-user":
+		return m.preflightUserCmd(target, "delete-user")
 	case "ban-ip":
 		return m.banIPCmd(target)
 	case "unban-ip":
@@ -662,12 +690,20 @@ func (m *Sysop) View() string {
 	}
 	b.WriteString("\n\n")
 
-	if m.pendingWall != "" {
-		b.WriteString(sysopErr.Render("Wall broadcast to ALL sessions:"))
-		b.WriteString("\n  ")
-		b.WriteString(sysopFlag.Render(`"` + m.pendingWall + `"`))
-		b.WriteString("\n")
-		b.WriteString(sysopHint.Render("[Y] send  ·  [N] cancel"))
+	if m.pending != nil {
+		for i, line := range m.pending.summary {
+			if i == 0 {
+				b.WriteString(sysopErr.Render(line))
+			} else {
+				b.WriteString(sysopFlag.Render(line))
+			}
+			b.WriteString("\n")
+		}
+		label := m.pending.confirmLabel
+		if label == "" {
+			label = "confirm"
+		}
+		b.WriteString(sysopHint.Render("[Y] " + label + "  ·  [N] cancel"))
 		b.WriteString("\n")
 	} else {
 		prompt := "> "

@@ -27,6 +27,22 @@ func (q *Queries) CountSshCredentialsForUser(ctx context.Context, userID int64) 
 	return count, err
 }
 
+const deleteAllSshCredentialsForUser = `-- name: DeleteAllSshCredentialsForUser :execrows
+DELETE FROM identity_credentials
+WHERE user_id = $1 AND provider = 'Ssh'
+`
+
+// Sysop "remove SSH keys" action — wipes every SSH key for a target user
+// in one statement. :execrows so the handler can report how many were
+// removed.
+func (q *Queries) DeleteAllSshCredentialsForUser(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAllSshCredentialsForUser, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCredentialByID = `-- name: DeleteCredentialByID :execrows
 DELETE FROM identity_credentials
 WHERE id = $1 AND user_id = $2

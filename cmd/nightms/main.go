@@ -482,6 +482,13 @@ func buildSessionDeps(
 		}
 	}()
 
+	sessionKicker := realtime.NewSessionKicker(bus, logger.With("component", "session-kick"))
+	go func() {
+		if err := sessionKicker.Run(ctx); err != nil {
+			logger.Error("session kicker exited", "err", err)
+		}
+	}()
+
 	mpLedger := &realtime.MultiplayerLedger{Pool: pool, Queries: queries}
 	holdemReg := multiplayer.NewRegistry(ctx, queries, mpLedger, logger.With("component", "holdem-mp"))
 	restoreCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -526,6 +533,7 @@ func buildSessionDeps(
 			Forums:       &realtime.ForumService{Queries: queries, Logger: logger.With("component", "forums")},
 			Locations:    &realtime.LocationService{Queries: queries},
 			Leaderboards: &realtime.LeaderboardService{Queries: queries},
+			Kicker:       sessionKicker,
 		},
 		Providers: buildProviders(opts),
 		Art:       buildArt(opts, logger),
