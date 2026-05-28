@@ -38,7 +38,7 @@ WITH unified AS (
         ''::text AS actor,
         s.handle AS subject_handle,
         s.ip_addr AS subject_ip,
-        NULL::text AS target,
+        ''::text AS target,
         s.details
     FROM security_events s
 )
@@ -76,7 +76,7 @@ WITH unified AS (
         ''::text AS actor,
         s.handle AS subject_handle,
         s.ip_addr AS subject_ip,
-        NULL::text AS target,
+        ''::text AS target,
         s.details
     FROM security_events s
 )
