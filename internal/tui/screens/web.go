@@ -144,20 +144,34 @@ func (m *Web) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(textinput.Blink, m.reloadHistory())
 
 	case bookmarksLoadedMsg:
-		if msg.err == nil {
-			m.bookmarks = msg.rows
-			if m.bmCursor >= len(m.bookmarks) {
-				m.bmCursor = max0(len(m.bookmarks) - 1)
-			}
+		if msg.err != nil {
+			m.bookmarks = []gen.ListWebBookmarksRow{}
+			m.status = "! load bookmarks failed: " + msg.err.Error()
+			return m, nil
+		}
+		// sqlc returns a nil slice when the user has zero rows; normalize so
+		// the "nil = still loading" sentinel in renderBookmarks is honored.
+		if msg.rows == nil {
+			msg.rows = []gen.ListWebBookmarksRow{}
+		}
+		m.bookmarks = msg.rows
+		if m.bmCursor >= len(m.bookmarks) {
+			m.bmCursor = max0(len(m.bookmarks) - 1)
 		}
 		return m, nil
 
 	case historyLoadedMsg:
-		if msg.err == nil {
-			m.history = msg.rows
-			if m.hsCursor >= len(m.history) {
-				m.hsCursor = max0(len(m.history) - 1)
-			}
+		if msg.err != nil {
+			m.history = []gen.RecentWebHistoryRow{}
+			m.status = "! load history failed: " + msg.err.Error()
+			return m, nil
+		}
+		if msg.rows == nil {
+			msg.rows = []gen.RecentWebHistoryRow{}
+		}
+		m.history = msg.rows
+		if m.hsCursor >= len(m.history) {
+			m.hsCursor = max0(len(m.history) - 1)
 		}
 		return m, nil
 
