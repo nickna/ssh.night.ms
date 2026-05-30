@@ -61,6 +61,17 @@ services:
       NIGHTMS_COOKIE_SECRET: "${NIGHTMS_COOKIE_SECRET:-}"
       # Behind Cloudflare Flexible the inbound origin connection is plain HTTP.
       NIGHTMS_WEB_SECURE_COOKIES: "0"
+
+      # OAuth account linking (Google + Microsoft). Each provider is enabled
+      # only when its CLIENT_ID is non-empty; an empty value hides its button.
+      NIGHTMS_MICROSOFT_CLIENT_ID: "${NIGHTMS_MICROSOFT_CLIENT_ID:-}"
+      NIGHTMS_MICROSOFT_CLIENT_SECRET: "${NIGHTMS_MICROSOFT_CLIENT_SECRET:-}"
+      # Externally-visible https origin used to build the OAuth callback URLs
+      # (<base>/auth/{provider}/callback). MUST be set in prod: the auto-derived
+      # fallback uses http when WEB_SECURE_COOKIES=0 (the Cloudflare Flexible
+      # case above), but Azure/Google require the registered redirect URI to be
+      # https — so it has to be pinned explicitly here.
+      NIGHTMS_OAUTH_REDIRECT_BASE: "${NIGHTMS_OAUTH_REDIRECT_BASE:-}"
     volumes:
       - app-data:/data
     ports:
