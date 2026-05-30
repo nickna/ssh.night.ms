@@ -241,6 +241,27 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 			// access to an existing SSH account.
 			r.Get("/auth/{provider}/start", h.oauthStart)
 			r.Get("/auth/{provider}/callback", h.oauthCallback)
+
+			// OneNote JSON API. Sits inside the CSRF group: GETs are exempt by
+			// gorilla/csrf, and the browser sends the csrf token as the
+			// X-CSRF-Token header on the mutating verbs. The SSH TUI consumes
+			// the same *onenote.Service in-process and never touches these
+			// routes. All handlers cookie-authenticate via identityFrom and
+			// 503 when the service is unconfigured.
+			r.Route("/api/onenote", func(r chi.Router) {
+				r.Get("/notebooks", h.onenoteNotebooks)
+				r.Get("/sections", h.onenoteSections)
+				r.Get("/pages", h.onenotePages)
+				r.Get("/recent", h.onenoteRecent)
+				r.Get("/prefs", h.onenotePrefsGet)
+				r.Put("/prefs", h.onenotePrefsPut)
+				r.Get("/pages/{id}", h.onenotePageGet)
+				r.Delete("/pages/{id}", h.onenotePageDelete)
+				r.Post("/sections/{id}/pages", h.onenotePageCreate)
+				r.Post("/pages/{id}/append", h.onenotePageAppend)
+				r.Patch("/pages/{id}/elements/{elementId}", h.onenoteElementReplace)
+				r.Put("/pages/{id}/body", h.onenoteBodyReplace)
+			})
 		})
 
 		// /u/{handle}/avatar.png is outside the CSRF group — it's a GET image

@@ -297,6 +297,13 @@ func (r *Refresher) emitReauthRequired(ctx context.Context, row gen.ListExpiring
 	})
 }
 
+// IsHardError reports whether an OAuth refresh error is "hard" — the refresh
+// token itself is dead and the user must re-authorize. Exported so the
+// synchronous on-demand token path (internal/auth/usertoken) classifies
+// refresh failures with exactly the same rule as this background loop,
+// instead of re-deriving it and risking drift.
+func IsHardError(err error) bool { return isHardOAuthError(err) }
+
 // isHardOAuthError returns true when the provider's response indicates the
 // refresh token itself is no longer usable (invalid_grant being the canonical
 // signal: the user revoked consent, the refresh token expired, the app was

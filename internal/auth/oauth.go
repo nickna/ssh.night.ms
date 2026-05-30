@@ -45,10 +45,18 @@ var GoogleLinkScopes = []string{
 // offline_access is what gets us a refresh token; without it the access
 // token expires after an hour and we can't refresh it from the background
 // service. Mail.Read + Files.Read cover the planned Outlook + OneDrive
-// integrations.
+// integrations; Notes.ReadWrite backs the OneNote read/edit feature
+// (internal/onenote).
+//
+// Scopes are fixed at link time and the refresher preserves them — adding a
+// scope here only takes effect for accounts linked (or re-authorized) after
+// the change ships. Existing Microsoft links keep their old scope set until
+// the user re-runs /auth/microsoft/start (which forces prompt=consent). The
+// usertoken.Source surfaces the gap as ErrMissingScope so callers render a
+// "re-authorize to enable OneNote" CTA instead of a 500.
 var MicrosoftLinkScopes = []string{
 	"openid", "email", "profile", "offline_access",
-	"User.Read", "Mail.Read", "Files.Read",
+	"User.Read", "Mail.Read", "Files.Read", "Notes.ReadWrite",
 }
 
 // Device-code flow endpoints. Authorization-code endpoints come from

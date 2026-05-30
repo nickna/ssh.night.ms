@@ -14,6 +14,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
 	roulettemp "github.com/nickna/ssh.night.ms/internal/doors/roulette/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
+	"github.com/nickna/ssh.night.ms/internal/onenote"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
@@ -100,6 +101,14 @@ type ProviderDeps struct {
 	// Routing is nil when NIGHTMS_ORS_API_KEY isn't set. The Map screen
 	// handles nil by surfacing a "routing disabled" toast on the `d` key.
 	Routing routing.Provider
+
+	// OneNote is the per-user OneNote (Microsoft Graph) read/edit service.
+	// Nil when the feature is disabled (NIGHTMS_ONENOTE_ENABLED=0) or no
+	// Microsoft OAuth client is configured. The OneNote screen + REST routes
+	// gate on nil and surface "unavailable". Attached after buildProviders by
+	// main.go (it depends on the OAuth sealer + Microsoft provider, both built
+	// later than the provider bag).
+	OneNote *onenote.Service
 }
 
 // ArtDeps groups the filesystem-backed visual asset providers.

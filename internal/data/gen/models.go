@@ -126,6 +126,36 @@ type OauthToken struct {
 	UpdatedAt             pgtype.Timestamptz
 }
 
+type OnenotePageCache struct {
+	UserID         int64
+	PageID         string
+	Html           string
+	Blocks         []byte
+	PageModifiedAt pgtype.Timestamptz
+	FetchedAt      pgtype.Timestamptz
+}
+
+type OnenoteRecentPage struct {
+	ID             int64
+	UserID         int64
+	PageID         string
+	SectionID      *string
+	Title          string
+	WebUrl         *string
+	PageModifiedAt pgtype.Timestamptz
+	LastViewedAt   pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
+type OnenoteUserPref struct {
+	UserID            int64
+	DefaultNotebookID *string
+	DefaultSectionID  *string
+	LastSyncedAt      pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
 type Post struct {
 	ID           int64
 	TopicID      int64

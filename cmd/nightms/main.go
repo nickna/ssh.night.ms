@@ -22,6 +22,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/auth/devicecode"
 	"github.com/nickna/ssh.night.ms/internal/auth/oauthrefresh"
 	"github.com/nickna/ssh.night.ms/internal/auth/tokenseal"
+	"github.com/nickna/ssh.night.ms/internal/auth/usertoken"
 	"github.com/nickna/ssh.night.ms/internal/carbonyl"
 	"github.com/nickna/ssh.night.ms/internal/config"
 	"github.com/nickna/ssh.night.ms/internal/data"
@@ -30,6 +31,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/doors/holdem/multiplayer"
 	roulettemp "github.com/nickna/ssh.night.ms/internal/doors/roulette/multiplayer"
 	"github.com/nickna/ssh.night.ms/internal/imaging/asyncfetch"
+	"github.com/nickna/ssh.night.ms/internal/onenote"
 	"github.com/nickna/ssh.night.ms/internal/providers/finance"
 	"github.com/nickna/ssh.night.ms/internal/providers/geocoding"
 	"github.com/nickna/ssh.night.ms/internal/providers/maptile"
@@ -234,6 +236,42 @@ func main() {
 			os.Exit(1)
 		}
 		go refresher.Run(ctx)
+	}
+
+	// OneNote (Microsoft Graph) read/edit service. Late-attached here — not in
+	// buildProviders — because it depends on the OAuth sealer + Microsoft
+	// provider, both constructed above (after buildSessionDeps ran). Gated on
+	// the feature flag AND a configured Microsoft client; either missing
+	// leaves Providers.OneNote nil and the screen / REST routes surface
+	// "unavailable". web.NewDeps runs later (below) and picks up the attached
+	// service automatically. Its own connection-pooled transport (single host,
+	// graph.microsoft.com) keeps Graph traffic isolated from the provider pool.
+	if msProv := deviceProviders[auth.OAuthMicrosoft]; opts.OneNote.Enabled && msProv != nil {
+		tokenSrc := &usertoken.Source{
+			Queries:  queries,
+			Sealer:   oauthSealer,
+			Provider: msProv,
+			Logger:   logger.With("component", "usertoken"),
+		}
+		graphClient := &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
+				MaxIdleConns:        20,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				ForceAttemptHTTP2:   true,
+			},
+		}
+		sessionDeps.Providers.OneNote = onenote.New(onenote.Config{
+			Tokens:     tokenSrc,
+			Queries:    queries,
+			HTTPClient: graphClient,
+			Logger:     logger.With("component", "onenote"),
+			ListTTL:    opts.OneNote.ListTTL,
+			ContentTTL: opts.OneNote.ContentTTL,
+		})
+		logger.Info("onenote: enabled")
 	}
 
 	// Carbonyl "rich mode" browser runner. Process singleton — Launch fans

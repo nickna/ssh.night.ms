@@ -124,6 +124,34 @@ type Options struct {
 	// effect at boot; the Enabled flag + concurrency caps seed the matching
 	// settings.Defaults so a sysop can flip them live without restart.
 	Carbonyl CarbonylOptions
+
+	// OneNote bundles the OneNote (Microsoft Graph) integration knobs. The
+	// feature also requires a configured Microsoft OAuth client + the
+	// Notes.ReadWrite scope; with Enabled=false the service is left nil and
+	// the screen / REST routes surface "unavailable".
+	OneNote OneNoteOptions
+}
+
+// OneNoteOptions configures the OneNote read/edit integration
+// (internal/onenote). All NIGHTMS_ONENOTE_* env vars. The cache TTLs bound
+// how stale a listing / page read may be before a fresh Microsoft Graph
+// fetch; they trade responsiveness against Graph rate-limit pressure.
+type OneNoteOptions struct {
+	// Enabled gates the whole feature. Default true — but the service still
+	// only constructs when a Microsoft OAuth client is configured (the
+	// presence of credentials is the implicit second gate, mirroring
+	// Carbonyl's "binary on disk" gate). Set NIGHTMS_ONENOTE_ENABLED=0 to
+	// force-disable independent of OAuth config.
+	Enabled bool
+
+	// ListTTL is the in-process cache window for notebook/section/page
+	// listings (structure changes slowly). Default 5m.
+	ListTTL time.Duration
+
+	// ContentTTL is the cache window for a fetched page's content. Short by
+	// default (60s) because pages are actively edited and a second viewer
+	// should see near-fresh content.
+	ContentTTL time.Duration
 }
 
 // CarbonylOptions configures the "rich mode" handoff in the browser screen.
@@ -266,6 +294,11 @@ func Load() Options {
 			MaxGlobal:    int(uintEnv("NIGHTMS_CARBONYL_MAX_GLOBAL", 2)),
 			MaxPerIP:     int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_IP", 1)),
 			MaxPerHandle: int(uintEnv("NIGHTMS_CARBONYL_MAX_PER_HANDLE", 1)),
+		},
+		OneNote: OneNoteOptions{
+			Enabled:    envOr("NIGHTMS_ONENOTE_ENABLED", "1") != "0",
+			ListTTL:    durationEnv("NIGHTMS_ONENOTE_LIST_TTL", 5*time.Minute),
+			ContentTTL: durationEnv("NIGHTMS_ONENOTE_CONTENT_TTL", 60*time.Second),
 		},
 	}
 	o.WebCookieSecret = loadCookieSecret(o.HostKeyDir)
