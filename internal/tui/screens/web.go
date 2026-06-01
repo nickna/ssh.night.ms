@@ -160,9 +160,7 @@ func (m *Web) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.bookmarks == nil {
 			m.bookmarks = []gen.ListWebBookmarksRow{}
 		}
-		if m.bmCursor >= len(m.bookmarks) {
-			m.bmCursor = max0(len(m.bookmarks) - 1)
-		}
+		m.bmCursor = clampCursor(m.bmCursor, len(m.bookmarks))
 		return m, nil
 
 	case historyLoadedMsg:
@@ -177,9 +175,7 @@ func (m *Web) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.history == nil {
 			m.history = []gen.RecentWebHistoryRow{}
 		}
-		if m.hsCursor >= len(m.history) {
-			m.hsCursor = max0(len(m.history) - 1)
-		}
+		m.hsCursor = clampCursor(m.hsCursor, len(m.history))
 		return m, nil
 
 	case bookmarkSavedMsg:

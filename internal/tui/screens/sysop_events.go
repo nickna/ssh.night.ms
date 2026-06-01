@@ -139,9 +139,7 @@ func (m *Sysop) handleEventsLoaded(msg sysopEventsLoadedMsg) tea.Cmd {
 
 	if len(m.events) == 0 || isFreshLoad(m.events, msg.rows) {
 		m.events = msg.rows
-		if m.eventsCursor >= len(m.events) {
-			m.eventsCursor = 0
-		}
+		m.eventsCursor = clampIndex(m.eventsCursor, len(m.events))
 		m.eventsScroll = 0
 	} else {
 		// Append, deduping by ID+source (handles the race where a new row

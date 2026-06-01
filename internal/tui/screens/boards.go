@@ -194,9 +194,7 @@ func (m *Boards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case boardsForumsLoadedMsg:
 		m.forums = msg.forums
 		m.unreadByForum = msg.unread
-		if m.forumCursor >= len(m.forums) {
-			m.forumCursor = 0
-		}
+		m.forumCursor = clampIndex(m.forumCursor, len(m.forums))
 
 	case boardsTopicsLoadedMsg:
 		if msg.seq != m.navSeq {
@@ -1208,12 +1206,5 @@ func wrapToWidth(text string, width int) []string {
 		out = []string{""}
 	}
 	return out
-}
-
-func plural(noun string, n int) string {
-	if n == 1 {
-		return noun
-	}
-	return noun + "s"
 }
 

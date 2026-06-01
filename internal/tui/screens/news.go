@@ -205,9 +205,7 @@ func (m *News) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			st.stories = msg.stories
-			if st.cursor >= len(st.stories) {
-				st.cursor = 0
-			}
+			st.cursor = clampIndex(st.cursor, len(st.stories))
 		}
 
 	case components.ArticleReaderLoadedMsg:

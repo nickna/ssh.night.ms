@@ -471,9 +471,7 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, it := range msg.items {
 			m.rows[i].item = it
 		}
-		if m.rowCursor >= len(m.rows) {
-			m.rowCursor = max0(len(m.rows) - 1)
-		}
+		m.rowCursor = clampCursor(m.rowCursor, len(m.rows))
 		return m, tea.Batch(m.loadRows(msg.items), m.loadNews())
 
 	case rowDataMsg:
@@ -492,9 +490,7 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.news = msg.items
-		if m.newsCursor >= len(m.news) {
-			m.newsCursor = max0(len(m.news) - 1)
-		}
+		m.newsCursor = clampCursor(m.newsCursor, len(m.news))
 		return m, nil
 
 	case itemMutatedMsg:
@@ -528,9 +524,7 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail = msg.detail
 		m.detailNews = msg.news
-		if m.detailNewsCursor >= len(m.detailNews) {
-			m.detailNewsCursor = 0
-		}
+		m.detailNewsCursor = clampIndex(m.detailNewsCursor, len(m.detailNews))
 		return m, nil
 
 	case components.ArticleReaderLoadedMsg:
@@ -1155,32 +1149,6 @@ func formatBigUSD(v float64) string {
 	return fmt.Sprintf("$%.2f", v)
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return "…"
-	}
-	return s[:n-1] + "…"
-}
-
-func max0(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
 
 func (m *Finance) viewReader() string {
 	return m.reader.View(m.sess.Width, m.sess.Height, "Finance › Reader")

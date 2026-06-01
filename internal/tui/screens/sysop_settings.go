@@ -36,12 +36,7 @@ func (m *Sysop) renderSettings(w, h int) string {
 
 	// Clamp the cursor to the catalog length; the catalog is closed so this
 	// only matters defensively if a setting is removed mid-session.
-	if m.settingsCursor >= len(settings.Catalog) {
-		m.settingsCursor = len(settings.Catalog) - 1
-	}
-	if m.settingsCursor < 0 {
-		m.settingsCursor = 0
-	}
+	m.settingsCursor = clampCursor(m.settingsCursor, len(settings.Catalog))
 
 	// Column widths chosen so the catalog renders in 80 columns: key 26,
 	// value 22, default 22, type 4, plus separators. Description trails.
