@@ -144,20 +144,41 @@ func (m *Web) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(textinput.Blink, m.reloadHistory())
 
 	case bookmarksLoadedMsg:
-		if msg.err == nil {
-			m.bookmarks = msg.rows
-			if m.bmCursor >= len(m.bookmarks) {
-				m.bmCursor = max0(len(m.bookmarks) - 1)
+		if msg.err != nil {
+			// Mark the region loaded (non-nil) so it stops showing "loading…",
+			// and surface the failure instead of swallowing it.
+			if m.bookmarks == nil {
+				m.bookmarks = []gen.ListWebBookmarksRow{}
 			}
+			m.status = "! bookmarks load failed: " + msg.err.Error()
+			return m, nil
+		}
+		// sqlc returns a nil slice for zero rows, which is indistinguishable
+		// from the not-yet-loaded sentinel. Coerce to a non-nil empty slice so
+		// "loaded but empty" renders "(empty …)" rather than "loading…" forever.
+		m.bookmarks = msg.rows
+		if m.bookmarks == nil {
+			m.bookmarks = []gen.ListWebBookmarksRow{}
+		}
+		if m.bmCursor >= len(m.bookmarks) {
+			m.bmCursor = max0(len(m.bookmarks) - 1)
 		}
 		return m, nil
 
 	case historyLoadedMsg:
-		if msg.err == nil {
-			m.history = msg.rows
-			if m.hsCursor >= len(m.history) {
-				m.hsCursor = max0(len(m.history) - 1)
+		if msg.err != nil {
+			if m.history == nil {
+				m.history = []gen.RecentWebHistoryRow{}
 			}
+			m.status = "! history load failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.history = msg.rows
+		if m.history == nil {
+			m.history = []gen.RecentWebHistoryRow{}
+		}
+		if m.hsCursor >= len(m.history) {
+			m.hsCursor = max0(len(m.history) - 1)
 		}
 		return m, nil
 
