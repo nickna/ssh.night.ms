@@ -119,6 +119,11 @@ type Finance struct {
 	detailNewsCursor int
 	detailLoading    bool
 	detailErr        string
+	// detailSeq is bumped each time a detail load starts (open or refresh) and
+	// on Esc out of detail. The loaded handler drops a response whose seq no
+	// longer matches, so a slow fetch for a previously-viewed symbol can't
+	// overwrite the detail the user is now looking at.
+	detailSeq int
 
 	// Reader-mode delegate + return-to breadcrumb. The reader can be opened
 	// from either the list view's news pane (return to fmList) or the Detail
@@ -171,6 +176,7 @@ type itemMutatedMsg struct {
 }
 
 type detailLoadedMsg struct {
+	seq    int
 	detail *finance.Detail
 	news   []finance.Headline
 	err    error
@@ -418,6 +424,8 @@ func (m *Finance) loadDetail(item gen.UserWatchlistItem) tea.Cmd {
 	news := m.sess.FinanceNews
 	kind := finance.Kind(item.Kind)
 	canon := item.Canonical
+	m.detailSeq++
+	seq := m.detailSeq
 	return func() tea.Msg {
 		ctx, cancel := m.sess.CtxWithTimeout(quoteFanoutTO)
 		defer cancel()
@@ -443,7 +451,7 @@ func (m *Finance) loadDetail(item gen.UserWatchlistItem) tea.Cmd {
 			}
 		}()
 		wg.Wait()
-		return detailLoadedMsg{detail: d, news: hl, err: derr}
+		return detailLoadedMsg{seq: seq, detail: d, news: hl, err: derr}
 	}
 }
 
@@ -511,6 +519,9 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadWatchlist()
 
 	case detailLoadedMsg:
+		if msg.seq != m.detailSeq {
+			return m, nil // stale: a newer detail open/refresh superseded this
+		}
 		m.detailLoading = false
 		if msg.err != nil {
 			m.detailErr = msg.err.Error()
@@ -691,6 +702,7 @@ func (m *Finance) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Finance) handleDetailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc", "q":
+		m.detailSeq++ // invalidate any in-flight detail load for this symbol
 		m.mode = fmList
 		m.detail = nil
 		m.detailNews = nil
