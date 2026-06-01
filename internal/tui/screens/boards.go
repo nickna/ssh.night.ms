@@ -28,6 +28,13 @@ type Boards struct {
 	mode boardsMode
 	err  string
 
+	// navSeq is bumped on every view-changing transition (drill-in and
+	// Esc-back). Each topics/posts load captures it and the loaded handler
+	// drops the response if it no longer matches — so a slow response can't
+	// paint a forum/topic the user already navigated away from, nor yank them
+	// back into a thread they Esc'd out of.
+	navSeq int
+
 	forums        []realtime.Forum
 	forumCursor   int
 	unreadByForum map[int64]int // forum_id → unread post count; nil until first load
@@ -97,11 +104,13 @@ type boardsForumsLoadedMsg struct {
 	unread map[int64]int // forum_id → unread (may be nil if the aggregate fails)
 }
 type boardsTopicsLoadedMsg struct {
+	seq    int
 	forum  realtime.Forum
 	topics []realtime.Topic
 	unread map[int64]int // topic_id → unread
 }
 type boardsPostsLoadedMsg struct {
+	seq   int
 	topic realtime.Topic
 	posts []realtime.Post
 }
@@ -137,6 +146,8 @@ func (m *Boards) loadForums() tea.Cmd {
 func (m *Boards) loadTopics(forum realtime.Forum) tea.Cmd {
 	svc := m.sess.Forums
 	userID := m.sess.Identity.UserID
+	m.navSeq++
+	seq := m.navSeq
 	return func() tea.Msg {
 		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
 		defer cancel()
@@ -145,7 +156,7 @@ func (m *Boards) loadTopics(forum realtime.Forum) tea.Cmd {
 			return boardsErrMsg{stage: "topics", err: err}
 		}
 		unread, _ := svc.UnreadTopicCounts(ctx, userID, forum.ID)
-		return boardsTopicsLoadedMsg{forum: forum, topics: ts, unread: unread}
+		return boardsTopicsLoadedMsg{seq: seq, forum: forum, topics: ts, unread: unread}
 	}
 }
 
@@ -164,6 +175,8 @@ func (m *Boards) touchRead(topicID int64) tea.Cmd {
 
 func (m *Boards) loadPosts(topic realtime.Topic) tea.Cmd {
 	svc := m.sess.Forums
+	m.navSeq++
+	seq := m.navSeq
 	return func() tea.Msg {
 		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
 		defer cancel()
@@ -171,7 +184,7 @@ func (m *Boards) loadPosts(topic realtime.Topic) tea.Cmd {
 		if err != nil {
 			return boardsErrMsg{stage: "posts", err: err}
 		}
-		return boardsPostsLoadedMsg{topic: topic, posts: ps}
+		return boardsPostsLoadedMsg{seq: seq, topic: topic, posts: ps}
 	}
 }
 
@@ -181,11 +194,12 @@ func (m *Boards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case boardsForumsLoadedMsg:
 		m.forums = msg.forums
 		m.unreadByForum = msg.unread
-		if m.forumCursor >= len(m.forums) {
-			m.forumCursor = 0
-		}
+		m.forumCursor = clampIndex(m.forumCursor, len(m.forums))
 
 	case boardsTopicsLoadedMsg:
+		if msg.seq != m.navSeq {
+			return m, nil // stale: user navigated away before this landed
+		}
 		f := msg.forum
 		m.activeForum = &f
 		m.topics = msg.topics
@@ -194,6 +208,9 @@ func (m *Boards) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeTopicList
 
 	case boardsPostsLoadedMsg:
+		if msg.seq != m.navSeq {
+			return m, nil // stale: user navigated away before this landed
+		}
 		t := msg.topic
 		m.activeTopic = &t
 		m.posts = msg.posts
@@ -280,6 +297,7 @@ func (m *Boards) handleForumListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Boards) handleTopicListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
+		m.navSeq++ // invalidate any in-flight topics/posts load for this view
 		m.mode = modeForumList
 		m.activeForum = nil
 		m.topics = nil
@@ -314,6 +332,7 @@ func (m *Boards) handleTopicListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Boards) handleThreadKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
+		m.navSeq++ // invalidate any in-flight posts load so it can't yank us back
 		m.mode = modeTopicList
 		m.activeTopic = nil
 		m.posts = nil
@@ -726,7 +745,7 @@ func (m *Boards) forumTextLines(f realtime.Forum, active bool) []string {
 	name := "#" + f.Name
 	metaText := fmt.Sprintf("%d %s · %s",
 		f.TopicCount, plural("topic", int(f.TopicCount)),
-		relativeAge(f.LastActivityAt))
+		components.FormatRelativeAge(f.LastActivityAt))
 	meta := boardsDim.Render(metaText)
 	if n := m.unreadByForum[f.ID]; n > 0 {
 		meta = meta + " " + theme.UnreadBadge.Render(fmt.Sprintf("%d new", n))
@@ -820,7 +839,7 @@ func (m *Boards) renderTopicRows() string {
 		meta := boardsDim.Render(fmt.Sprintf(
 			"%d %s · %s",
 			t.PostCount, plural("post", int(t.PostCount)),
-			relativeAge(t.LastPostAt),
+			components.FormatRelativeAge(t.LastPostAt),
 		))
 		left := dot + " " + authorChip + " " + title
 		right := activity + "  " + meta
@@ -1189,24 +1208,3 @@ func wrapToWidth(text string, width int) []string {
 	return out
 }
 
-func plural(noun string, n int) string {
-	if n == 1 {
-		return noun
-	}
-	return noun + "s"
-}
-
-// relativeAge prints "just now", "5m ago", "2h ago", "3d ago".
-func relativeAge(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}

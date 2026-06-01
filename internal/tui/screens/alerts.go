@@ -83,9 +83,7 @@ func (m *Alerts) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = ""
 		m.alerts = msg.alerts
-		if m.cursor >= len(m.alerts) {
-			m.cursor = 0
-		}
+		m.cursor = clampIndex(m.cursor, len(m.alerts))
 		return m, nil
 
 	case tea.KeyMsg:

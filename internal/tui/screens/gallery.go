@@ -44,9 +44,7 @@ func (m *Gallery) reload() {
 		return
 	}
 	m.entries = entries
-	if m.cursor >= len(m.entries) {
-		m.cursor = 0
-	}
+	m.cursor = clampIndex(m.cursor, len(m.entries))
 	m.err = ""
 }
 

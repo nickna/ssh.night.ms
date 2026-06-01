@@ -119,9 +119,7 @@ func (m *HoldemMP) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hmpTablesMsg:
 		m.tables = msg.tables
-		if m.tableCursor >= len(m.tables) {
-			m.tableCursor = 0
-		}
+		m.tableCursor = clampIndex(m.tableCursor, len(m.tables))
 
 	case hmpSnapMsg:
 		m.snap = msg.snap
