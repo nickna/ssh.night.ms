@@ -35,6 +35,28 @@ func (q *Queries) DeleteIPBan(ctx context.Context, ipAddr string) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const deleteSecurityEventsBySeverityOlderThan = `-- name: DeleteSecurityEventsBySeverityOlderThan :execrows
+
+DELETE FROM security_events WHERE severity = $1 AND at < $2
+`
+
+type DeleteSecurityEventsBySeverityOlderThanParams struct {
+	Severity string
+	At       pgtype.Timestamptz
+}
+
+// DeleteSecurityEventsBySeverityOlderThan prunes events of one severity tier
+// older than a caller-computed cutoff. The retention sweeper computes the
+// cutoff in Go (now - configured window) so the window is env-driven rather
+// than hardcoded as a SQL interval.
+func (q *Queries) DeleteSecurityEventsBySeverityOlderThan(ctx context.Context, arg DeleteSecurityEventsBySeverityOlderThanParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecurityEventsBySeverityOlderThan, arg.Severity, arg.At)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertSecurityEvent = `-- name: InsertSecurityEvent :exec
 
 INSERT INTO security_events (at, event_type, severity, handle, ip_addr, details)
