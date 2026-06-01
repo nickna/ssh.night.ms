@@ -49,7 +49,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends xz-utils ca-cer
     rm -rf /var/lib/apt/lists/*
 WORKDIR /carbonyl
 COPY bundle/carbonyl-linux-x86_64.tar.xz bundle/carbonyl-linux-x86_64.sha256 ./
-RUN expected=$(cat carbonyl-linux-x86_64.sha256) && \
+# tr -d strips any stray whitespace/CR so a Windows (CRLF) checkout of the
+# .sha256 doesn't fail the compare with an invisible trailing carriage return.
+RUN expected=$(tr -d '[:space:]' < carbonyl-linux-x86_64.sha256) && \
     actual=$(sha256sum carbonyl-linux-x86_64.tar.xz | awk '{print $1}') && \
     if [ "$expected" != "$actual" ]; then \
       echo "carbonyl bundle sha256 mismatch: expected $expected got $actual" >&2; \
