@@ -863,7 +863,7 @@ func (m *Finance) viewList() string {
 		}
 		for i := 0; i < newsLimit; i++ {
 			h := m.news[i]
-			age := humanizeAge(time.Since(h.Published))
+			age := components.FormatAge(time.Since(h.Published))
 			line := fmt.Sprintf("  %s  %s", truncate(h.Title, 70), financeAge.Render("("+age+")"))
 			if m.focus == ffNews && i == m.newsCursor {
 				line = financeCur.Render(line)
@@ -1036,7 +1036,7 @@ func (m *Finance) viewDetail() string {
 		b.WriteString(financeHdr.Render("── related news ─────────────────────────────────"))
 		b.WriteString("\n")
 		for i, h := range m.detailNews {
-			age := humanizeAge(time.Since(h.Published))
+			age := components.FormatAge(time.Since(h.Published))
 			line := fmt.Sprintf("  %s  %s", truncate(h.Title, 70), financeAge.Render("("+age+")"))
 			if i == m.detailNewsCursor {
 				line = financeCur.Render(line)
@@ -1153,19 +1153,6 @@ func formatBigUSD(v float64) string {
 		return fmt.Sprintf("$%.1fK", v/1e3)
 	}
 	return fmt.Sprintf("$%.2f", v)
-}
-
-func humanizeAge(d time.Duration) string {
-	if d < time.Minute {
-		return "now"
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d/time.Minute))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d/time.Hour))
-	}
-	return fmt.Sprintf("%dd ago", int(d/(24*time.Hour)))
 }
 
 func truncate(s string, n int) string {

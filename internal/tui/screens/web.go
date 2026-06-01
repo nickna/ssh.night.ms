@@ -294,10 +294,7 @@ func (m *Web) handleBrowseKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "type a URL first, or visit one to bookmark"
 			return m, nil
 		}
-		if !strings.Contains(target, "://") {
-			target = "https://" + target
-		}
-		m.openEditorForAdd(target)
+		m.openEditorForAdd(ensureScheme(target))
 		return m, nil
 	}
 
@@ -391,9 +388,7 @@ func (m *Web) launch(raw string) tea.Cmd {
 		m.status = "type a URL first"
 		return nil
 	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
+	raw = ensureScheme(raw)
 	if err := carbonyl.ValidateURL(raw); err != nil {
 		m.status = "! " + err.Error()
 		return nil
@@ -557,6 +552,15 @@ func (m *Web) View() string {
 	b.WriteString("\n  ")
 	b.WriteString(webHint.Render("Ctrl+\\   emergency exit"))
 	return b.String()
+}
+
+// ensureScheme prepends https:// when the input carries no scheme, so a bare
+// host typed into the URL row (or pulled from a list) becomes a loadable URL.
+func ensureScheme(raw string) string {
+	if !strings.Contains(raw, "://") {
+		return "https://" + raw
+	}
+	return raw
 }
 
 // defaultBookmarkTitle returns the host name as the suggested title for a

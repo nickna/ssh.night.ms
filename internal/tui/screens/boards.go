@@ -747,7 +747,7 @@ func (m *Boards) forumTextLines(f realtime.Forum, active bool) []string {
 	name := "#" + f.Name
 	metaText := fmt.Sprintf("%d %s · %s",
 		f.TopicCount, plural("topic", int(f.TopicCount)),
-		relativeAge(f.LastActivityAt))
+		components.FormatRelativeAge(f.LastActivityAt))
 	meta := boardsDim.Render(metaText)
 	if n := m.unreadByForum[f.ID]; n > 0 {
 		meta = meta + " " + theme.UnreadBadge.Render(fmt.Sprintf("%d new", n))
@@ -841,7 +841,7 @@ func (m *Boards) renderTopicRows() string {
 		meta := boardsDim.Render(fmt.Sprintf(
 			"%d %s · %s",
 			t.PostCount, plural("post", int(t.PostCount)),
-			relativeAge(t.LastPostAt),
+			components.FormatRelativeAge(t.LastPostAt),
 		))
 		left := dot + " " + authorChip + " " + title
 		right := activity + "  " + meta
@@ -1217,17 +1217,3 @@ func plural(noun string, n int) string {
 	return noun + "s"
 }
 
-// relativeAge prints "just now", "5m ago", "2h ago", "3d ago".
-func relativeAge(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
