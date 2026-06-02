@@ -145,34 +145,37 @@ func (m *Web) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case bookmarksLoadedMsg:
 		if msg.err != nil {
-			m.bookmarks = []gen.ListWebBookmarksRow{}
-			m.status = "! load bookmarks failed: " + msg.err.Error()
+			// Mark the region loaded (non-nil) so it stops showing "loading…",
+			// and surface the failure instead of swallowing it.
+			if m.bookmarks == nil {
+				m.bookmarks = []gen.ListWebBookmarksRow{}
+			}
+			m.status = "! bookmarks load failed: " + msg.err.Error()
 			return m, nil
 		}
-		// sqlc returns a nil slice when the user has zero rows; normalize so
-		// the "nil = still loading" sentinel in renderBookmarks is honored.
-		if msg.rows == nil {
-			msg.rows = []gen.ListWebBookmarksRow{}
-		}
+		// sqlc returns a nil slice for zero rows, which is indistinguishable
+		// from the not-yet-loaded sentinel. Coerce to a non-nil empty slice so
+		// "loaded but empty" renders "(empty …)" rather than "loading…" forever.
 		m.bookmarks = msg.rows
-		if m.bmCursor >= len(m.bookmarks) {
-			m.bmCursor = max0(len(m.bookmarks) - 1)
+		if m.bookmarks == nil {
+			m.bookmarks = []gen.ListWebBookmarksRow{}
 		}
+		m.bmCursor = clampCursor(m.bmCursor, len(m.bookmarks))
 		return m, nil
 
 	case historyLoadedMsg:
 		if msg.err != nil {
-			m.history = []gen.RecentWebHistoryRow{}
-			m.status = "! load history failed: " + msg.err.Error()
+			if m.history == nil {
+				m.history = []gen.RecentWebHistoryRow{}
+			}
+			m.status = "! history load failed: " + msg.err.Error()
 			return m, nil
 		}
-		if msg.rows == nil {
-			msg.rows = []gen.RecentWebHistoryRow{}
-		}
 		m.history = msg.rows
-		if m.hsCursor >= len(m.history) {
-			m.hsCursor = max0(len(m.history) - 1)
+		if m.history == nil {
+			m.history = []gen.RecentWebHistoryRow{}
 		}
+		m.hsCursor = clampCursor(m.hsCursor, len(m.history))
 		return m, nil
 
 	case bookmarkSavedMsg:
@@ -287,10 +290,7 @@ func (m *Web) handleBrowseKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "type a URL first, or visit one to bookmark"
 			return m, nil
 		}
-		if !strings.Contains(target, "://") {
-			target = "https://" + target
-		}
-		m.openEditorForAdd(target)
+		m.openEditorForAdd(ensureScheme(target))
 		return m, nil
 	}
 
@@ -384,9 +384,7 @@ func (m *Web) launch(raw string) tea.Cmd {
 		m.status = "type a URL first"
 		return nil
 	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
+	raw = ensureScheme(raw)
 	if err := carbonyl.ValidateURL(raw); err != nil {
 		m.status = "! " + err.Error()
 		return nil
@@ -550,6 +548,15 @@ func (m *Web) View() string {
 	b.WriteString("\n  ")
 	b.WriteString(webHint.Render("Ctrl+\\   emergency exit"))
 	return b.String()
+}
+
+// ensureScheme prepends https:// when the input carries no scheme, so a bare
+// host typed into the URL row (or pulled from a list) becomes a loadable URL.
+func ensureScheme(raw string) string {
+	if !strings.Contains(raw, "://") {
+		return "https://" + raw
+	}
+	return raw
 }
 
 // defaultBookmarkTitle returns the host name as the suggested title for a

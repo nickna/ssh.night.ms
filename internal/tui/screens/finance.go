@@ -119,6 +119,11 @@ type Finance struct {
 	detailNewsCursor int
 	detailLoading    bool
 	detailErr        string
+	// detailSeq is bumped each time a detail load starts (open or refresh) and
+	// on Esc out of detail. The loaded handler drops a response whose seq no
+	// longer matches, so a slow fetch for a previously-viewed symbol can't
+	// overwrite the detail the user is now looking at.
+	detailSeq int
 
 	// Reader-mode delegate + return-to breadcrumb. The reader can be opened
 	// from either the list view's news pane (return to fmList) or the Detail
@@ -171,6 +176,7 @@ type itemMutatedMsg struct {
 }
 
 type detailLoadedMsg struct {
+	seq    int
 	detail *finance.Detail
 	news   []finance.Headline
 	err    error
@@ -418,6 +424,8 @@ func (m *Finance) loadDetail(item gen.UserWatchlistItem) tea.Cmd {
 	news := m.sess.FinanceNews
 	kind := finance.Kind(item.Kind)
 	canon := item.Canonical
+	m.detailSeq++
+	seq := m.detailSeq
 	return func() tea.Msg {
 		ctx, cancel := m.sess.CtxWithTimeout(quoteFanoutTO)
 		defer cancel()
@@ -443,7 +451,7 @@ func (m *Finance) loadDetail(item gen.UserWatchlistItem) tea.Cmd {
 			}
 		}()
 		wg.Wait()
-		return detailLoadedMsg{detail: d, news: hl, err: derr}
+		return detailLoadedMsg{seq: seq, detail: d, news: hl, err: derr}
 	}
 }
 
@@ -463,9 +471,7 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, it := range msg.items {
 			m.rows[i].item = it
 		}
-		if m.rowCursor >= len(m.rows) {
-			m.rowCursor = max0(len(m.rows) - 1)
-		}
+		m.rowCursor = clampCursor(m.rowCursor, len(m.rows))
 		return m, tea.Batch(m.loadRows(msg.items), m.loadNews())
 
 	case rowDataMsg:
@@ -484,9 +490,7 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.news = msg.items
-		if m.newsCursor >= len(m.news) {
-			m.newsCursor = max0(len(m.news) - 1)
-		}
+		m.newsCursor = clampCursor(m.newsCursor, len(m.news))
 		return m, nil
 
 	case itemMutatedMsg:
@@ -511,15 +515,16 @@ func (m *Finance) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadWatchlist()
 
 	case detailLoadedMsg:
+		if msg.seq != m.detailSeq {
+			return m, nil // stale: a newer detail open/refresh superseded this
+		}
 		m.detailLoading = false
 		if msg.err != nil {
 			m.detailErr = msg.err.Error()
 		}
 		m.detail = msg.detail
 		m.detailNews = msg.news
-		if m.detailNewsCursor >= len(m.detailNews) {
-			m.detailNewsCursor = 0
-		}
+		m.detailNewsCursor = clampIndex(m.detailNewsCursor, len(m.detailNews))
 		return m, nil
 
 	case components.ArticleReaderLoadedMsg:
@@ -691,6 +696,7 @@ func (m *Finance) handleConfirmKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Finance) handleDetailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc", "q":
+		m.detailSeq++ // invalidate any in-flight detail load for this symbol
 		m.mode = fmList
 		m.detail = nil
 		m.detailNews = nil
@@ -851,7 +857,7 @@ func (m *Finance) viewList() string {
 		}
 		for i := 0; i < newsLimit; i++ {
 			h := m.news[i]
-			age := humanizeAge(time.Since(h.Published))
+			age := components.FormatAge(time.Since(h.Published))
 			line := fmt.Sprintf("  %s  %s", truncate(h.Title, 70), financeAge.Render("("+age+")"))
 			if m.focus == ffNews && i == m.newsCursor {
 				line = financeCur.Render(line)
@@ -1024,7 +1030,7 @@ func (m *Finance) viewDetail() string {
 		b.WriteString(financeHdr.Render("── related news ─────────────────────────────────"))
 		b.WriteString("\n")
 		for i, h := range m.detailNews {
-			age := humanizeAge(time.Since(h.Published))
+			age := components.FormatAge(time.Since(h.Published))
 			line := fmt.Sprintf("  %s  %s", truncate(h.Title, 70), financeAge.Render("("+age+")"))
 			if i == m.detailNewsCursor {
 				line = financeCur.Render(line)
@@ -1143,45 +1149,6 @@ func formatBigUSD(v float64) string {
 	return fmt.Sprintf("$%.2f", v)
 }
 
-func humanizeAge(d time.Duration) string {
-	if d < time.Minute {
-		return "now"
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d/time.Minute))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d/time.Hour))
-	}
-	return fmt.Sprintf("%dd ago", int(d/(24*time.Hour)))
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return "…"
-	}
-	return s[:n-1] + "…"
-}
-
-func max0(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
 
 func (m *Finance) viewReader() string {
 	return m.reader.View(m.sess.Width, m.sess.Height, "Finance › Reader")

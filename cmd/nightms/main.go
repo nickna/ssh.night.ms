@@ -41,6 +41,7 @@ import (
 	"github.com/nickna/ssh.night.ms/internal/realtime"
 	"github.com/nickna/ssh.night.ms/internal/security/audit"
 	"github.com/nickna/ssh.night.ms/internal/security/netlimit"
+	"github.com/nickna/ssh.night.ms/internal/security/retention"
 	"github.com/nickna/ssh.night.ms/internal/settings"
 	"github.com/nickna/ssh.night.ms/internal/transport"
 	"github.com/nickna/ssh.night.ms/internal/tui/art"
@@ -134,6 +135,18 @@ func main() {
 		os.Exit(1)
 	}
 	go banCache.Run(ctx)
+
+	// Retention sweeper (Phase B): bounds security_events growth on a
+	// severity-tiered schedule and reaps expired security_ip_bans rows. Runs
+	// an initial sweep on start, then hourly; exits cleanly when ctx cancels.
+	retentionSweeper := retention.New(
+		queries,
+		logger.With("component", "retention"),
+		opts.SecurityRetention.SweepInterval,
+		opts.SecurityRetention.EventInfoTTL,
+		opts.SecurityRetention.EventWarnTTL,
+	)
+	go retentionSweeper.Run(ctx)
 
 	rateLimiter := auth.NewRedisRateLimiter(redisClient, opts.RateLimit, logger.With("component", "rate-limit"))
 	rateLimiter.Audit = auditRecorder

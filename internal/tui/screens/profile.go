@@ -326,13 +326,6 @@ func (m *Profile) hydrate() {
 	m.applyFocus()
 }
 
-func clampIndex(v, max int) int {
-	if v < 0 || v >= max {
-		return 0
-	}
-	return v
-}
-
 //
 // Update
 //
@@ -348,9 +341,7 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snap = msg.snap
 		m.keys = msg.keys
 		m.oauthCreds = msg.oauth
-		if m.oauthCursor >= len(m.oauthCreds) {
-			m.oauthCursor = 0
-		}
+		m.oauthCursor = clampIndex(m.oauthCursor, len(m.oauthCreds))
 		if m.mode != modeFinger {
 			m.hydrate()
 		}
@@ -441,9 +432,7 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.keys = msg.keys
-		if m.keysCursor >= len(m.keys) {
-			m.keysCursor = 0
-		}
+		m.keysCursor = clampIndex(m.keysCursor, len(m.keys))
 		return m, nil
 
 	case keyRemovedMsg:
@@ -482,9 +471,7 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.savedLocations = msg.locs
-		if m.locCursor >= len(m.savedLocations) {
-			m.locCursor = 0
-		}
+		m.locCursor = clampIndex(m.locCursor, len(m.savedLocations))
 		return m, nil
 
 	case locationSearchMsg:
@@ -543,9 +530,7 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.oauthCreds = msg.rows
-		if m.oauthCursor >= len(m.oauthCreds) {
-			m.oauthCursor = 0
-		}
+		m.oauthCursor = clampIndex(m.oauthCursor, len(m.oauthCreds))
 		return m, nil
 
 	case oauthFlowStartedMsg:

@@ -42,3 +42,11 @@ FROM security_events
 WHERE event_type = $1
 ORDER BY at DESC
 LIMIT $2;
+
+-- DeleteSecurityEventsBySeverityOlderThan prunes events of one severity tier
+-- older than a caller-computed cutoff. The retention sweeper computes the
+-- cutoff in Go (now - configured window) so the window is env-driven rather
+-- than hardcoded as a SQL interval.
+
+-- name: DeleteSecurityEventsBySeverityOlderThan :execrows
+DELETE FROM security_events WHERE severity = $1 AND at < $2;

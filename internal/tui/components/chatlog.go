@@ -769,20 +769,3 @@ func formatReactionCount(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// FormatRelativeAge is a small helper for screens that want to label the
-// chat log header with the last-message timestamp. Returns "just now", "5m
-// ago", "2h ago", etc.
-func FormatRelativeAge(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
-

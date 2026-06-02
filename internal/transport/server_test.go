@@ -146,39 +146,6 @@ func TestDispatchAuthPropagatesWindowDims(t *testing.T) {
 	}
 }
 
-func TestMergeOfferedKeyNoOpWhenEmpty(t *testing.T) {
-	d := auth.SignupRequired{Handle: "alice", OfferedPassword: "secret"}
-	got := mergeOfferedKey(d, offeredKey{})
-	if got.OfferedFingerprint != "" || got.OfferedAlgorithm != "" || got.OfferedBlob != nil {
-		t.Errorf("empty offered: got %+v, want zero offered fields", got)
-	}
-	if got.Handle != "alice" || got.OfferedPassword != "secret" {
-		t.Errorf("non-offer fields mutated: got %+v, want handle=alice password=secret", got)
-	}
-}
-
-func TestMergeOfferedKeyCopiesAllFields(t *testing.T) {
-	d := auth.SignupRequired{Handle: "alice"}
-	blob := []byte{0xAA, 0xBB, 0xCC}
-	got := mergeOfferedKey(d, offeredKey{
-		Fingerprint: "SHA256:abc",
-		Algorithm:   "ssh-ed25519",
-		Blob:        blob,
-	})
-	if got.OfferedFingerprint != "SHA256:abc" {
-		t.Errorf("Fingerprint: got %q, want SHA256:abc", got.OfferedFingerprint)
-	}
-	if got.OfferedAlgorithm != "ssh-ed25519" {
-		t.Errorf("Algorithm: got %q, want ssh-ed25519", got.OfferedAlgorithm)
-	}
-	if !reflect.DeepEqual(got.OfferedBlob, blob) {
-		t.Errorf("Blob: got %v, want %v", got.OfferedBlob, blob)
-	}
-	if got.Handle != "alice" {
-		t.Errorf("Handle mutated: got %q, want alice", got.Handle)
-	}
-}
-
 // Compile-time sanity: the test below proves dispatchAuth returns one of
 // the documented arms. Adding a new Decision variant to auth without
 // updating dispatchAuth will keep compiling — this assertion at least

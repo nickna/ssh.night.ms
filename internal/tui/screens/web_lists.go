@@ -75,10 +75,7 @@ func (m *Web) handleBookmarksKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "type a URL above to bookmark (or visit one first)"
 			return m, nil
 		}
-		if !strings.Contains(target, "://") {
-			target = "https://" + target
-		}
-		m.openEditorForAdd(target)
+		m.openEditorForAdd(ensureScheme(target))
 		return m, nil
 	case "e":
 		if m.bmCursor < len(m.bookmarks) {
@@ -319,7 +316,7 @@ func (m *Web) renderHistory() string {
 		urlDisplay := compactURL(row.Url)
 		urlDisplay = runewidth.Truncate(urlDisplay, urlW, "…")
 		urlDisplay = runewidth.FillRight(urlDisplay, urlW)
-		age := relativeAge(row.LastVisitedAt.Time)
+		age := components.FormatRelativeAge(row.LastVisitedAt.Time)
 		ageDisplay := runewidth.FillLeft(age, 14)
 
 		line := "  " + urlDisplay + "  " + webDim.Render(ageDisplay)

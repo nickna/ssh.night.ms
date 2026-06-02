@@ -78,22 +78,10 @@ type Deps struct {
 // recent auth.Decision so the program handler can read it after the handshake.
 type authResultKey struct{}
 
-// offeredKeyKey carries the SSH key the client offered during pubkey auth even
-// when the decision didn't go that way (e.g., unknown handle → signup). The
-// password handler reads this to attach the offered triplet to a SignupRequired
-// so the register screen can show the key-adoption checkbox.
-type offeredKeyKey struct{}
-
 // deadlineConnKey holds the *netlimit.DeadlineConn that wraps the per-conn
 // TCP socket so the auth callbacks can clear the handshake deadline and
 // release the global unauth-handshake slot on a successful decision.
 type deadlineConnKey struct{}
-
-type offeredKey struct {
-	Fingerprint string
-	Algorithm   string
-	Blob        []byte
-}
 
 func NewServer(cfg Config, deps Deps, logger *slog.Logger) (*Server, error) {
 	hostKeyPath, err := EnsureHostKey(cfg.HostKeyDir)
@@ -229,21 +217,25 @@ func pubKeyHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PublicKeyHandle
 		blob := key.Marshal()
 		ip := ctx.RemoteAddr()
 
-		// Remember the offered key for this session regardless of how the
-		// decision goes — used by the password handler if the user falls
-		// through to signup.
-		ctx.SetValue(offeredKeyKey{}, offeredKey{
-			Fingerprint: fingerprint,
-			Algorithm:   algorithm,
-			Blob:        blob,
-		})
-
 		decision := lookup.ByPublicKey(ctx, handle, fingerprint, algorithm, blob, ip)
 		ctx.SetValue(authResultKey{}, decision)
 
-		if _, ok := decision.(auth.Known); ok {
+		switch decision.(type) {
+		case auth.Known:
 			clearHandshakeState(ctx)
 			logger.Info("publickey auth ok", "handle", handle, "fp", fingerprint)
+			return true
+		case auth.SignupRequired:
+			// Unknown handle, but the client proved possession of this key —
+			// gossh verifies the signature before this authenticated callback
+			// fires, so accepting here can't be spoofed. Admit the session and
+			// route straight to the signup screen with the offered key already
+			// loaded (ByPublicKey populated SignupRequired.Offered* above) so
+			// the adopt-key box is pre-checked. New key users thus reach signup
+			// with no password prompt; keyless new users still fall through to
+			// the password method and land on signup the same way as before.
+			clearHandshakeState(ctx)
+			logger.Info("publickey auth → signup", "handle", handle, "fp", fingerprint)
 			return true
 		}
 		return false
@@ -269,13 +261,15 @@ func passwordHandler(lookup *auth.Lookup, logger *slog.Logger) ssh.PasswordHandl
 			logger.Info("password auth ok", "handle", handle)
 			return true
 		case auth.SignupRequired:
-			// Merge any key offered during the pubkey phase so the register
-			// screen can surface the adopt-key prompt.
-			offered, _ := ctx.Value(offeredKeyKey{}).(offeredKey)
-			d = mergeOfferedKey(d, offered)
+			// No key is attached here on purpose. A key only reaches the
+			// register screen's adopt prompt via the pubkey path, where gossh
+			// has cryptographically verified the client holds the private key
+			// (see pubKeyHandler). Trusting a key merely *offered* during the
+			// unsigned pubkey query phase would let anyone who knows a victim's
+			// public key squat that fingerprint on a fresh account.
 			ctx.SetValue(authResultKey{}, d)
 			clearHandshakeState(ctx)
-			logger.Info("password auth → signup", "handle", handle, "has_offered_key", d.OfferedFingerprint != "")
+			logger.Info("password auth → signup", "handle", handle)
 			return true
 		}
 		ctx.SetValue(authResultKey{}, decision)
@@ -472,22 +466,4 @@ func dispatchAuth(
 	logger.Error("program handler reached with unexpected decision",
 		"handle", handle, "decision_type", fmt.Sprintf("%T", decision))
 	return screens.NewMessage("internal error: missing auth decision"), nil, nil
-}
-
-// mergeOfferedKey copies an SSH pubkey that was offered but not used for
-// authentication onto a SignupRequired decision so the register screen can
-// pre-populate the key-adoption checkbox. Returns the (possibly modified)
-// decision. Empty fingerprint = no key was offered; in that case the
-// returned value equals the input.
-//
-// Extracted from passwordHandler so the merge logic can be unit-tested
-// without mocking the full wish SSH context interface.
-func mergeOfferedKey(d auth.SignupRequired, offered offeredKey) auth.SignupRequired {
-	if offered.Fingerprint == "" {
-		return d
-	}
-	d.OfferedFingerprint = offered.Fingerprint
-	d.OfferedAlgorithm = offered.Algorithm
-	d.OfferedBlob = offered.Blob
-	return d
 }

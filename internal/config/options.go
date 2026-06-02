@@ -77,6 +77,12 @@ type Options struct {
 	// duration via the ban-ip command. Default 24h.
 	PersistentBanDuration time.Duration
 
+	// SecurityRetention bundles the background retention sweeper's windows.
+	// The sweeper prunes security_events on a severity-tiered schedule and
+	// reaps expired security_ip_bans rows. See internal/security/retention
+	// and the Security section of CLAUDE.md.
+	SecurityRetention SecurityRetentionOptions
+
 	// SSHSecurity bundles the connection-level controls applied to the SSH
 	// listener: protocol-layer caps (MaxAuthTries, LoginGrace) and the
 	// netlimit gates (per-IP concurrent + token bucket, global
@@ -217,6 +223,27 @@ type SSHSecurityOptions struct {
 	UsernameDenylist []string
 }
 
+// SecurityRetentionOptions configures the background sweeper that bounds the
+// security_events table's growth. All NIGHTMS_SECURITY_* env vars. A zero
+// retention window disables pruning for that tier; the sweeper still reaps
+// expired IP bans each tick.
+type SecurityRetentionOptions struct {
+	// SweepInterval is the cadence between prune passes. Hourly by default so
+	// each DELETE batch stays small versus one big nightly delete; the work is
+	// idempotent and cheap. NIGHTMS_SECURITY_RETENTION_SWEEP_INTERVAL.
+	SweepInterval time.Duration
+
+	// EventInfoTTL retains severity="info" events (handshake_failed,
+	// auth_failure — the ~98% scanner-noise bulk) this long. Default 30 days.
+	// Zero disables info pruning. NIGHTMS_SECURITY_EVENT_RETENTION_INFO_DAYS.
+	EventInfoTTL time.Duration
+
+	// EventWarnTTL retains severity="warn"/"crit" events (lockouts, bans,
+	// overlimit) this long. Default 365 days. Zero disables warn/crit pruning.
+	// NIGHTMS_SECURITY_EVENT_RETENTION_WARN_DAYS.
+	EventWarnTTL time.Duration
+}
+
 // Load reads environment variables and falls back to sensible defaults that
 // match the legacy stack's defaults (so the same .env file works for both).
 func Load() Options {
@@ -261,6 +288,11 @@ func Load() Options {
 			LockcountWindow:        time.Duration(uintEnv("NIGHTMS_LOCKCOUNT_WINDOW_SECONDS", 86400)) * time.Second,
 		},
 		PersistentBanDuration: time.Duration(uintEnv("NIGHTMS_PERSISTENT_BAN_DURATION_SECONDS", 86400)) * time.Second,
+		SecurityRetention: SecurityRetentionOptions{
+			SweepInterval: durationEnv("NIGHTMS_SECURITY_RETENTION_SWEEP_INTERVAL", time.Hour),
+			EventInfoTTL:  time.Duration(uintEnv("NIGHTMS_SECURITY_EVENT_RETENTION_INFO_DAYS", 30)) * 24 * time.Hour,
+			EventWarnTTL:  time.Duration(uintEnv("NIGHTMS_SECURITY_EVENT_RETENTION_WARN_DAYS", 365)) * 24 * time.Hour,
+		},
 		SSHSecurity: SSHSecurityOptions{
 			MaxAuthTries:        int(uintEnv("NIGHTMS_SSH_MAX_AUTH_TRIES", 3)),
 			LoginGrace:          time.Duration(uintEnv("NIGHTMS_SSH_LOGIN_GRACE_SECONDS", 30)) * time.Second,
