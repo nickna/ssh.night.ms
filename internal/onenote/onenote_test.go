@@ -106,6 +106,83 @@ func TestListNotebooks_RequestShapeAndDecode(t *testing.T) {
 	}
 }
 
+func TestListNotebooks_ColorMapping(t *testing.T) {
+	fg := &fakeGraph{handler: func(rr recordedReq) (int, string) {
+		return 200, `{"value":[
+			{"id":"nb1","displayName":"Hot","color":"#FF7DB0"},
+			{"id":"nb2","displayName":"Plain","color":"none"},
+			{"id":"nb3","displayName":"Blank"}
+		]}`
+	}}
+	svc := newTestService(&fakeTokens{}, fg)
+
+	nbs, err := svc.ListNotebooks(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListNotebooks: %v", err)
+	}
+	if len(nbs) != 3 {
+		t.Fatalf("got %d notebooks", len(nbs))
+	}
+	if nbs[0].Color != "#FF7DB0" {
+		t.Errorf("nb1 color = %q, want #FF7DB0", nbs[0].Color)
+	}
+	if nbs[1].Color != "" {
+		t.Errorf(`nb2 color = %q, want "" (Graph "none")`, nbs[1].Color)
+	}
+	if nbs[2].Color != "" {
+		t.Errorf("nb3 color = %q, want empty", nbs[2].Color)
+	}
+}
+
+func TestFetchResource_AuthAndPassthrough(t *testing.T) {
+	fg := &fakeGraph{handler: func(rr recordedReq) (int, string) {
+		return 200, "PNGBYTES"
+	}}
+	svc := newTestService(&fakeTokens{token: "rt"}, fg)
+
+	got, err := svc.FetchResource(context.Background(), 1,
+		"https://graph.microsoft.com/v1.0/me/onenote/resources/r1/$value")
+	if err != nil {
+		t.Fatalf("FetchResource: %v", err)
+	}
+	if string(got) != "PNGBYTES" {
+		t.Errorf("body = %q", got)
+	}
+	rr := fg.reqs[0]
+	if rr.method != "GET" || rr.path != "/v1.0/me/onenote/resources/r1/$value" {
+		t.Errorf("request = %s %s", rr.method, rr.path)
+	}
+	if rr.auth != "Bearer rt" {
+		t.Errorf("auth = %q, want Bearer rt", rr.auth)
+	}
+}
+
+func TestFetchResource_RelativeResolvesAgainstBase(t *testing.T) {
+	fg := &fakeGraph{handler: func(rr recordedReq) (int, string) { return 200, "x" }}
+	svc := newTestService(&fakeTokens{}, fg)
+
+	if _, err := svc.FetchResource(context.Background(), 1, "me/onenote/resources/r2/$value"); err != nil {
+		t.Fatalf("FetchResource: %v", err)
+	}
+	rr := fg.reqs[0]
+	if rr.path != "/me/onenote/resources/r2/$value" {
+		t.Errorf("relative path resolved to %q", rr.path)
+	}
+}
+
+func TestFetchResource_GraphErrorStatus(t *testing.T) {
+	fg := &fakeGraph{handler: func(rr recordedReq) (int, string) {
+		return 401, `{"error":{"code":"InvalidAuthenticationToken","message":"expired"}}`
+	}}
+	svc := newTestService(&fakeTokens{}, fg)
+
+	_, err := svc.FetchResource(context.Background(), 1, "https://x/y/$value")
+	var ge *GraphError
+	if !errors.As(err, &ge) || ge.StatusCode != 401 {
+		t.Fatalf("err = %v, want GraphError 401", err)
+	}
+}
+
 func TestGetPage_IncludeIDsAndParse(t *testing.T) {
 	fg := &fakeGraph{handler: func(rr recordedReq) (int, string) {
 		if strings.HasSuffix(rr.path, "/content") {

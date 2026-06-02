@@ -59,6 +59,7 @@ func NewLobby(sess *session.Session) tea.Model {
 		{Title: "Weather", Hotkey: 'f', Destination: nav.DestWeather, Icon: icon("weather")},
 		{Title: "Finance", Hotkey: 'k', Destination: nav.DestFinance, Icon: icon("finance")},
 		{Title: "Doors", Hotkey: 'd', Destination: nav.DestDoors, Icon: icon("doors")},
+		{Title: "OneNote", Hotkey: 'o', Destination: nav.DestOneNote, Icon: icon("onenote")},
 		{Title: "Web", Hotkey: 'w', Destination: nav.DestWeb, Icon: icon("web")},
 	}
 	if sess.Identity.IsSysop {

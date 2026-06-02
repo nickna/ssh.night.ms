@@ -47,6 +47,11 @@ const (
 	// lobby; the screen itself surfaces the reason if a launch can't
 	// actually happen (WS session, missing binary, kill switch off).
 	DestWeb
+
+	// DestOneNote is the per-user OneNote (Microsoft Graph) reader/editor.
+	// Always shown in the lobby; the screen surfaces its own gates
+	// (feature disabled, account not linked, scope missing, re-auth needed).
+	DestOneNote
 )
 
 // Title returns a short label suitable for the carousel and the placeholder
@@ -95,6 +100,8 @@ func (d Destination) Title() string {
 		return "Roulette"
 	case DestWeb:
 		return "Web"
+	case DestOneNote:
+		return "OneNote"
 	}
 	return ""
 }

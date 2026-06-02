@@ -12,6 +12,7 @@ type Notebook struct {
 	ID         string
 	Name       string
 	IsDefault  bool
+	Color      string // notebook accent color as a hex string ("#A6A6A6"); "" when unset
 	CreatedAt  time.Time
 	ModifiedAt time.Time
 	WebURL     string // oneNoteWebUrl — opens the notebook in a browser

@@ -62,6 +62,7 @@ type graphNotebook struct {
 	ID                   string     `json:"id"`
 	DisplayName          string     `json:"displayName"`
 	IsDefault            bool       `json:"isDefault"`
+	Color                string     `json:"color"` // hex (e.g. "#A6A6A6") or "none"/""
 	CreatedDateTime      string     `json:"createdDateTime"`
 	LastModifiedDateTime string     `json:"lastModifiedDateTime"`
 	Links                graphLinks `json:"links"`
@@ -91,10 +92,15 @@ type graphPage struct {
 // --- mapping -------------------------------------------------------------
 
 func (g graphNotebook) toDomain() Notebook {
+	color := g.Color
+	if color == "none" {
+		color = "" // Graph's sentinel for "no color" → treat as unset
+	}
 	return Notebook{
 		ID:         g.ID,
 		Name:       g.DisplayName,
 		IsDefault:  g.IsDefault,
+		Color:      color,
 		CreatedAt:  parseGraphTime(g.CreatedDateTime),
 		ModifiedAt: parseGraphTime(g.LastModifiedDateTime),
 		WebURL:     g.Links.OneNoteWebURL.Href,
@@ -143,6 +149,16 @@ func parseGraphTime(s string) time.Time {
 // request against baseURL+path, and returns the response body for 2xx or a
 // *GraphError otherwise. A non-nil body is sent with the given contentType.
 func (s *Service) do(ctx context.Context, userID int64, method, path, contentType string, body []byte) ([]byte, error) {
+	return s.doURL(ctx, userID, method, s.baseURL+path, contentType, body)
+}
+
+// doURL is the request core: it resolves a token for userID, issues method
+// against an already-fully-qualified url, and returns the 2xx body or a
+// *GraphError. do() prepends baseURL to a relative path; FetchResource passes
+// an absolute Graph resource URL straight through. The Accept header asks for
+// JSON, which Graph ignores for binary resource ($value) and HTML (/content)
+// endpoints — both return their native content-type regardless.
+func (s *Service) doURL(ctx context.Context, userID int64, method, fullURL, contentType string, body []byte) ([]byte, error) {
 	token, err := s.tokens.Token(ctx, userID, scopeNotesReadWrite)
 	if err != nil {
 		return nil, err // typed usertoken error — handler maps it
@@ -152,7 +168,7 @@ func (s *Service) do(ctx context.Context, userID int64, method, path, contentTyp
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, s.baseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, reader)
 	if err != nil {
 		return nil, fmt.Errorf("onenote: build request: %w", err)
 	}
