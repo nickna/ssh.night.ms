@@ -100,16 +100,25 @@ func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Key not registered to anyone. Refuse so the client can try password;
-			// the offered-key info travels forward via the Known decision later if
-			// the password attempt succeeds.
-			return Refused{Reason: "key not registered to this account"}
+			// Key enrolled to nobody. Refuse so the client can try its next
+			// key (or fall back to password); the offered-key info travels
+			// forward via the Known decision later if a subsequent attempt
+			// succeeds. This is the multi-key offer-dance noise — emitAuthAudit
+			// drops the security_events row for keyUnenrolledReason, so this
+			// slog line is the durable record (mirrors checkUsernameDenylist).
+			if l.Logger != nil {
+				l.Logger.Info("auth: publickey offered an unenrolled key",
+					"handle", handle, "fingerprint", fingerprint)
+			}
+			return Refused{Reason: keyUnenrolledReason}
 		}
 		l.Logger.Error("publickey credential lookup", "fingerprint", fingerprint, "err", err)
 		return Refused{Reason: "internal error"}
 	}
 	if cred.UserID != user.ID {
-		return Refused{Reason: "key not registered to this account"}
+		// Key is enrolled, but to a different account. Kept in the feed (see
+		// keyOtherAccountReason) — distinct from the unenrolled-key noise.
+		return Refused{Reason: keyOtherAccountReason}
 	}
 
 	// Touch last_used_at fire-and-forget. We don't block the auth response on this.
@@ -266,6 +275,16 @@ func (l *Lookup) emitAuthAudit(ctx context.Context, method, handle string, sourc
 		if d.Reason == denylistRefuseReason {
 			return
 		}
+		// Unenrolled-key offers are the publickey multi-key offer-dance: a
+		// legit client offering several keys emits one of these on every
+		// login alongside the eventual auth_success. The slog line in
+		// ByPublicKey's ErrNoRows branch is the durable record, so drop the
+		// security_events row to keep the feed clean. Only the unenrolled
+		// case — keyOtherAccountReason (key belongs to another account) is
+		// deliberately NOT suppressed.
+		if d.Reason == keyUnenrolledReason {
+			return
+		}
 		l.Audit.Record(ctx, audit.AuthFailure{
 			Handle: handle, IP: ip, Method: method, Reason: d.Reason,
 		})
@@ -293,6 +312,24 @@ func (l *Lookup) checkUsernameDenylist(handle string) Decision {
 // returned by checkUsernameDenylist. emitAuthAudit checks against it to
 // suppress the DB-side audit write for this specific rejection class.
 const denylistRefuseReason = "username denylisted"
+
+// keyUnenrolledReason is the Refused.Reason for a publickey offer whose
+// fingerprint is enrolled to nobody (the GetCredentialByProviderSubject
+// ErrNoRows path). This is the multi-key offer-dance noise: a client that
+// holds several keys offers each in turn until one matches, so a legit user
+// generates one of these on every login alongside the eventual auth_success.
+// emitAuthAudit suppresses the security_events row for it (the slog line in
+// ByPublicKey is the durable record), mirroring denylistRefuseReason. The
+// client already proved possession of the key via the verified signature, so
+// this is never a brute-force vector — only real key-holders reach it.
+const keyUnenrolledReason = "key not enrolled"
+
+// keyOtherAccountReason is the Refused.Reason for a publickey offer whose
+// fingerprint IS enrolled, but to a different user than the supplied handle.
+// Deliberately distinct from keyUnenrolledReason: this one is NOT suppressed
+// — a key proven to belong to account B presented against account A is a
+// genuine signal (revoked/shared/stolen key) worth keeping in the feed.
+const keyOtherAccountReason = "key registered to another account"
 
 func (l *Lookup) checkPersistentBan(sourceIP net.Addr) Decision {
 	if l.Bans == nil || sourceIP == nil {
