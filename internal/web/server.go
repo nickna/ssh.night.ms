@@ -242,6 +242,12 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 			r.Get("/boards/{forumID}/{topicID}", h.boardTopic)
 			r.Post("/boards/{forumID}/{topicID}/reply", h.boardReplyPost)
 
+			// Weather — server-rendered forecast for the signed-in user's
+			// primary saved location. Login-gated (the handler redirects
+			// anonymous requests to /login); reuses the same Open-Meteo + NWS
+			// providers and DisplayPrefs formatters as the SSH/TUI screen.
+			r.Get("/weather", h.weatherIndex)
+
 			r.Get("/profile/connections", h.connectionsView)
 			r.Post("/profile/connections/{id}/unlink", h.connectionsUnlink)
 			r.Get("/profile/rename", h.renameGet)

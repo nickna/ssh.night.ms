@@ -1,0 +1,75 @@
+{{define "body"}}
+<section class="weather">
+  <div class="board-head">
+    <div>
+      <h1>weather{{if .Label}} — {{.Label}}{{end}}</h1>
+      {{if .Timezone}}<p class="muted">{{.Timezone}}{{if .FetchedAt}} · fetched {{.FetchedAt}}{{end}}</p>{{end}}
+    </div>
+  </div>
+
+  {{if not .Located}}
+    <p class="weather-empty">No saved location yet. <a href="/profile">Add a location</a> to see its forecast.</p>
+  {{else if .FetchError}}
+    <p class="weather-error">{{.FetchError}}</p>
+  {{else}}
+
+    {{with .Now}}
+    <div class="weather-now">
+      <span class="now-temp">{{.Temp}}</span>
+      <span class="now-glyph">{{.Glyph}}</span>
+      <span class="now-cond">{{.Condition}}</span>
+      <span class="now-meta muted">feels like {{.FeelsLike}}° · {{.Humidity}}% RH · {{.Wind}}</span>
+    </div>
+    {{end}}
+
+    {{if .Alerts}}
+    <div class="weather-alerts">
+      <h2>active alerts</h2>
+      {{range .Alerts}}
+      <article class="alert-card {{.SeverityClass}}">
+        <header class="alert-head">
+          <span class="alert-sev">{{.Severity}}</span>
+          <span class="alert-event">{{.Event}}</span>
+        </header>
+        {{if .Area}}<p class="alert-area muted">{{.Area}}</p>{{end}}
+        {{if .Headline}}<p class="alert-headline">{{.Headline}}</p>{{end}}
+        {{if .Description}}<details><summary>full text</summary><div class="alert-desc">{{.Description}}</div></details>{{end}}
+        <p class="alert-meta muted">expires {{.Expires}}{{if .URL}} · <a href="{{.URL}}" rel="noopener noreferrer" target="_blank">view on weather.gov</a>{{end}}</p>
+      </article>
+      {{end}}
+    </div>
+    {{end}}
+
+    {{if .Hourly}}
+    <h2>next 12 hours</h2>
+    <div class="hourly-strip">
+      {{range .Hourly}}
+      <div class="hour-cell">
+        <span class="hour-clock muted">{{.Clock}}</span>
+        <span class="hour-glyph">{{.Glyph}}</span>
+        <span class="hour-temp">{{.Temp}}°</span>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+
+    {{if .Daily}}
+    <h2>7-day forecast</h2>
+    <table class="topic-table forecast-table">
+      <thead><tr><th>day</th><th></th><th>high / low</th><th>conditions</th></tr></thead>
+      <tbody>
+        {{range .Daily}}
+        <tr>
+          <td>{{.Date}}</td>
+          <td class="day-glyph">{{.Glyph}}</td>
+          <td><span class="day-hi">{{.Hi}}°</span> / <span class="day-lo">{{.Lo}}°</span></td>
+          <td class="muted">{{.Condition}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+
+  {{end}}
+</section>
+{{end}}
