@@ -137,6 +137,16 @@ WHERE cm.channel_id = $1 AND cm.deleted_at IS NULL
 GROUP BY mr.message_id, mr.emoji
 ORDER BY mr.message_id, mr.emoji;
 
+-- name: MyReactionsForChannel :many
+-- The reactions the given user has placed on messages in the channel. The web
+-- chat uses this to seed per-chip "you reacted" state so a click can toggle
+-- (React vs Unreact) correctly across reloads.
+SELECT mr.message_id,
+       mr.emoji
+FROM message_reactions mr
+JOIN chat_messages cm ON cm.id = mr.message_id
+WHERE cm.channel_id = $1 AND mr.user_id = $2;
+
 -- name: SeedLobbyChannel :exec
 -- Idempotent seed of the default public channel — used by the startup
 -- initializer on every boot. The ON CONFLICT clause is a guard for cutover

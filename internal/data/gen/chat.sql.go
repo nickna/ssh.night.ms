@@ -431,6 +431,47 @@ func (q *Queries) ListPinnedMessagesForChannel(ctx context.Context, channelID in
 	return items, nil
 }
 
+const myReactionsForChannel = `-- name: MyReactionsForChannel :many
+SELECT mr.message_id,
+       mr.emoji
+FROM message_reactions mr
+JOIN chat_messages cm ON cm.id = mr.message_id
+WHERE cm.channel_id = $1 AND mr.user_id = $2
+`
+
+type MyReactionsForChannelParams struct {
+	ChannelID int64
+	UserID    int64
+}
+
+type MyReactionsForChannelRow struct {
+	MessageID int64
+	Emoji     string
+}
+
+// The reactions the given user has placed on messages in the channel. The web
+// chat uses this to seed per-chip "you reacted" state so a click can toggle
+// (React vs Unreact) correctly across reloads.
+func (q *Queries) MyReactionsForChannel(ctx context.Context, arg MyReactionsForChannelParams) ([]MyReactionsForChannelRow, error) {
+	rows, err := q.db.Query(ctx, myReactionsForChannel, arg.ChannelID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MyReactionsForChannelRow
+	for rows.Next() {
+		var i MyReactionsForChannelRow
+		if err := rows.Scan(&i.MessageID, &i.Emoji); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const postCountForUser = `-- name: PostCountForUser :one
 SELECT COUNT(*)::bigint AS n
 FROM posts

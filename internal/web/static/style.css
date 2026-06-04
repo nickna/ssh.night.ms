@@ -412,3 +412,180 @@ a.button:hover { background: var(--yellow); text-decoration: none; }
 .alert-card.sev-moderate { border-left-color: var(--accent); }
 .alert-card.sev-moderate .alert-sev { color: var(--accent); }
 .alert-card.sev-minor .alert-sev { color: var(--accent-dim); }
+
+/* Chat — channel list + live channel view. Mirrors the boards/forum look. */
+.chat h1 { color: var(--accent); margin: 0.2em 0; }
+.chat h2 { color: var(--accent-dim); font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.05em; margin: 1.6em 0 0.4em; }
+.channel-list { list-style: none; padding: 0; margin: 0.4em 0; }
+.channel-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.5em 0;
+  border-bottom: 1px solid var(--dim);
+}
+.channel-name { font-size: 1.05em; }
+.chat-action {
+  display: flex;
+  gap: 0.6em;
+  margin: 0.8em 0 0;
+  max-width: 480px;
+}
+.chat-action input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--dim);
+  padding: 0.5em 0.7em;
+  font-family: inherit;
+}
+.chat-action input:focus { outline: none; border-color: var(--accent); }
+.chat-action button {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  padding: 0.5em 1em;
+  cursor: pointer;
+}
+.chat-action button:hover { background: var(--yellow); }
+
+.channel-head { margin-bottom: 0.8em; }
+.channel-topic { margin: 0.2em 0 0; font-size: 0.9em; }
+.chat-log {
+  list-style: none;
+  padding: 0;
+  margin: 1em 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+.chat-msg {
+  padding: 0.35em 0.6em;
+  border-left: 2px solid var(--dim);
+  line-height: 1.5;
+}
+.chat-author { color: var(--accent); font-weight: bold; }
+.chat-time { font-size: 0.8em; margin-left: 0.2em; }
+.chat-body { white-space: pre-wrap; word-wrap: break-word; }
+
+.chat-send {
+  display: flex;
+  gap: 0.6em;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding: 0.8em 0;
+}
+.chat-send input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--dim);
+  padding: 0.6em 0.8em;
+  font-family: inherit;
+}
+.chat-send input:focus { outline: none; border-color: var(--accent); }
+.chat-send button {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  padding: 0.6em 1.2em;
+  cursor: pointer;
+}
+.chat-send button:hover { background: var(--yellow); }
+
+/* Chat v2 — markup, reactions, pins, replies, edit/delete. */
+.chat-body strong { color: #ffffff; font-weight: bold; }
+.chat-body em { font-style: italic; }
+.chat-body code {
+  background: var(--surface-alt);
+  color: #9fe59f;
+  padding: 0 0.3em;
+  border-radius: 2px;
+}
+.chat-body .mention { color: #6cc0ff; font-weight: bold; }
+.chat-body .mention-self { color: #ffd700; font-weight: bold; }
+.chat-body.action { font-style: italic; color: var(--accent-dim); }
+.chat-msg.deleted .chat-body { font-style: italic; }
+.pin-mark { color: var(--yellow); }
+.edited { font-size: 0.8em; }
+
+/* Reaction chips */
+.chat-reactions { display: flex; flex-wrap: wrap; gap: 0.3em; margin: 0.25em 0 0; }
+.react-chip {
+  background: var(--surface-alt);
+  border: 1px solid var(--dim);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0 0.5em;
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.react-chip:hover { border-color: var(--accent); }
+.react-chip.reacted { border-color: var(--accent); background: rgba(255, 125, 176, 0.15); }
+.react-chip .rc-count { color: var(--accent-dim); }
+
+/* Per-message toolbar — dim until hovered so it stays out of the way. */
+.msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin: 0.2em 0 0;
+  opacity: 0.25;
+  transition: opacity 0.1s;
+  font-size: 0.8em;
+}
+.chat-msg:hover .msg-toolbar, .msg-toolbar:focus-within { opacity: 1; }
+.react-palette { display: inline-flex; gap: 0.15em; }
+.msg-toolbar button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--accent-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1em;
+  padding: 0 0.3em;
+  border-radius: 3px;
+}
+.msg-toolbar button:hover { color: var(--accent); border-color: var(--dim); }
+.react-add { font-size: 1.1em; }
+
+.reply-marker { display: block; font-size: 0.8em; }
+.reply-badge { display: inline-block; margin: 0.2em 0 0; font-size: 0.8em; }
+
+.edit-input {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 0.3em 0.5em;
+  font: inherit;
+}
+
+/* Pinned block */
+.pinned-block {
+  background: var(--surface);
+  border: 1px solid var(--dim);
+  border-radius: 4px;
+  padding: 0.4em 0.8em;
+  margin: 0.8em 0;
+}
+.pinned-block summary { cursor: pointer; color: var(--accent-dim); }
+.pinned-block ul { list-style: none; padding: 0; margin: 0.4em 0 0; }
+.pinned-block li { padding: 0.2em 0; font-size: 0.9em; }
+
+/* Reply-to banner above the send input */
+.chat-send { flex-wrap: wrap; }
+.reply-banner {
+  flex-basis: 100%;
+  font-size: 0.85em;
+  color: var(--accent-dim);
+}
+.reply-cancel {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
