@@ -229,6 +229,19 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 			r.Post("/profile/picture", h.picturePost)
 			r.Post("/profile/picture/clear", h.pictureClear)
 			r.Get("/u/{handle}", h.publicProfile)
+
+			// Boards — server-rendered forum. Reads are public; the POST
+			// handlers gate on a session and redirect anonymous users to
+			// /login. The static "/new" segment is registered before the
+			// "{topicID}" wildcard, and chi prioritizes static routes over
+			// params regardless, so /boards/{id}/new never resolves as a topic.
+			r.Get("/boards", h.boardsIndex)
+			r.Get("/boards/{forumID}", h.boardForum)
+			r.Get("/boards/{forumID}/new", h.boardNewGet)
+			r.Post("/boards/{forumID}/new", h.boardNewPost)
+			r.Get("/boards/{forumID}/{topicID}", h.boardTopic)
+			r.Post("/boards/{forumID}/{topicID}/reply", h.boardReplyPost)
+
 			r.Get("/profile/connections", h.connectionsView)
 			r.Post("/profile/connections/{id}/unlink", h.connectionsUnlink)
 			r.Get("/profile/rename", h.renameGet)

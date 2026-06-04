@@ -257,6 +257,75 @@ func (q *Queries) ListPostsInTopic(ctx context.Context, topicID int64) ([]ListPo
 	return items, nil
 }
 
+const listPostsInTopicPaged = `-- name: ListPostsInTopicPaged :many
+SELECT p.id,
+       p.topic_id,
+       p.parent_post_id,
+       p.body,
+       p.created_by_id,
+       p.created_at,
+       p.edited_at,
+       u.handle AS author_handle,
+       u.is_sysop AS author_is_sysop
+FROM posts p
+JOIN users u ON u.id = p.created_by_id
+WHERE p.topic_id = $1
+ORDER BY p.created_at
+LIMIT $2 OFFSET $3
+`
+
+type ListPostsInTopicPagedParams struct {
+	TopicID int64
+	Limit   int32
+	Offset  int32
+}
+
+type ListPostsInTopicPagedRow struct {
+	ID            int64
+	TopicID       int64
+	ParentPostID  *int64
+	Body          string
+	CreatedByID   int64
+	CreatedAt     pgtype.Timestamptz
+	EditedAt      pgtype.Timestamptz
+	AuthorHandle  string
+	AuthorIsSysop bool
+}
+
+// Same shape as ListPostsInTopic but with LIMIT/OFFSET so the web thread
+// view can page through long threads. Total count for the page controls
+// comes from the topic's denormalized post_count (the topic-list query),
+// so no separate COUNT query is needed.
+func (q *Queries) ListPostsInTopicPaged(ctx context.Context, arg ListPostsInTopicPagedParams) ([]ListPostsInTopicPagedRow, error) {
+	rows, err := q.db.Query(ctx, listPostsInTopicPaged, arg.TopicID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPostsInTopicPagedRow
+	for rows.Next() {
+		var i ListPostsInTopicPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TopicID,
+			&i.ParentPostID,
+			&i.Body,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.EditedAt,
+			&i.AuthorHandle,
+			&i.AuthorIsSysop,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTopicsInForum = `-- name: ListTopicsInForum :many
 SELECT t.id,
        t.forum_id,
@@ -305,6 +374,76 @@ func (q *Queries) ListTopicsInForum(ctx context.Context, arg ListTopicsInForumPa
 	var items []ListTopicsInForumRow
 	for rows.Next() {
 		var i ListTopicsInForumRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ForumID,
+			&i.Title,
+			&i.CreatedByID,
+			&i.CreatedAt,
+			&i.LastPostAt,
+			&i.AuthorHandle,
+			&i.PostCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTopicsInForumPaged = `-- name: ListTopicsInForumPaged :many
+SELECT t.id,
+       t.forum_id,
+       t.title,
+       t.created_by_id,
+       t.created_at,
+       t.last_post_at,
+       u.handle AS author_handle,
+       COALESCE(pc.post_count, 0)::bigint AS post_count
+FROM topics t
+JOIN users u ON u.id = t.created_by_id
+LEFT JOIN (
+    SELECT topic_id, COUNT(*) AS post_count
+    FROM posts
+    GROUP BY topic_id
+) pc ON pc.topic_id = t.id
+WHERE t.forum_id = $1
+ORDER BY t.last_post_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListTopicsInForumPagedParams struct {
+	ForumID int64
+	Limit   int32
+	Offset  int32
+}
+
+type ListTopicsInForumPagedRow struct {
+	ID           int64
+	ForumID      int64
+	Title        string
+	CreatedByID  int64
+	CreatedAt    pgtype.Timestamptz
+	LastPostAt   pgtype.Timestamptz
+	AuthorHandle string
+	PostCount    int64
+}
+
+// Same shape as ListTopicsInForum but with an OFFSET so the web forum view
+// can page through topics. Total count for the page controls comes from the
+// denormalized forums.topic_count, so no separate COUNT query is needed.
+func (q *Queries) ListTopicsInForumPaged(ctx context.Context, arg ListTopicsInForumPagedParams) ([]ListTopicsInForumPagedRow, error) {
+	rows, err := q.db.Query(ctx, listTopicsInForumPaged, arg.ForumID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTopicsInForumPagedRow
+	for rows.Next() {
+		var i ListTopicsInForumPagedRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ForumID,

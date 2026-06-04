@@ -1,0 +1,26 @@
+{{define "body"}}
+<section class="boards">
+  <h1>boards</h1>
+  <p class="muted">discussion forums. anyone can read; <a href="/login">log in</a> to post.</p>
+
+  {{if .Forums}}
+    <ul class="forum-list">
+      {{range .Forums}}
+      <li class="forum-row">
+        <div class="forum-main">
+          <a class="forum-name" href="/boards/{{.ID}}">{{.Name}}</a>
+          {{if .Unread}}<span class="badge unread">{{.Unread}} new</span>{{end}}
+          {{if .Description}}<p class="forum-desc muted">{{.Description}}</p>{{end}}
+        </div>
+        <div class="forum-meta muted">
+          <span>{{.TopicCount}} topic{{if ne .TopicCount 1}}s{{end}}</span>
+          {{if not .LastActivityAt.IsZero}}<span>last activity {{.LastActivityAt.Format "Jan 2, 2006"}}</span>{{end}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="muted">no forums yet.</p>
+  {{end}}
+</section>
+{{end}}

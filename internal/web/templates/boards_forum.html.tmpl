@@ -1,0 +1,43 @@
+{{define "body"}}
+<section class="boards">
+  <p class="crumbs muted"><a href="/boards">boards</a> / {{.Forum.Name}}</p>
+  <div class="board-head">
+    <div>
+      <h1>{{.Forum.Name}}</h1>
+      {{if .Forum.Description}}<p class="muted">{{.Forum.Description}}</p>{{end}}
+    </div>
+    {{if .Identity}}<a class="button" href="/boards/{{.Forum.ID}}/new">new topic</a>{{else}}<a class="button" href="/login">log in to post</a>{{end}}
+  </div>
+
+  {{if .Topics}}
+    <table class="topic-table">
+      <thead>
+        <tr><th>topic</th><th>author</th><th>posts</th><th>last post</th></tr>
+      </thead>
+      <tbody>
+        {{range .Topics}}
+        <tr>
+          <td>
+            <a href="/boards/{{$.Forum.ID}}/{{.ID}}">{{.Title}}</a>
+            {{if .Unread}}<span class="badge unread">{{.Unread}} new</span>{{end}}
+          </td>
+          <td class="muted">@{{.AuthorHandle}}</td>
+          <td class="muted">{{.PostCount}}</td>
+          <td class="muted">{{.LastPostAt.Format "Jan 2, 2006 3:04pm"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="muted">no topics yet. {{if .Identity}}<a href="/boards/{{.Forum.ID}}/new">start one</a>.{{else}}<a href="/login">log in</a> to start one.{{end}}</p>
+  {{end}}
+
+  {{if gt .Nav.TotalPages 1}}
+  <nav class="pager">
+    {{if .Nav.HasPrev}}<a href="{{.Nav.BasePath}}?page={{.Nav.PrevPage}}">&larr; prev</a>{{else}}<span class="disabled">&larr; prev</span>{{end}}
+    <span class="muted">page {{.Nav.CurrentPage}} of {{.Nav.TotalPages}}</span>
+    {{if .Nav.HasNext}}<a href="{{.Nav.BasePath}}?page={{.Nav.NextPage}}">next &rarr;</a>{{else}}<span class="disabled">next &rarr;</span>{{end}}
+  </nav>
+  {{end}}
+</section>
+{{end}}

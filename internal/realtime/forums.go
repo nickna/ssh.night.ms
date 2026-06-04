@@ -37,27 +37,27 @@ type Forum struct {
 // Topic carries denormalized author + post count so the topic list renders
 // with one query.
 type Topic struct {
-	ID          int64
-	ForumID     int64
-	Title       string
-	CreatedByID int64
+	ID           int64
+	ForumID      int64
+	Title        string
+	CreatedByID  int64
 	AuthorHandle string
-	CreatedAt   time.Time
-	LastPostAt  time.Time
-	PostCount   int64
+	CreatedAt    time.Time
+	LastPostAt   time.Time
+	PostCount    int64
 }
 
 // Post is one post in a thread.
 type Post struct {
-	ID              int64
-	TopicID         int64
-	ParentPostID    *int64
-	Body            string
-	CreatedByID     int64
-	AuthorHandle    string
-	AuthorIsSysop   bool
-	CreatedAt       time.Time
-	EditedAt        time.Time // zero value = never edited
+	ID            int64
+	TopicID       int64
+	ParentPostID  *int64
+	Body          string
+	CreatedByID   int64
+	AuthorHandle  string
+	AuthorIsSysop bool
+	CreatedAt     time.Time
+	EditedAt      time.Time // zero value = never edited
 }
 
 // ListForums returns every forum ordered by sort_order then name.
@@ -130,6 +130,35 @@ func (s *ForumService) RecentTopics(ctx context.Context, forumID int64, limit in
 	return out, nil
 }
 
+// TopicsPage returns one page of a forum's topics ordered by last activity,
+// using LIMIT/OFFSET. Mirrors RecentTopics but lets the web forum view page
+// through the full list; the total for the page controls comes from the
+// forum's denormalized TopicCount, so there's no separate COUNT round-trip.
+func (s *ForumService) TopicsPage(ctx context.Context, forumID int64, limit, offset int32) ([]Topic, error) {
+	rows, err := s.Queries.ListTopicsInForumPaged(ctx, gen.ListTopicsInForumPagedParams{
+		ForumID: forumID,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("forums: topics page: %w", err)
+	}
+	out := make([]Topic, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Topic{
+			ID:           r.ID,
+			ForumID:      r.ForumID,
+			Title:        r.Title,
+			CreatedByID:  r.CreatedByID,
+			AuthorHandle: r.AuthorHandle,
+			CreatedAt:    r.CreatedAt.Time,
+			LastPostAt:   r.LastPostAt.Time,
+			PostCount:    r.PostCount,
+		})
+	}
+	return out, nil
+}
+
 // GetTopic returns one topic by id.
 func (s *ForumService) GetTopic(ctx context.Context, id int64) (Topic, error) {
 	r, err := s.Queries.GetTopicByID(ctx, id)
@@ -157,6 +186,36 @@ func (s *ForumService) Posts(ctx context.Context, topicID int64) ([]Post, error)
 	rows, err := s.Queries.ListPostsInTopic(ctx, topicID)
 	if err != nil {
 		return nil, fmt.Errorf("forums: posts: %w", err)
+	}
+	out := make([]Post, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Post{
+			ID:            r.ID,
+			TopicID:       r.TopicID,
+			ParentPostID:  r.ParentPostID,
+			Body:          r.Body,
+			CreatedByID:   r.CreatedByID,
+			AuthorHandle:  r.AuthorHandle,
+			AuthorIsSysop: r.AuthorIsSysop,
+			CreatedAt:     r.CreatedAt.Time,
+			EditedAt:      r.EditedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+// PostsPage returns one page of a topic's posts in chronological order,
+// using LIMIT/OFFSET. Mirrors Posts but lets the web thread view page
+// through long threads; the total for the page controls comes from the
+// topic's denormalized PostCount.
+func (s *ForumService) PostsPage(ctx context.Context, topicID int64, limit, offset int32) ([]Post, error) {
+	rows, err := s.Queries.ListPostsInTopicPaged(ctx, gen.ListPostsInTopicPagedParams{
+		TopicID: topicID,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("forums: posts page: %w", err)
 	}
 	out := make([]Post, 0, len(rows))
 	for _, r := range rows {
