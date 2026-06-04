@@ -1,0 +1,48 @@
+{{define "body"}}
+<section class="chat">
+  <h1>chat</h1>
+  <p class="muted">live channels and direct messages. shared with the SSH terminal.</p>
+
+  {{if .Notice}}<p class="error">{{.Notice}}</p>{{end}}
+
+  <h2>channels</h2>
+  {{if .Channels}}
+    <ul class="channel-list">
+      {{range .Channels}}
+      <li class="channel-row">
+        <a class="channel-name" href="/chat/{{.ID}}">{{.Name}}</a>
+        {{if .Unread}}<span class="badge unread">{{.Unread}} new</span>{{end}}
+      </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="muted">no channels joined yet — join one below.</p>
+  {{end}}
+
+  <form class="chat-action" method="post" action="/chat/join">
+    {{.CSRFField}}
+    <input type="text" name="name" maxlength="64" placeholder="channel name (e.g. lobby)" required>
+    <button type="submit">join channel</button>
+  </form>
+
+  <h2>direct messages</h2>
+  {{if .DMs}}
+    <ul class="channel-list dm-list">
+      {{range .DMs}}
+      <li class="channel-row">
+        <a class="channel-name" href="/chat/{{.ID}}">{{.Name}}</a>
+        {{if .Unread}}<span class="badge unread">{{.Unread}} new</span>{{end}}
+      </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="muted">no direct messages yet.</p>
+  {{end}}
+
+  <form class="chat-action" method="post" action="/chat/dm">
+    {{.CSRFField}}
+    <input type="text" name="handle" maxlength="64" placeholder="handle to message" required>
+    <button type="submit">start DM</button>
+  </form>
+</section>
+{{end}}

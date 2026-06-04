@@ -203,6 +203,14 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 	// the CSRF angle.
 	r.Get("/ws/bbs", h.handleBBSWebSocket)
 
+	// /chat/{id}/stream is the chat Server-Sent Events feed. Like /ws/bbs it
+	// sits OUTSIDE the 30s Timeout group — the stream is long-lived, and a
+	// request-context deadline would tear it down every 30 seconds. It
+	// authenticates via the session cookie loaded by attachIdentity above;
+	// CSRF is irrelevant for a GET. The companion read/write routes that DO
+	// belong under the normal timeout live in the csrf group below.
+	r.Get("/chat/{channelID}/stream", h.chatStream)
+
 	// Everything else gets the 30s request-context Timeout. Static-file
 	// serves, the healthz probe, and the avatar/CSRF routes all complete
 	// well inside that budget.
@@ -241,6 +249,27 @@ func NewServer(cfg Config, deps Deps) (*Server, error) {
 			r.Post("/boards/{forumID}/new", h.boardNewPost)
 			r.Get("/boards/{forumID}/{topicID}", h.boardTopic)
 			r.Post("/boards/{forumID}/{topicID}/reply", h.boardReplyPost)
+
+			// Chat — server-rendered live chat. Every route requires a session
+			// (the handlers redirect anonymous users to /login). Reuses the same
+			// realtime.ChatService as the SSH/TUI path, so messages cross both
+			// surfaces. The live feed (/chat/{id}/stream) is registered above,
+			// outside the Timeout group. Static "/chat/join" and "/chat/dm" are
+			// declared before the "{channelID}" wildcard; chi prioritizes static
+			// segments regardless, so they never resolve as a channel id.
+			r.Get("/chat", h.chatIndex)
+			r.Post("/chat/join", h.chatJoin)
+			r.Post("/chat/dm", h.chatStartDM)
+			r.Get("/chat/{channelID}", h.chatChannel)
+			r.Post("/chat/{channelID}/send", h.chatSend)
+			// Per-message actions, fired by chat.js with fetch() (CSRF token in
+			// the X-CSRF-Token header). They return 204; the resulting Redis
+			// event patches every open client over SSE.
+			r.Post("/chat/{channelID}/react", h.chatReact)
+			r.Post("/chat/{channelID}/unreact", h.chatUnreact)
+			r.Post("/chat/{channelID}/pin", h.chatPin)
+			r.Post("/chat/{channelID}/edit", h.chatEdit)
+			r.Post("/chat/{channelID}/delete", h.chatDelete)
 
 			// Weather — server-rendered forecast for the signed-in user's
 			// primary saved location. Login-gated (the handler redirects

@@ -9,7 +9,7 @@
 <body>
   <header class="site-header">
     <a class="brand" href="/">night.ms</a>
-    <nav class="site-nav"><a href="/boards">boards</a>{{if .Identity}}<a href="/weather">weather</a>{{end}}</nav>
+    <nav class="site-nav"><a href="/boards">boards</a>{{if .Identity}}<a href="/chat">chat</a><a href="/weather">weather</a>{{end}}</nav>
     {{if .Identity}}<span class="identity">@{{.Identity.Handle}}{{if .Identity.IsSysop}} <span class="badge">SYSOP</span>{{end}}</span><form class="logout" method="post" action="/logout">{{.CSRFField}}<button type="submit">log out</button></form>{{end}}
   </header>
   <main>

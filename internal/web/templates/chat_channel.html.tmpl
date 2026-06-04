@@ -1,0 +1,65 @@
+{{define "body"}}
+<section class="chat channel"
+         data-channel-id="{{.Channel.ID}}"
+         data-self-handle="{{.SelfHandle}}"
+         data-sysop="{{if .IsSysop}}1{{end}}"
+         data-csrf="{{.CSRFToken}}">
+  <p class="crumbs muted"><a href="/chat">chat</a> / {{.Channel.Name}}</p>
+  <div class="channel-head">
+    <h1>{{.Channel.Name}}</h1>
+    {{if .Channel.Topic}}<p class="channel-topic muted">{{.Channel.Topic}}</p>{{end}}
+  </div>
+
+  {{if .Notice}}<p class="error">{{.Notice}}</p>{{end}}
+
+  {{if .Pinned}}
+  <details class="pinned-block" open>
+    <summary>📌 pinned ({{len .Pinned}})</summary>
+    <ul>
+      {{range .Pinned}}
+      <li><a href="#msg-{{.ID}}">@{{.Handle}}</a>: <span class="chat-body">{{.Body}}</span></li>
+      {{end}}
+    </ul>
+  </details>
+  {{end}}
+
+  <ul id="chat-log" class="chat-log">
+    {{range .Messages}}
+    <li class="chat-msg{{if .IsPinned}} pinned{{end}}" id="msg-{{.ID}}" data-msg-id="{{.ID}}"{{if .IsOwn}} data-own="1" data-raw="{{.RawBody}}"{{end}}>
+      {{if .ParentID}}<a class="reply-marker muted" href="#msg-{{.ParentID}}">↳ replying to {{if .ParentHandle}}@{{.ParentHandle}}{{else}}a message{{end}}</a>{{end}}
+      {{if .IsAction}}
+        <div class="msg-head"><span class="chat-body action">* <span class="chat-author">@{{.Handle}}</span> {{.Body}}</span> <span class="pin-mark"{{if not .IsPinned}} hidden{{end}}>★</span></div>
+      {{else}}
+        <div class="msg-head">
+          <span class="chat-author">@{{.Handle}}</span>{{if .IsSysop}} <span class="chip sysop">SYSOP</span>{{end}}
+          <span class="chat-time muted">{{.CreatedAt.Format "Jan 2, 3:04pm"}}</span>
+          <span class="pin-mark"{{if not .IsPinned}} hidden{{end}}>★</span>
+          <span class="edited muted"{{if not .Edited}} hidden{{end}}>(edited)</span>
+          <span class="chat-body">{{.Body}}</span>
+        </div>
+      {{end}}
+      <div class="chat-reactions">
+        {{range .Reactions}}<button type="button" class="chip react-chip{{if .Mine}} reacted{{end}}" data-emoji="{{.Emoji}}">{{.Emoji}} <span class="rc-count">{{.Count}}</span></button>{{end}}
+      </div>
+      <div class="msg-toolbar">
+        <span class="react-palette">{{range $.Palette}}<button type="button" class="react-add" data-emoji="{{.}}" title="react {{.}}">{{.}}</button>{{end}}</span>
+        <button type="button" class="act-reply" data-handle="{{.Handle}}">reply</button>
+        <button type="button" class="act-pin">{{if .IsPinned}}unpin{{else}}pin{{end}}</button>
+        <button type="button" class="act-edit" hidden>edit</button>
+        <button type="button" class="act-delete" hidden>delete</button>
+      </div>
+      <a class="reply-badge muted" href="#msg-{{.ID}}"{{if not .ReplyCount}} hidden{{end}}>{{.ReplyCount}} <span class="rb-word">{{if eq .ReplyCount 1}}reply{{else}}replies{{end}}</span></a>
+    </li>
+    {{end}}
+  </ul>
+
+  <form class="chat-send" method="post" action="/chat/{{.Channel.ID}}/send" autocomplete="off">
+    {{.CSRFField}}
+    <input type="hidden" name="parent_id" value="">
+    <div class="reply-banner" hidden>replying to <span class="reply-banner-who"></span> <button type="button" class="reply-cancel" title="cancel reply">✕</button></div>
+    <input type="text" name="body" maxlength="4000" placeholder="message {{.Channel.Name}}…" required autofocus>
+    <button type="submit">send</button>
+  </form>
+</section>
+<script src="/static/chat.js" defer></script>
+{{end}}

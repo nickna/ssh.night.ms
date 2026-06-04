@@ -401,6 +401,27 @@ func (s *ChatService) ReactionsForChannel(ctx context.Context, channelID int64) 
 	return out, nil
 }
 
+// MyReactionsForChannel returns the set of emoji the user has reacted with,
+// keyed by message ID. The web chat seeds per-chip "you reacted" state from
+// this so a click toggles (React vs Unreact) correctly across reloads.
+func (s *ChatService) MyReactionsForChannel(ctx context.Context, channelID, userID int64) (map[int64]map[string]bool, error) {
+	rows, err := s.Queries.MyReactionsForChannel(ctx, gen.MyReactionsForChannelParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat: my reactions: %w", err)
+	}
+	out := make(map[int64]map[string]bool, len(rows))
+	for _, r := range rows {
+		if out[r.MessageID] == nil {
+			out[r.MessageID] = make(map[string]bool)
+		}
+		out[r.MessageID][r.Emoji] = true
+	}
+	return out, nil
+}
+
 // EnsureMembership idempotently records that the user belongs to a channel.
 // Called from /join and on first send into an auto-joined channel.
 func (s *ChatService) EnsureMembership(ctx context.Context, channelID, userID int64) error {
