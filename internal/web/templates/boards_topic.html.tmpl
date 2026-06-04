@@ -1,0 +1,44 @@
+{{define "body"}}
+<section class="boards thread">
+  <p class="crumbs muted"><a href="/boards">boards</a> / <a href="/boards/{{.Forum.ID}}">{{.Forum.Name}}</a></p>
+  <h1>{{.Topic.Title}}</h1>
+
+  {{if .Notice}}<p class="error">{{.Notice}}</p>{{end}}
+
+  {{if .Posts}}
+    {{range .Posts}}
+    <article class="post">
+      <header class="post-head">
+        <span class="post-author">@{{.AuthorHandle}}</span>
+        {{if .IsOP}}<span class="chip op">OP</span>{{end}}
+        {{if .IsSysop}}<span class="chip sysop">SYSOP</span>{{end}}
+        {{if .Edited}}<span class="chip muted">edited</span>{{end}}
+        <span class="post-time muted">{{.CreatedAt.Format "Jan 2, 2006 3:04pm"}}</span>
+      </header>
+      <div class="post-body">{{.Body}}</div>
+    </article>
+    {{end}}
+  {{else}}
+    <p class="muted">(empty thread)</p>
+  {{end}}
+
+  {{if gt .Nav.TotalPages 1}}
+  <nav class="pager">
+    {{if .Nav.HasPrev}}<a href="{{.Nav.BasePath}}?page={{.Nav.PrevPage}}">&larr; prev</a>{{else}}<span class="disabled">&larr; prev</span>{{end}}
+    <span class="muted">page {{.Nav.CurrentPage}} of {{.Nav.TotalPages}}</span>
+    {{if .Nav.HasNext}}<a href="{{.Nav.BasePath}}?page={{.Nav.NextPage}}">next &rarr;</a>{{else}}<span class="disabled">next &rarr;</span>{{end}}
+  </nav>
+  {{end}}
+
+  {{if .CanReply}}
+  <form class="reply-form" method="post" action="/boards/{{.Topic.ForumID}}/{{.Topic.ID}}/reply">
+    {{.CSRFField}}
+    <h2>reply</h2>
+    <textarea name="body" rows="5" maxlength="4000" placeholder="write a reply…" required></textarea>
+    <button type="submit">post reply</button>
+  </form>
+  {{else}}
+  <p class="muted"><a href="/login">log in</a> to reply.</p>
+  {{end}}
+</section>
+{{end}}

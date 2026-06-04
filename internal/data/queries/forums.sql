@@ -30,6 +30,29 @@ WHERE t.forum_id = $1
 ORDER BY t.last_post_at DESC
 LIMIT $2;
 
+-- name: ListTopicsInForumPaged :many
+-- Same shape as ListTopicsInForum but with an OFFSET so the web forum view
+-- can page through topics. Total count for the page controls comes from the
+-- denormalized forums.topic_count, so no separate COUNT query is needed.
+SELECT t.id,
+       t.forum_id,
+       t.title,
+       t.created_by_id,
+       t.created_at,
+       t.last_post_at,
+       u.handle AS author_handle,
+       COALESCE(pc.post_count, 0)::bigint AS post_count
+FROM topics t
+JOIN users u ON u.id = t.created_by_id
+LEFT JOIN (
+    SELECT topic_id, COUNT(*) AS post_count
+    FROM posts
+    GROUP BY topic_id
+) pc ON pc.topic_id = t.id
+WHERE t.forum_id = $1
+ORDER BY t.last_post_at DESC
+LIMIT $2 OFFSET $3;
+
 -- name: GetTopicByID :one
 SELECT id, forum_id, title, created_by_id, created_at, last_post_at
 FROM topics
@@ -51,6 +74,26 @@ FROM posts p
 JOIN users u ON u.id = p.created_by_id
 WHERE p.topic_id = $1
 ORDER BY p.created_at;
+
+-- name: ListPostsInTopicPaged :many
+-- Same shape as ListPostsInTopic but with LIMIT/OFFSET so the web thread
+-- view can page through long threads. Total count for the page controls
+-- comes from the topic's denormalized post_count (the topic-list query),
+-- so no separate COUNT query is needed.
+SELECT p.id,
+       p.topic_id,
+       p.parent_post_id,
+       p.body,
+       p.created_by_id,
+       p.created_at,
+       p.edited_at,
+       u.handle AS author_handle,
+       u.is_sysop AS author_is_sysop
+FROM posts p
+JOIN users u ON u.id = p.created_by_id
+WHERE p.topic_id = $1
+ORDER BY p.created_at
+LIMIT $2 OFFSET $3;
 
 -- name: CreateTopic :one
 -- Topic body lives in the first post; this only creates the topic shell.

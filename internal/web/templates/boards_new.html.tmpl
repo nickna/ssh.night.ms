@@ -1,0 +1,17 @@
+{{define "body"}}
+<section class="boards">
+  <p class="crumbs muted"><a href="/boards">boards</a> / <a href="/boards/{{.Forum.ID}}">{{.Forum.Name}}</a> / new topic</p>
+  <h1>new topic in {{.Forum.Name}}</h1>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+  <form class="topic-form" method="post" action="/boards/{{.Forum.ID}}/new">
+    {{.CSRFField}}
+    <label>title <input type="text" name="title" maxlength="120" value="{{.Title}}" placeholder="a short, descriptive title" required></label>
+    <label>body <textarea name="body" rows="10" maxlength="4000" placeholder="write your post…" required>{{.Body}}</textarea></label>
+    <div class="form-actions">
+      <button type="submit">create topic</button>
+      <a class="muted" href="/boards/{{.Forum.ID}}">cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}
