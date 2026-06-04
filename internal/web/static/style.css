@@ -337,3 +337,78 @@ a.button:hover { background: var(--yellow); text-decoration: none; }
 .topic-form button:hover, .reply-form button:hover { background: var(--yellow); }
 .form-actions a { background: var(--surface); border: 1px solid var(--dim); color: var(--accent-dim); }
 .form-actions a:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Weather — current conditions, hourly strip, 7-day table, NWS alerts */
+.weather h1 { color: var(--accent); }
+.weather h2 { color: var(--accent-dim); font-size: 1em; text-transform: uppercase; letter-spacing: 0.05em; margin: 1.6em 0 0.6em; }
+.weather-empty, .weather-error {
+  background: var(--surface);
+  border: 1px solid var(--dim);
+  border-radius: 4px;
+  padding: 0.8em 1em;
+  margin: 1.2em 0;
+}
+.weather-error { border-color: var(--red); color: var(--red); }
+
+.weather-now {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5em 0.8em;
+  margin: 1.2em 0;
+}
+.weather-now .now-temp { font-size: 2.6em; font-weight: bold; color: var(--accent); line-height: 1; }
+.weather-now .now-glyph { font-size: 1.8em; }
+.weather-now .now-cond { font-size: 1.2em; color: var(--text); }
+.weather-now .now-meta { width: 100%; font-size: 0.9em; }
+
+.hourly-strip { display: flex; flex-wrap: wrap; gap: 0.4em; margin: 0.6em 0; }
+.hour-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25em;
+  min-width: 3.4em;
+  padding: 0.5em 0.4em;
+  background: var(--surface);
+  border: 1px solid var(--dim);
+  border-radius: 4px;
+}
+.hour-cell .hour-clock { font-size: 0.75em; }
+.hour-cell .hour-glyph { font-size: 1.3em; }
+.hour-cell .hour-temp { font-weight: bold; color: var(--accent); }
+
+.forecast-table .day-glyph { font-size: 1.2em; }
+.forecast-table .day-hi { color: var(--yellow); font-weight: bold; }
+.forecast-table .day-lo { color: var(--accent-dim); }
+
+.weather-alerts { margin: 1.2em 0; }
+.alert-card {
+  background: var(--surface);
+  border: 1px solid var(--dim);
+  border-left: 3px solid var(--dim);
+  border-radius: 4px;
+  padding: 0.7em 1em;
+  margin: 0.6em 0;
+}
+.alert-head { display: flex; align-items: center; gap: 0.6em; }
+.alert-sev {
+  font-size: 0.7em;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 0.4em;
+}
+.alert-event { font-weight: bold; }
+.alert-headline { margin: 0.4em 0; }
+.alert-desc { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; margin-top: 0.4em; }
+.alert-meta { font-size: 0.85em; margin: 0.4em 0 0; }
+.alert-card.sev-extreme { border-left-color: var(--red); }
+.alert-card.sev-extreme .alert-sev { color: var(--red); }
+.alert-card.sev-severe { border-left-color: var(--yellow); }
+.alert-card.sev-severe .alert-sev { color: var(--yellow); }
+.alert-card.sev-moderate { border-left-color: var(--accent); }
+.alert-card.sev-moderate .alert-sev { color: var(--accent); }
+.alert-card.sev-minor .alert-sev { color: var(--accent-dim); }
