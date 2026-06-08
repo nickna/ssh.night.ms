@@ -68,7 +68,7 @@ func (l *Lookup) ByPublicKey(ctx context.Context, handle, fingerprint, algorithm
 	if d := l.checkPersistentBan(sourceIP); d != nil {
 		return d
 	}
-	if d := l.checkUsernameDenylist(handle); d != nil {
+	if d := l.checkUsernameDenylist(ctx, handle, sourceIP); d != nil {
 		return d
 	}
 	if handle == "" {
@@ -156,7 +156,7 @@ func (l *Lookup) ByPassword(ctx context.Context, handle, secret string, sourceIP
 	// Denylist deliberately does NOT burn the dummy Argon2id — speed is
 	// the whole point of the gate, and the list (root, postgres, etc.) is
 	// public knowledge so timing leaks nothing useful.
-	if d := l.checkUsernameDenylist(handle); d != nil {
+	if d := l.checkUsernameDenylist(ctx, handle, sourceIP); d != nil {
 		return d
 	}
 	if handle == "" {
@@ -298,12 +298,25 @@ func (l *Lookup) emitAuthAudit(ctx context.Context, method, handle string, sourc
 // checkUsernameDenylist returns Refused when handle is on the denylist,
 // nil otherwise. The slog line emitted here is the only structured record
 // of the rejection — emitAuthAudit drops the matching security_events row.
-func (l *Lookup) checkUsernameDenylist(handle string) Decision {
+//
+// A denylisted attempt is still counted toward the per-IP failure counter
+// (handle "" so only the IP key moves, mirroring the empty-handle path in
+// ByPassword). Without this the denylist — which holds exactly the system
+// names brute-force scanners spray (root, admin, …) — becomes a rate-limit
+// bypass: the short-circuit returns before ByPassword's RecordFailure, so a
+// scanner spraying denylisted handles never trips the per-IP lockout and
+// never escalates to a persistent ban. Recording here keeps the gate cheap
+// (no DB, no Argon2id) while still letting the IP accrue lockout state.
+func (l *Lookup) checkUsernameDenylist(ctx context.Context, handle string, sourceIP net.Addr) Decision {
 	if l.Denylist == nil || !l.Denylist.Denied(handle) {
 		return nil
 	}
+	if l.Limiter != nil {
+		_ = l.Limiter.RecordFailure(ctx, "", sourceIP)
+	}
 	if l.Logger != nil {
-		l.Logger.Info("auth: denylisted handle rejected", "handle", handle)
+		l.Logger.Info("auth: denylisted handle rejected",
+			"handle", handle, "ip", netlimit.CollapseIP(sourceIP))
 	}
 	return Refused{Reason: denylistRefuseReason}
 }
