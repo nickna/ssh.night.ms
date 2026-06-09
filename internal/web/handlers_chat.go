@@ -51,10 +51,6 @@ const (
 	chatStreamHeartbeat = 25 * time.Second
 )
 
-// chatTimeFmt is the timestamp rendering shared by the history template and the
-// SSE payload so replayed and live messages look identical.
-const chatTimeFmt = "Jan 2, 3:04pm"
-
 // chatReactionPalette is the fixed quick-pick set the web UI offers. Reactions
 // from the SSH /react command can use any emoji-table glyph and still render as
 // chips here, but the web react endpoint only accepts these so it can't be used
@@ -250,7 +246,7 @@ type chatMessageItem struct {
 	IsSysop      bool
 	Body         template.HTML
 	RawBody      string // raw text for the edit box; only set on own messages
-	CreatedAt    time.Time
+	Time         string // pre-localized stamp (viewer's zone + clock format)
 	IsOwn        bool
 	Edited       bool
 	IsPinned     bool
@@ -334,7 +330,7 @@ func (h *handlers) chatChannel(w http.ResponseWriter, r *http.Request) {
 			Handle:     m.Handle,
 			IsSysop:    m.IsSysop,
 			Body:       body,
-			CreatedAt:  m.CreatedAt,
+			Time:       id.Prefs.FormatStamp(m.CreatedAt),
 			IsOwn:      m.UserID == id.UserID,
 			Edited:     !m.EditedAt.IsZero(),
 			IsPinned:   m.IsPinned,
@@ -791,7 +787,7 @@ func (h *handlers) streamFrame(ev realtime.ChatEvent, viewer *webIdentity) (chat
 			Handle:   ev.Handle,
 			IsSysop:  ev.IsSysop,
 			Body:     string(body),
-			Time:     ev.CreatedAt.Format(chatTimeFmt),
+			Time:     viewer.Prefs.FormatStamp(ev.CreatedAt),
 			IsOwn:    ev.UserID == viewer.UserID,
 			IsAction: isAction,
 		}

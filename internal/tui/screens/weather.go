@@ -144,7 +144,7 @@ func (m *Weather) View() string {
 		b.WriteString("\n")
 		// Row 1: hour labels
 		for _, h := range hourly {
-			b.WriteString(weatherStat.Render(fmt.Sprintf(" %4s ", m.sess.DisplayPrefs.FormatClock(h.Time))))
+			b.WriteString(weatherStat.Render(fmt.Sprintf(" %4s ", m.sess.DisplayPrefs.FormatClockLocal(h.Time))))
 		}
 		b.WriteString("\n")
 		// Row 2: glyphs

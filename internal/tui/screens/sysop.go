@@ -723,9 +723,9 @@ func (m *Sysop) View() string {
 	}
 	if !m.metrics.at.IsZero() {
 		b.WriteString(sysopMuted.Render(fmt.Sprintf(
-			"heap %.1f MB · sys %.1f MB · goroutines %d  (refreshed %s)",
+			"heap %.1f MB · sys %.1f MB · goroutines %d  (refreshed %s UTC)",
 			m.metrics.allocMB, m.metrics.sysMB, m.metrics.goroutines,
-			m.metrics.at.Format("15:04:05"),
+			sysopTSClock(m.metrics.at),
 		)))
 	}
 
@@ -783,7 +783,9 @@ func (m *Sysop) renderUsers(w, h int) string {
 		}
 		seen := "<never>"
 		if u.LastSeenAt.Valid {
-			seen = m.sess.DisplayPrefs.FormatDateTime(u.LastSeenAt.Time)
+			// UTC, like the rest of the sysop console — not the viewing
+			// sysop's display-zone preference. See sysop_time.go.
+			seen = sysopTSMin(u.LastSeenAt.Time)
 		}
 		line := fmt.Sprintf("%s %-24s %s", flagStr, truncateRow(u.Handle, 24), sysopMuted.Render(seen))
 		b.WriteString(line)

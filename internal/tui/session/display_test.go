@@ -136,6 +136,56 @@ func TestDisplayPrefsFormatTemperatureCompact(t *testing.T) {
 	}
 }
 
+// FormatClockLocal must render the timestamp's OWN zone and honor only the
+// 12/24-hour preference — it must NOT re-zone to the user's TimeZoneID. This
+// is what keeps a weather forecast on the forecast city's clock regardless of
+// where the viewer is.
+func TestDisplayPrefsFormatClockLocal(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load Asia/Tokyo: %v", err)
+	}
+	// 22:07 Tokyo == refTime (13:07 UTC).
+	tokyoTime := refTime.In(tokyo)
+	cases := []struct {
+		name string
+		p    DisplayPrefs
+		want string
+	}{
+		// User's zone is New York, but the value stays on Tokyo's wall clock.
+		{"24h ignores user zone", DisplayPrefs{TimeZoneID: "America/New_York"}, "22:07"},
+		{"12h ignores user zone", DisplayPrefs{TimeZoneID: "America/New_York", ClockFormat: 1}, "10:07 PM"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.FormatClockLocal(tokyoTime); got != tc.want {
+				t.Errorf("FormatClockLocal = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDisplayPrefsFormatStamp(t *testing.T) {
+	// 2026-04-15 13:07 UTC.
+	cases := []struct {
+		name string
+		p    DisplayPrefs
+		want string
+	}{
+		{"24h utc", DisplayPrefs{}, "Apr 15, 13:07"},
+		{"12h utc", DisplayPrefs{ClockFormat: 1}, "Apr 15, 1:07 PM"},
+		{"24h NY", DisplayPrefs{TimeZoneID: "America/New_York"}, "Apr 15, 09:07"},
+		{"far-west tz still same day", DisplayPrefs{TimeZoneID: "Pacific/Honolulu"}, "Apr 15, 03:07"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.FormatStamp(refTime); got != tc.want {
+				t.Errorf("FormatStamp = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDisplayPrefsFormatDayClock(t *testing.T) {
 	// 2026-04-15 13:07 UTC is a Wednesday.
 	cases := []struct {

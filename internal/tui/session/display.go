@@ -125,6 +125,20 @@ func (d DisplayPrefs) FormatClock(t time.Time) string {
 	return local.Format("15:04")
 }
 
+// FormatClockLocal renders the wall-clock time honoring the 12/24-hour
+// preference but in the timestamp's OWN location — it does NOT convert to
+// the user's zone. Used for weather forecast times, which belong to the
+// forecast location, not the viewer: a New York user reading Tokyo's
+// forecast wants Tokyo hours, and the screen labels the zone separately.
+// The caller is responsible for handing in a time already in the intended
+// zone (the weather provider parses forecast times in the forecast zone).
+func (d DisplayPrefs) FormatClockLocal(t time.Time) string {
+	if d.ClockFormat == 1 {
+		return t.Format("3:04 PM")
+	}
+	return t.Format("15:04")
+}
+
 // FormatClockWithSeconds is FormatClock plus seconds — for the freshness
 // indicators on Weather + Finance where the user wants to see "data is
 // N seconds old," not just "fetched this minute."
@@ -140,6 +154,17 @@ func (d DisplayPrefs) FormatClockWithSeconds(t time.Time) string {
 // user's preferred format and time zone.
 func (d DisplayPrefs) FormatDateTime(t time.Time) string {
 	return d.FormatDate(t) + " " + d.FormatClock(t)
+}
+
+// FormatStamp renders a compact "<month> <day>, <clock>" stamp in the
+// user's zone + clock format. Used by the server-rendered web chat, where a
+// per-message timestamp wants the calendar day (history can span days) but
+// the year is noise. Honors the 12/24-hour preference via FormatClock; the
+// "Jan 2" portion is intentionally not run through the date-format
+// preference — a month name reads unambiguously regardless of US/EU order.
+func (d DisplayPrefs) FormatStamp(t time.Time) string {
+	local := t.In(d.resolveLocation())
+	return local.Format("Jan 2, ") + d.FormatClock(t)
 }
 
 // FormatDayClock renders "<weekday short> <clock>" — used by short-range

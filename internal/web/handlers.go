@@ -12,6 +12,7 @@ import (
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
 	"github.com/nickna/ssh.night.ms/internal/data/gen"
+	"github.com/nickna/ssh.night.ms/internal/tui/session"
 )
 
 type handlers struct {
@@ -58,6 +59,10 @@ type webIdentity struct {
 	UserID  int64
 	Handle  string
 	IsSysop bool
+	// Prefs carries the user's time-zone / clock / date formatting choices so
+	// server-rendered surfaces (chat history + SSE frames) localize timestamps
+	// the same way the SSH/TUI path does. Zero value is safe (UTC/ISO/24h).
+	Prefs session.DisplayPrefs
 }
 
 func (h *handlers) attachIdentity(next http.Handler) http.Handler {
@@ -83,6 +88,7 @@ func (h *handlers) attachIdentity(next http.Handler) http.Handler {
 			UserID:  user.ID,
 			Handle:  user.Handle,
 			IsSysop: user.IsSysop,
+			Prefs:   session.DisplayPrefsFromUser(user),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

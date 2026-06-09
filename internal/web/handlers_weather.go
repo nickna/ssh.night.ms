@@ -147,7 +147,7 @@ func (h *handlers) weatherIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, hr := range hourly {
 		data.Hourly = append(data.Hourly, weatherHour{
-			Clock: prefs.FormatClock(hr.Time),
+			Clock: prefs.FormatClockLocal(hr.Time),
 			Glyph: weather.CodeGlyph(hr.Code),
 			Temp:  prefs.FormatTemperatureCompact(hr.Temperature),
 		})

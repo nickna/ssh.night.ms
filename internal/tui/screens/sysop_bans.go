@@ -33,11 +33,11 @@ func (m *Sysop) renderBans(w, h int) string {
 	for _, ban := range rows {
 		expires := "<none>"
 		if ban.ExpiresAt.Valid {
-			expires = ban.ExpiresAt.Time.UTC().Format("2006-01-02 15:04 UTC")
+			expires = sysopTSMin(ban.ExpiresAt.Time)
 		}
 		bannedAt := ""
 		if ban.BannedAt.Valid {
-			bannedAt = ban.BannedAt.Time.UTC().Format("2006-01-02 15:04")
+			bannedAt = sysopTSMin(ban.BannedAt.Time)
 		}
 		reason := truncateRow(ban.Reason, 40)
 		creator := truncateRow(ban.CreatedBy, 16)

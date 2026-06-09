@@ -364,10 +364,10 @@ func (m *Sysop) renderEvents(w, h int) string {
 	// Header: filter status.
 	if len(m.eventsFilters) == 0 {
 		b.WriteString(sysopHeader.Render("events (unified audit + security)"))
-		b.WriteString("  " + sysopHint.Render("no filters"))
+		b.WriteString("  " + sysopHint.Render("no filters · times UTC"))
 	} else {
 		b.WriteString(sysopHeader.Render(fmt.Sprintf("events (%d filters active)", len(m.eventsFilters))))
-		b.WriteString("  " + sysopHint.Render(m.summariseFilters()))
+		b.WriteString("  " + sysopHint.Render(m.summariseFilters()+" · times UTC"))
 	}
 	b.WriteString("\n")
 
@@ -499,7 +499,7 @@ func (m *Sysop) renderEventsDetailModal() string {
 
 	ts := "<no timestamp>"
 	if r.At.Valid {
-		ts = r.At.Time.UTC().Format("2006-01-02 15:04:05 UTC")
+		ts = sysopTS(r.At.Time)
 	}
 	sev := "-"
 	if r.Severity != nil {
@@ -555,7 +555,7 @@ func (m *Sysop) renderEventsDetailModal() string {
 		for _, rel := range m.eventsRelated {
 			rts := "             "
 			if rel.At.Valid {
-				rts = rel.At.Time.UTC().Format("15:04:05")
+				rts = sysopTSClock(rel.At.Time)
 			}
 			subj := ""
 			if rel.SubjectHandle != nil {

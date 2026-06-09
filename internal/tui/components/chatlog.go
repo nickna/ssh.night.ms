@@ -68,8 +68,8 @@ func (c *ChatLog) ThreadFilter() int64 { return c.threadFilter }
 
 // SetTimeFormatter installs a callback the log uses to render message
 // timestamps. Re-wraps all entries so existing history picks up the new
-// format on the next paint. Pass nil to revert to the default
-// server-local 24-hour fallback.
+// format on the next paint. Pass nil to revert to the default UTC 24-hour
+// fallback.
 func (c *ChatLog) SetTimeFormatter(fn func(time.Time) string) {
 	c.timeFormatter = fn
 	for i := range c.entries {
@@ -78,14 +78,16 @@ func (c *ChatLog) SetTimeFormatter(fn func(time.Time) string) {
 }
 
 // formatTimestamp returns the header "[HH:MM]" form, routed through the
-// installed formatter when present, otherwise a server-local 24-hour
-// fallback. Centralized so callers can't accidentally bypass the
-// formatter.
+// installed formatter when present, otherwise a UTC 24-hour fallback.
+// UTC (not server-local) matches the DisplayPrefs zero value, so a caller
+// that forgets SetTimeFormatter degrades to the same zone a brand-new user
+// would see rather than leaking the host's timezone. Centralized so callers
+// can't accidentally bypass the formatter.
 func (c *ChatLog) formatTimestamp(t time.Time) string {
 	if c.timeFormatter != nil {
 		return c.timeFormatter(t)
 	}
-	return t.Local().Format("15:04")
+	return t.UTC().Format("15:04")
 }
 
 // SetSelfHandle remembers the viewer's handle so message rendering can colorize

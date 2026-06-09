@@ -32,7 +32,7 @@
       {{else}}
         <div class="msg-head">
           <span class="chat-author">@{{.Handle}}</span>{{if .IsSysop}} <span class="chip sysop">SYSOP</span>{{end}}
-          <span class="chat-time muted">{{.CreatedAt.Format "Jan 2, 3:04pm"}}</span>
+          <span class="chat-time muted">{{.Time}}</span>
           <span class="pin-mark"{{if not .IsPinned}} hidden{{end}}>★</span>
           <span class="edited muted"{{if not .Edited}} hidden{{end}}>(edited)</span>
           <span class="chat-body">{{.Body}}</span>
