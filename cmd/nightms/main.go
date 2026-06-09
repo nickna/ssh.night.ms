@@ -297,11 +297,26 @@ func main() {
 		PerIPBurst:          opts.SSHSecurity.PerIPConnBurst,
 		MaxUnauthHandshakes: opts.SSHSecurity.MaxUnauthHandshakes,
 	}, logger.With("component", "netlimit"), func(addr net.Addr, reason netlimit.RejectReason) {
+		ip := netlimit.CollapseIP(addr)
+		// A persistent-ban drop gets its own event_type (and info severity)
+		// so it reads distinctly from a capacity/rate rejection in the feed.
+		if reason == netlimit.RejectIPBanned {
+			auditRecorder.Record(context.Background(), audit.ConnRejectedBanned{IP: ip})
+			return
+		}
 		auditRecorder.Record(context.Background(), audit.ConnRejectedOverlimit{
-			IP:     netlimit.CollapseIP(addr),
+			IP:     ip,
 			Reason: string(reason),
 		})
 	})
+
+	// Enforce persistent IP bans at the TCP-accept layer too, not just in the
+	// auth callbacks. BanCache is the very offender list the auth pipeline
+	// already consults (auth.Lookup.checkPersistentBan), so this adds no new
+	// lockout surface — it only moves the same rejection earlier, dropping a
+	// banned bot before the SSH handshake instead of after, which eliminates
+	// the reconnect churn those offenders generate.
+	sshTracker.SetBanChecker(banCache)
 	go sshTracker.Run(ctx)
 
 	// Push settings.Snapshot changes into the netlimit tracker on every

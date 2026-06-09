@@ -47,7 +47,19 @@ const (
 	RejectIPConcurrent RejectReason = "ip_concurrent_cap"
 	RejectIPRate       RejectReason = "ip_rate_cap"
 	RejectGlobalUnauth RejectReason = "global_unauth_cap"
+	RejectIPBanned     RejectReason = "ip_banned"
 )
+
+// BanChecker reports whether a source IP is on the persistent-ban list. It is
+// satisfied by *auth.BanCache, but lives here as a minimal interface so the
+// netlimit package never imports auth — that would form an import cycle,
+// since auth already imports netlimit for CollapseIP. ipKey is the
+// collapsed-IP key form produced by CollapseIP; the second return (ban
+// expiry) is unused by the gate but kept so *auth.BanCache satisfies the
+// interface without an adapter.
+type BanChecker interface {
+	IsBanned(ipKey string) (bool, time.Time)
+}
 
 // RejectCallback is invoked when a connection is denied at acquire time.
 // Optional — when nil, the Tracker logs a warn line and nothing else. Phase C
@@ -73,6 +85,13 @@ type Tracker struct {
 	cfg      atomic.Pointer[Config]
 	logger   *slog.Logger
 	onReject RejectCallback
+
+	// banChecker, when non-nil, is consulted at the top of AcquireConn so a
+	// persistently-banned IP is dropped at TCP-accept time, before any gate
+	// allocation or SSH handshake. Set once via SetBanChecker during startup
+	// wiring (before the listener serves); not designed for concurrent
+	// rotation, matching the plain logger/onReject fields beside it.
+	banChecker BanChecker
 
 	mu    sync.Mutex
 	perIP map[string]*ipState
@@ -100,6 +119,16 @@ func NewTracker(cfg Config, logger *slog.Logger, onReject RejectCallback) *Track
 	}
 	t.cfg.Store(&cfg)
 	return t
+}
+
+// SetBanChecker installs the persistent-ban lookup consulted by AcquireConn.
+// Call once during startup wiring, before the listener begins serving — the
+// field is read on the accept hot path without synchronization, so rotating
+// it under live traffic is not supported. Passing nil leaves the gate
+// disabled (the zero value), which keeps existing call sites and tests that
+// never set a checker working unchanged.
+func (t *Tracker) SetBanChecker(bc BanChecker) {
+	t.banChecker = bc
 }
 
 // UpdateConfig swaps the active Config. Called by the sysop settings hook
@@ -166,6 +195,28 @@ func (t *Tracker) AcquireConn(addr net.Addr) (release func(), reason RejectReaso
 		// (Unix sockets in tests); production listener always has a real
 		// TCP addr.
 		return func() {}, "", true
+	}
+
+	// Persistent-ban gate runs first — before the token bucket, the
+	// concurrent cap, and the per-IP state allocation. A banned offender is
+	// the same IP the auth pipeline already refuses (checkPersistentBan);
+	// dropping it here means it never completes a handshake to be refused at
+	// the auth callback, which kills the reconnect churn (and the per-attempt
+	// auth_failure + handshake_failed event pair) those bots generate. Logged
+	// at Debug, not Warn: dropping an already-banned IP is the system working
+	// as intended and is the highest-volume reject path, so it must not flood
+	// the operational warn stream. Observability lives in the onReject audit
+	// event (ConnRejectedBanned, info severity).
+	if t.banChecker != nil {
+		if banned, _ := t.banChecker.IsBanned(key); banned {
+			if t.logger != nil {
+				t.logger.Debug("netlimit: dropped banned ip", "ip", key)
+			}
+			if t.onReject != nil {
+				t.onReject(addr, RejectIPBanned)
+			}
+			return nil, RejectIPBanned, false
+		}
 	}
 
 	cfg := t.cfg.Load()

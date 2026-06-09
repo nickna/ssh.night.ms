@@ -160,6 +160,81 @@ func TestTracker_RejectCallbackFires(t *testing.T) {
 	}
 }
 
+// fakeBanChecker is a BanChecker stub whose verdict is driven by a set of
+// collapsed-IP keys. Expiry is always zero — the gate ignores it.
+type fakeBanChecker struct {
+	banned map[string]bool
+}
+
+func (f fakeBanChecker) IsBanned(ipKey string) (bool, time.Time) {
+	return f.banned[ipKey], time.Time{}
+}
+
+func TestTracker_BannedIP_DroppedBeforeGates(t *testing.T) {
+	var hits atomic.Int64
+	var seen RejectReason
+	var mu sync.Mutex
+	cb := func(_ net.Addr, r RejectReason) {
+		hits.Add(1)
+		mu.Lock()
+		seen = r
+		mu.Unlock()
+	}
+	// Generous caps + a live token bucket: if the ban gate didn't run first,
+	// this IP would sail through. It must be rejected anyway.
+	tr := NewTracker(Config{MaxConnPerIP: 5, PerIPRate: rate.Limit(100), PerIPBurst: 10}, discardLogger(), cb)
+	tr.SetBanChecker(fakeBanChecker{banned: map[string]bool{"203.0.113.9": true}})
+
+	addr := mustAddr(t, "203.0.113.9:5000")
+	if _, reason, ok := tr.AcquireConn(addr); ok || reason != RejectIPBanned {
+		t.Fatalf("banned IP must reject with RejectIPBanned; got ok=%v reason=%q", ok, reason)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected 1 reject callback, got %d", hits.Load())
+	}
+	mu.Lock()
+	got := seen
+	mu.Unlock()
+	if got != RejectIPBanned {
+		t.Fatalf("callback should see RejectIPBanned, got %q", got)
+	}
+	// The ban gate runs before getOrCreate, so no per-IP state is allocated
+	// for a banned offender — it can't consume map memory or a token slot.
+	tr.mu.Lock()
+	_, present := tr.perIP[CollapseIP(addr)]
+	tr.mu.Unlock()
+	if present {
+		t.Fatal("banned IP must not allocate a per-IP state entry")
+	}
+	// A different, non-banned IP is wholly unaffected.
+	if _, _, ok := tr.AcquireConn(mustAddr(t, "203.0.113.10:5000")); !ok {
+		t.Fatal("non-banned IP should still be admitted")
+	}
+}
+
+func TestTracker_BanCheckerNil_AdmitsNormally(t *testing.T) {
+	// No SetBanChecker call → the nil checker must be a no-op, not a panic,
+	// and must not change the admit decision.
+	tr := NewTracker(Config{MaxConnPerIP: 1}, discardLogger(), nil)
+	if _, _, ok := tr.AcquireConn(mustAddr(t, "203.0.113.11:1")); !ok {
+		t.Fatal("nil ban checker must admit normally")
+	}
+}
+
+func TestTracker_BanChecker_OnlyBannedKeysRejected(t *testing.T) {
+	// A checker that bans one key must leave every other key alone — guards
+	// against an inverted-condition regression in the gate.
+	tr := NewTracker(Config{MaxConnPerIP: 2}, discardLogger(), nil)
+	tr.SetBanChecker(fakeBanChecker{banned: map[string]bool{"198.51.100.50": true}})
+
+	if _, reason, ok := tr.AcquireConn(mustAddr(t, "198.51.100.50:1")); ok || reason != RejectIPBanned {
+		t.Fatalf("listed key must reject; got ok=%v reason=%q", ok, reason)
+	}
+	if _, _, ok := tr.AcquireConn(mustAddr(t, "198.51.100.51:1")); !ok {
+		t.Fatal("unlisted key must be admitted")
+	}
+}
+
 func TestTracker_IPv6Collapsing_AppliesToCap(t *testing.T) {
 	// Two distinct addresses in the same /64 must share the cap.
 	tr := NewTracker(Config{MaxConnPerIP: 2}, discardLogger(), nil)

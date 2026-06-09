@@ -171,6 +171,24 @@ func (e ConnRejectedOverlimit) Severity() string          { return SeverityWarn 
 func (e ConnRejectedOverlimit) Subject() (string, string) { return "", e.IP }
 func (e ConnRejectedOverlimit) Details() any              { return map[string]any{"reason": e.Reason} }
 
+// ConnRejectedBanned fires when the netlimit Tracker drops a connection at
+// TCP-accept because the source IP is on the persistent-ban list — the ban
+// enforced at the connection layer, before the SSH handshake, instead of
+// only at the post-handshake auth callback. Distinct event_type from
+// ConnRejectedOverlimit so the sysop feed and log shippers can tell a
+// known-bad-offender drop apart from a capacity/rate rejection. Info
+// severity, by design: dropping an already-banned IP is the system working
+// as intended, and this is the highest-volume reject path (a banned bot
+// reconnects continuously), so it must not flood the warn feed.
+type ConnRejectedBanned struct {
+	IP string
+}
+
+func (e ConnRejectedBanned) EventType() string         { return "conn_rejected_banned" }
+func (e ConnRejectedBanned) Severity() string          { return SeverityInfo }
+func (e ConnRejectedBanned) Subject() (string, string) { return "", e.IP }
+func (ConnRejectedBanned) Details() any                { return nil }
+
 // OAuthLinked fires when a user successfully attaches a Google or
 // Microsoft account to their SSH identity. Method discriminates the entry
 // path ("browser" via the /auth/{provider}/callback redirect, "device"
