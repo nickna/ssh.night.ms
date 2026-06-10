@@ -153,14 +153,6 @@ func (m *Blackjack) settleCmd() tea.Cmd {
 	}
 }
 
-func handToStrings(h []cards.Card) []string {
-	out := make([]string, len(h))
-	for i, c := range h {
-		out[i] = c.String()
-	}
-	return out
-}
-
 func (m *Blackjack) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case bjWalletMsg:

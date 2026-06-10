@@ -1,9 +1,10 @@
 package screens
 
+import "github.com/nickna/ssh.night.ms/internal/doors/cards"
+
 // Package-level pure helpers shared across screens. Kept here (rather than
 // buried in whichever screen first needed them) so they're discoverable and
-// have a single definition. Screen-specific variants that intentionally differ
-// — alerts.truncateArea, sysop.truncateRow — stay in their own files.
+// have a single definition.
 
 // plural appends "s" unless n == 1. ASCII regular nouns only.
 func plural(noun string, n int) string {
@@ -23,6 +24,30 @@ func truncate(s string, n int) string {
 		return "…"
 	}
 	return s[:n-1] + "…"
+}
+
+// truncateRunes is the rune-aware variant of truncate, for content that can
+// carry non-ASCII (NWS alert area names, user-supplied text). Counts runes so
+// a multi-byte character near the cut point can't be split mid-sequence.
+func truncateRunes(s string, max int) string {
+	if max <= 1 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
+}
+
+// handToStrings renders a card hand to its display strings, one per card.
+// Shared by the casino screens (blackjack, video poker).
+func handToStrings(h []cards.Card) []string {
+	out := make([]string, len(h))
+	for i, c := range h {
+		out[i] = c.String()
+	}
+	return out
 }
 
 // max0 clamps a negative int up to 0.

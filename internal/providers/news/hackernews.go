@@ -2,12 +2,12 @@ package news
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // HackerNews fetches stories from the public Firebase-hosted HN API. Free,
@@ -112,42 +112,17 @@ func (p *HackerNews) TopStories(ctx context.Context, limit int) ([]Story, error)
 }
 
 func (p *HackerNews) fetchTopIDs(ctx context.Context) ([]int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hnBaseURL+"/topstories.json", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, body)
-	}
 	var ids []int64
-	if err := json.NewDecoder(resp.Body).Decode(&ids); err != nil {
-		return nil, fmt.Errorf("decode top: %w", err)
+	if err := httpjson.Get(ctx, p.HTTPClient, hnBaseURL+"/topstories.json", &ids, nil); err != nil {
+		return nil, fmt.Errorf("top: %w", err)
 	}
 	return ids, nil
 }
 
 func (p *HackerNews) fetchItem(ctx context.Context, id int64) (hnItem, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/item/%d.json", hnBaseURL, id), nil)
-	if err != nil {
-		return hnItem{}, err
-	}
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return hnItem{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return hnItem{}, fmt.Errorf("item %d status %d", id, resp.StatusCode)
-	}
 	var item hnItem
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		return hnItem{}, fmt.Errorf("decode item %d: %w", id, err)
+	if err := httpjson.Get(ctx, p.HTTPClient, fmt.Sprintf("%s/item/%d.json", hnBaseURL, id), &item, nil); err != nil {
+		return hnItem{}, fmt.Errorf("item %d: %w", id, err)
 	}
 	if item.Dead {
 		return hnItem{}, fmt.Errorf("item %d is dead", id)

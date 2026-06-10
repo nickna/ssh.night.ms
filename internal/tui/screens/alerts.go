@@ -193,7 +193,7 @@ func (m *Alerts) View() string {
 		row := fmt.Sprintf("%s%s  %s", prefix, severityBadge(a.Severity), a.Event)
 		b.WriteString(row)
 		b.WriteString("\n")
-		b.WriteString("    " + alertsArea.Render(truncateArea(a.Area, m.sess.Width-6)))
+		b.WriteString("    " + alertsArea.Render(truncateRunes(a.Area, m.sess.Width-6)))
 		b.WriteString("\n")
 		b.WriteString("    " + alertsHint.Render("expires "+m.sess.DisplayPrefs.FormatDayClock(a.Expires)))
 		b.WriteString("\n\n")
@@ -271,15 +271,4 @@ func severityBadge(severity string) string {
 		return alertsMinor.Render("[" + label + "]")
 	}
 	return alertsMinor.Render("[" + label + "]")
-}
-
-func truncateArea(s string, max int) string {
-	if max <= 1 {
-		return s
-	}
-	if len([]rune(s)) <= max {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:max-1]) + "…"
 }

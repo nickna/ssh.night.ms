@@ -2,12 +2,13 @@ package weather
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // OpenMeteo fetches forecasts from https://api.open-meteo.com (free, no key).
@@ -71,21 +72,9 @@ func (p *OpenMeteo) Forecast(ctx context.Context, lat, lon float64, label string
 	q.Set("timezone", "auto")
 	q.Set("forecast_days", "7")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openMeteoBase+"?"+q.Encode(), nil)
-	if err != nil {
-		return Forecast{}, err
-	}
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return Forecast{}, fmt.Errorf("open-meteo: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return Forecast{}, fmt.Errorf("open-meteo: status %d", resp.StatusCode)
-	}
 	var raw openMeteoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return Forecast{}, fmt.Errorf("open-meteo: decode: %w", err)
+	if err := httpjson.Get(ctx, p.HTTPClient, openMeteoBase+"?"+q.Encode(), &raw, nil); err != nil {
+		return Forecast{}, fmt.Errorf("open-meteo: %w", err)
 	}
 
 	loc, _ := time.LoadLocation(raw.Timezone)

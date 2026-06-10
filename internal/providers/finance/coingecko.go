@@ -2,11 +2,13 @@ package finance
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // CoinGecko fetches crypto quotes from https://api.coingecko.com — free,
@@ -20,6 +22,9 @@ type CoinGecko struct {
 func NewCoinGecko() *CoinGecko {
 	return &CoinGecko{HTTPClient: &http.Client{Timeout: 8 * time.Second}}
 }
+
+// cgHeaders identifies the BBS on every CoinGecko request.
+var cgHeaders = map[string]string{"User-Agent": "nightms-bbs/1.0"}
 
 // market is the shared decoding shape for the /coins/markets endpoint.
 type cgMarket struct {
@@ -40,25 +45,13 @@ func (p *CoinGecko) fetchMarket(ctx context.Context, id string) (*cgMarket, erro
 		"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=%s&price_change_percentage=24h",
 		id,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "nightms-bbs/1.0")
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("coingecko: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("coingecko: rate limited (429) — try again in a moment")
-	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("coingecko: status %d", resp.StatusCode)
-	}
 	var rows []cgMarket
-	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-		return nil, fmt.Errorf("coingecko: decode: %w", err)
+	if err := httpjson.Get(ctx, p.HTTPClient, url, &rows, cgHeaders); err != nil {
+		var se *httpjson.StatusError
+		if errors.As(err, &se) && se.Code == 429 {
+			return nil, fmt.Errorf("coingecko: rate limited (429) — try again in a moment")
+		}
+		return nil, fmt.Errorf("coingecko: %w", err)
 	}
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("coingecko: id %q not found", id)
@@ -128,24 +121,11 @@ func (p *CoinGecko) fetchSeries(ctx context.Context, id, days string) ([]float64
 		"https://api.coingecko.com/api/v3/coins/%s/market_chart?vs_currency=usd&days=%s",
 		id, days,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "nightms-bbs/1.0")
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("coingecko series: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("coingecko series: status %d", resp.StatusCode)
-	}
 	var body struct {
 		Prices [][]float64 `json:"prices"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("coingecko series: decode: %w", err)
+	if err := httpjson.Get(ctx, p.HTTPClient, url, &body, cgHeaders); err != nil {
+		return nil, fmt.Errorf("coingecko series: %w", err)
 	}
 	out := make([]float64, 0, len(body.Prices))
 	for _, p := range body.Prices {

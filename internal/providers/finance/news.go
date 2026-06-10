@@ -8,8 +8,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/ttlcache"
 )
 
 // Headline is a single finance-news item rendered in the bottom pane of the
@@ -29,27 +30,18 @@ type NewsProvider interface {
 
 // YahooRSSNews fetches headlines from finance.yahoo.com/rss/headline. RSS 2.0,
 // no key. Per-(ticker-set, max) entries cached for 5 minutes so two users with
-// the same watchlist share a fetch.
+// the same watchlist share a fetch; a fetch failure serves the last-known
+// headlines rather than blanking the pane (ttlcache.StaleOnError).
 type YahooRSSNews struct {
 	HTTPClient *http.Client
-	TTL        time.Duration
-
-	mu    sync.Mutex
-	cache map[string]*rssCacheEntry
+	cache      *ttlcache.Cache[string, []Headline]
 }
 
 func NewYahooRSSNews() *YahooRSSNews {
 	return &YahooRSSNews{
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
-		TTL:        5 * time.Minute,
-		cache:      map[string]*rssCacheEntry{},
+		cache:      ttlcache.New[string, []Headline](5*time.Minute, nil, ttlcache.StaleOnError()),
 	}
-}
-
-type rssCacheEntry struct {
-	mu      sync.Mutex
-	items   []Headline
-	fetched time.Time
 }
 
 var fallbackSymbols = []string{"^DJI", "^GSPC", "^IXIC"}
@@ -87,35 +79,9 @@ func (y *YahooRSSNews) ForTickers(ctx context.Context, tickers []string, max int
 	}
 	symbols := normalizeNewsSymbols(tickers)
 	key := fmt.Sprintf("%s|%d", strings.Join(symbols, ","), max)
-
-	y.mu.Lock()
-	e, ok := y.cache[key]
-	if !ok {
-		e = &rssCacheEntry{}
-		y.cache[key] = e
-	}
-	y.mu.Unlock()
-
-	e.mu.Lock()
-	if e.items != nil && time.Since(e.fetched) < y.TTL {
-		out := e.items
-		e.mu.Unlock()
-		return out, nil
-	}
-	e.mu.Unlock()
-
-	items, err := y.fetch(ctx, symbols, max)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err != nil {
-		if e.items != nil {
-			return e.items, nil
-		}
-		return nil, err
-	}
-	e.items = items
-	e.fetched = time.Now()
-	return items, nil
+	return y.cache.Get(ctx, key, func(ctx context.Context) ([]Headline, error) {
+		return y.fetch(ctx, symbols, max)
+	})
 }
 
 func (y *YahooRSSNews) fetch(ctx context.Context, symbols []string, max int) ([]Headline, error) {

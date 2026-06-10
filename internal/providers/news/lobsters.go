@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // SourceIDLobsters is the registry ID the Lobsters provider stamps on every
@@ -89,27 +90,13 @@ func (p *Lobsters) TopStories(ctx context.Context, limit int) ([]Story, error) {
 	if base == "" {
 		base = "https://lobste.rs"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/hottest.json", nil)
-	if err != nil {
-		return nil, fmt.Errorf("lobsters: build request: %w", err)
-	}
+	headers := map[string]string{"Accept": "application/json"}
 	if p.UserAgent != "" {
-		req.Header.Set("User-Agent", p.UserAgent)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("lobsters: fetch: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("lobsters: status %d: %s", resp.StatusCode, body)
+		headers["User-Agent"] = p.UserAgent
 	}
 	var items []lobItem
-	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
-		return nil, fmt.Errorf("lobsters: decode: %w", err)
+	if err := httpjson.Get(ctx, p.HTTPClient, base+"/hottest.json", &items, headers); err != nil {
+		return nil, fmt.Errorf("lobsters: %w", err)
 	}
 	if len(items) > limit {
 		items = items[:limit]

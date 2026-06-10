@@ -114,15 +114,7 @@ func (s *sessionStore) Set(ctx context.Context, r *http.Request, w http.Response
 	if _, err := pipe.Exec(ctx); err != nil {
 		return "", fmt.Errorf("session: store: %w", err)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sid,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(s.timeout),
-	})
+	http.SetCookie(w, secureCookie(sessionCookieName, sid, s.secure, time.Now().Add(s.timeout)))
 	return sid, nil
 }
 
@@ -196,16 +188,7 @@ func (s *sessionStore) Clear(ctx context.Context, r *http.Request, w http.Respon
 			_ = s.redis.Del(ctx, sessionKey(sid)).Err()
 		}
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, expiredCookie(sessionCookieName, s.secure))
 }
 
 // ClearAllForUser revokes every session belonging to userID. Used by the

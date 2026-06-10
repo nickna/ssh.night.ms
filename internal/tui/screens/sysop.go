@@ -787,21 +787,9 @@ func (m *Sysop) renderUsers(w, h int) string {
 			// sysop's display-zone preference. See sysop_time.go.
 			seen = sysopTSMin(u.LastSeenAt.Time)
 		}
-		line := fmt.Sprintf("%s %-24s %s", flagStr, truncateRow(u.Handle, 24), sysopMuted.Render(seen))
+		line := fmt.Sprintf("%s %-24s %s", flagStr, truncate(u.Handle, 24), sysopMuted.Render(seen))
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
 	return lipgloss.NewStyle().Width(w).Render(b.String())
-}
-
-// truncateRow keeps row text inside the per-column budget. finance.go has
-// its own truncate(), hence the differentiated name.
-func truncateRow(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "…"
 }

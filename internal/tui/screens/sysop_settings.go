@@ -53,20 +53,20 @@ func (m *Sysop) renderSettings(w, h int) string {
 			source = sysopFlag.Render("custom ")
 		}
 
-		curRendered := truncateRow(cur, valW)
+		curRendered := truncate(cur, valW)
 		if def.Type == settings.TypeBool {
 			if cur == "true" {
-				curRendered = sysopFlag.Render(truncateRow(cur, valW))
+				curRendered = sysopFlag.Render(truncate(cur, valW))
 			} else {
-				curRendered = sysopMuted.Render(truncateRow(cur, valW))
+				curRendered = sysopMuted.Render(truncate(cur, valW))
 			}
 		}
 
 		line := fmt.Sprintf(
 			"%-*s  %-*s  default %-*s  %s  %s",
-			keyW, truncateRow(def.Key, keyW),
+			keyW, truncate(def.Key, keyW),
 			valW, curRendered,
-			defW, truncateRow(dflt, defW),
+			defW, truncate(dflt, defW),
 			source,
 			sysopMuted.Render("("+def.Type+")"),
 		)

@@ -127,21 +127,13 @@ func (m *VideoPoker) drawCmd() tea.Cmd {
 			UserID: user, GameKey: "videopoker",
 			Bet: bet, Payout: payout, Net: payout - bet,
 			Details: map[string]any{
-				"hand":   handStrings(hand),
+				"hand":   handToStrings(hand[:]),
 				"rank":   rank.String(),
 				"payout": payout,
 			},
 		})
 		return vpDrawnMsg{wallet: wallet, rank: rank, payout: payout}
 	}
-}
-
-func handStrings(h [5]cards.Card) []string {
-	out := make([]string, 5)
-	for i, c := range h {
-		out[i] = c.String()
-	}
-	return out
 }
 
 func (m *VideoPoker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

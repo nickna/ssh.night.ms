@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // Result is a single candidate from the geocoder. Latitude / Longitude
@@ -104,19 +106,11 @@ func (p *OpenMeteo) Search(ctx context.Context, query string, max int) ([]Result
 	q.Set("count", strconv.Itoa(max))
 	q.Set("language", "en")
 	q.Set("format", "json")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openMeteoBase+"?"+q.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("geocoding: build request: %w", err)
+	var raw openMeteoResponse
+	if err := httpjson.Get(ctx, p.client(), openMeteoBase+"?"+q.Encode(), &raw, nil); err != nil {
+		return nil, fmt.Errorf("geocoding: %w", err)
 	}
-	resp, err := p.client().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("geocoding: do request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("geocoding: upstream status %d", resp.StatusCode)
-	}
-	return parseOpenMeteoResults(resp.Body)
+	return resultsFromResponse(raw), nil
 }
 
 // parseOpenMeteoResults is split out so the test suite can exercise the
@@ -128,6 +122,10 @@ func parseOpenMeteoResults(body interface {
 	if err := json.NewDecoder(body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("geocoding: decode: %w", err)
 	}
+	return resultsFromResponse(raw), nil
+}
+
+func resultsFromResponse(raw openMeteoResponse) []Result {
 	out := make([]Result, 0, len(raw.Results))
 	for _, r := range raw.Results {
 		out = append(out, Result{
@@ -138,7 +136,7 @@ func parseOpenMeteoResults(body interface {
 			Longitude: r.Longitude,
 		})
 	}
-	return out, nil
+	return out
 }
 
 func (p *OpenMeteo) client() *http.Client {
