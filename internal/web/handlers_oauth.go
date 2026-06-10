@@ -32,9 +32,6 @@ type OAuthProviders struct {
 	Microsoft *auth.OAuthProvider
 }
 
-// Has returns true if any provider is configured.
-func (p OAuthProviders) Has() bool { return p.Google != nil || p.Microsoft != nil }
-
 // providerByKey resolves the URL param ("google" / "microsoft") to the
 // configured provider, or nil if unconfigured/unknown.
 func (h *handlers) providerByKey(key string) *auth.OAuthProvider {

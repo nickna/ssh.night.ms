@@ -26,9 +26,7 @@ const SingletonKey = "global"
 // Persistence is optional — when Queries is nil the registry runs purely
 // in-memory and history evaporates on restart.
 type Registry struct {
-	coord  *Coordinator
-	ctx    context.Context
-	cancel context.CancelFunc
+	coord *Coordinator
 
 	queries *gen.Queries
 	wallet  Wallet
@@ -36,13 +34,15 @@ type Registry struct {
 }
 
 // NewRegistry constructs the registry and returns it before Run starts.
+// Caller owns the coordinator's run lifetime: cancel the ctx passed to Run
+// to stop the actor loop (in-flight bets refund via the shutdown hook).
 // Caller should typically:
 //
-//	reg := NewRegistry(rootCtx, queries, ledger, wallet, rng, logger)
+//	reg := NewRegistry(queries, ledger, wallet, rng, logger)
 //	if err := reg.Restore(rootCtx); err != nil { ... }
-//	go reg.Coordinator().Run(reg.ctx)
+//	go reg.Coordinator().Run(rootCtx)
 //	defer reg.Persist(shutdownCtx)
-func NewRegistry(rootCtx context.Context, queries *gen.Queries, ledger gamesmp.Ledger, wallet Wallet, rng Rng, logger *slog.Logger) *Registry {
+func NewRegistry(queries *gen.Queries, ledger gamesmp.Ledger, wallet Wallet, rng Rng, logger *slog.Logger) *Registry {
 	cfg := Config{
 		Durations:     DefaultPhaseDurations,
 		LastBetCutoff: DefaultLastBetCutoff,
@@ -52,11 +52,8 @@ func NewRegistry(rootCtx context.Context, queries *gen.Queries, ledger gamesmp.L
 		Logger:        logger,
 	}
 	coord := NewCoordinator(cfg)
-	runCtx, cancel := context.WithCancel(rootCtx)
 	r := &Registry{
 		coord:   coord,
-		ctx:     runCtx,
-		cancel:  cancel,
 		queries: queries,
 		wallet:  wallet,
 		logger:  logger,
@@ -137,7 +134,3 @@ func (r *Registry) Persist(ctx context.Context) error {
 		Snapshot: body,
 	})
 }
-
-// Stop cancels the registry's coordinator-Run context. Call after Persist
-// during shutdown so the actor loop exits cleanly.
-func (r *Registry) Stop() { r.cancel() }

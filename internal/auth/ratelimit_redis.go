@@ -46,21 +46,6 @@ type RateLimitParams struct {
 	LockcountWindow time.Duration
 }
 
-// DefaultRateLimitParams returns the same numbers the legacy stack defaults
-// to, so two stacks pointed at the same Redis would lock the same accounts
-// at the same thresholds during cutover. Adds the Phase B defaults.
-func DefaultRateLimitParams() RateLimitParams {
-	return RateLimitParams{
-		HandleThreshold:        5,
-		IPThreshold:            20,
-		WindowDuration:         15 * time.Minute,
-		LockDuration:           15 * time.Minute,
-		BackoffMax:             5,
-		PersistentBanThreshold: 3,
-		LockcountWindow:        24 * time.Hour,
-	}
-}
-
 // RedisRateLimiter is the production limiter, backed by Redis INCR/EXPIRE
 // counters and TTL'd lock keys. Implements the RateLimiter interface.
 //

@@ -19,13 +19,3 @@ type RateLimiter interface {
 	RecordFailure(ctx context.Context, handle string, sourceIP net.Addr) error
 	Clear(ctx context.Context, handle string) error
 }
-
-// NoopRateLimiter never locks out. Used by tests that don't need to exercise
-// the real limiter.
-type NoopRateLimiter struct{}
-
-func (NoopRateLimiter) Check(_ context.Context, _ string, _ net.Addr) (RateLimitCheck, error) {
-	return RateLimitCheck{}, nil
-}
-func (NoopRateLimiter) RecordFailure(_ context.Context, _ string, _ net.Addr) error { return nil }
-func (NoopRateLimiter) Clear(_ context.Context, _ string) error                     { return nil }

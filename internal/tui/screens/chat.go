@@ -888,7 +888,6 @@ func (m *Chat) previewVisible() bool {
 var (
 	chatHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
 	chatStatusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
-	chatTypingStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccentDim)).Italic(true)
 	chatPreviewCmd     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorCyan)).Bold(true)
 	chatPreviewMention = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow)).Bold(true)
 	chatPreviewChannel = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccent)).Bold(true)

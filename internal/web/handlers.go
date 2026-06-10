@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/nickna/ssh.night.ms/internal/auth"
-	"github.com/nickna/ssh.night.ms/internal/data/gen"
 	"github.com/nickna/ssh.night.ms/internal/tui/session"
 )
 
@@ -210,7 +209,3 @@ func (h *handlers) logoutAllPost(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Clear(r.Context(), r, w)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
-
-// requireQueries is a small helper for handlers that need typed queries;
-// keeps the call site terse.
-func (h *handlers) requireQueries() *gen.Queries { return h.deps.Queries }

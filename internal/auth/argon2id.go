@@ -43,7 +43,6 @@ type Hasher struct {
 
 	dummyOnce sync.Once
 	dummyHash []byte
-	dummyAlgo string
 }
 
 func NewHasher(p Argon2Params) *Hasher { return &Hasher{params: p} }
