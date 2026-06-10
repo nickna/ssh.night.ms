@@ -36,13 +36,13 @@ type Holdem struct {
 	// hole-card deal at hand start and the per-street community-card
 	// deal — distinguished by dealStage so the renderer knows whether
 	// deal.Revealed bounds hole-card visibility or board visibility.
-	deal             components.DealAnimation
-	dealStage        heDealStage
-	boardRevealFrom  int // board index where the in-flight board deal began
-	pulse            components.PulseAnimation
-	shower           components.CoinShower
-	lastWinAt        int64 // hand counter that already triggered shower; prevents re-fire
-	handCount        int64
+	deal            components.DealAnimation
+	dealStage       heDealStage
+	boardRevealFrom int // board index where the in-flight board deal began
+	pulse           components.PulseAnimation
+	shower          components.CoinShower
+	lastWinAt       int64 // hand counter that already triggered shower; prevents re-fire
+	handCount       int64
 
 	// bestFive holds the 5 indices (into [hole[0], hole[1], board[0..4]])
 	// of the winner's winning subset. Populated at showdown by advance()
@@ -87,7 +87,7 @@ func (m *Holdem) Init() tea.Cmd {
 	user := m.sess.Identity.UserID
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		w, err := svc.Load(ctx, user)
 		return heWalletMsg{wallet: w, err: err}
@@ -103,7 +103,7 @@ func (m *Holdem) buyInCmd() tea.Cmd {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return heBetMsg{err: err}
@@ -123,7 +123,7 @@ func (m *Holdem) cashOutCmd() tea.Cmd {
 	svc := m.sess.Wallet
 	bet := m.bet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if final > 0 {
 			if err := svc.Credit(ctx, &wallet, int64(final)); err != nil {

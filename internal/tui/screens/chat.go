@@ -53,9 +53,9 @@ type Chat struct {
 	// typing tracks the "X is typing" indicator state per channel.
 	// typing[channelID][handle] = expiresAt. Entries past expiresAt are pruned
 	// on each typingTickMsg. The publisher's throttle is typingPublishedAt.
-	typing             map[int64]map[string]time.Time
-	typingPublishedAt  time.Time
-	lastInputValue     string
+	typing            map[int64]map[string]time.Time
+	typingPublishedAt time.Time
+	lastInputValue    string
 
 	// onlineHandles is the right-rail roster of currently-online users.
 	// Refreshed every onlineRefreshInterval via tea.Tick — the call is one
@@ -110,36 +110,36 @@ func NewChat(sess *session.Session, chatSvc *realtime.ChatService) tea.Model {
 //
 
 type chatBootstrapMsg struct {
-	joined       []gen.Channel
-	active       chatChannelHandle
-	sub          chatSubBundle
-	hist         []realtime.Message
-	unread       map[int64]int // persisted unread counts at startup
-	reactions    map[int64]map[string]int
-	replyCounts  map[int64]int  // per-parent reply totals for hist window
-	pfpByHandle  map[string]bool // lowercased handles → "has pfp"
+	joined      []gen.Channel
+	active      chatChannelHandle
+	sub         chatSubBundle
+	hist        []realtime.Message
+	unread      map[int64]int // persisted unread counts at startup
+	reactions   map[int64]map[string]int
+	replyCounts map[int64]int   // per-parent reply totals for hist window
+	pfpByHandle map[string]bool // lowercased handles → "has pfp"
 }
 
 // chatRefanMsg replaces the multi-channel subscription after a /join added
 // a new channel that should now be covered.
 type chatRefanMsg struct {
-	joined       []gen.Channel
-	active       chatChannelHandle
-	sub          chatSubBundle
-	hist         []realtime.Message
-	reactions    map[int64]map[string]int
-	replyCounts  map[int64]int
-	pfpByHandle  map[string]bool
+	joined      []gen.Channel
+	active      chatChannelHandle
+	sub         chatSubBundle
+	hist        []realtime.Message
+	reactions   map[int64]map[string]int
+	replyCounts map[int64]int
+	pfpByHandle map[string]bool
 }
 
 // chatLocalSwitchMsg is a pure UI swap to an already-joined channel; no
 // subscription teardown, no re-fanout. Loads history on first visit.
 type chatLocalSwitchMsg struct {
-	active       chatChannelHandle
-	hist         []realtime.Message // nil if log already loaded
-	reactions    map[int64]map[string]int
-	replyCounts  map[int64]int
-	pfpByHandle  map[string]bool
+	active      chatChannelHandle
+	hist        []realtime.Message // nil if log already loaded
+	reactions   map[int64]map[string]int
+	replyCounts map[int64]int
+	pfpByHandle map[string]bool
 }
 
 type chatSubBundle struct {
@@ -205,14 +205,14 @@ func (m *Chat) bootstrap() tea.Cmd {
 		}
 		replyCounts, pfpMap := m.loadDecorations(ctx, hist)
 		return chatBootstrapMsg{
-			joined:       joined,
-			active:       chatChannelHandle{ID: ch.ID, Name: ch.Name, Topic: derefTopic(ch.Topic)},
-			sub:          sub,
-			hist:         hist,
-			unread:       unread,
-			reactions:    reactions,
-			replyCounts:  replyCounts,
-			pfpByHandle:  pfpMap,
+			joined:      joined,
+			active:      chatChannelHandle{ID: ch.ID, Name: ch.Name, Topic: derefTopic(ch.Topic)},
+			sub:         sub,
+			hist:        hist,
+			unread:      unread,
+			reactions:   reactions,
+			replyCounts: replyCounts,
+			pfpByHandle: pfpMap,
 		}
 	}
 }
@@ -275,7 +275,7 @@ func (m *Chat) touchRead(channelID, msgID int64) tea.Cmd {
 	}
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := m.chat.TouchChannelRead(ctx, userID, channelID, msgID); err != nil {
 			m.sess.Logger.Warn("chat: persist read state", "channel_id", channelID, "err", err)
@@ -293,7 +293,7 @@ func (m *Chat) touchActiveAtLatest(channelID int64) tea.Cmd {
 	}
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		latest, err := m.chat.LatestMessageID(ctx, channelID)
 		if err != nil {
@@ -347,13 +347,13 @@ func (m *Chat) joinChannel(name string) tea.Cmd {
 		}
 		replyCounts, pfpMap := m.loadDecorations(ctx, hist)
 		return chatRefanMsg{
-			joined:       joined,
-			active:       chatChannelHandle{ID: ch.ID, Name: ch.Name, Topic: derefTopic(ch.Topic)},
-			sub:          sub,
-			hist:         hist,
-			reactions:    reactions,
-			replyCounts:  replyCounts,
-			pfpByHandle:  pfpMap,
+			joined:      joined,
+			active:      chatChannelHandle{ID: ch.ID, Name: ch.Name, Topic: derefTopic(ch.Topic)},
+			sub:         sub,
+			hist:        hist,
+			reactions:   reactions,
+			replyCounts: replyCounts,
+			pfpByHandle: pfpMap,
 		}
 	}
 }
@@ -376,7 +376,7 @@ func (m *Chat) switchChannel(name string) tea.Cmd {
 		if alreadyLoaded {
 			return chatLocalSwitchMsg{active: handle}
 		}
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		hist, err := m.chat.RecentMessages(ctx, target.ID, 100)
 		if err != nil {
@@ -388,11 +388,11 @@ func (m *Chat) switchChannel(name string) tea.Cmd {
 		}
 		replyCounts, pfpMap := m.loadDecorations(ctx, hist)
 		return chatLocalSwitchMsg{
-			active:       handle,
-			hist:         hist,
-			reactions:    reactions,
-			replyCounts:  replyCounts,
-			pfpByHandle:  pfpMap,
+			active:      handle,
+			hist:        hist,
+			reactions:   reactions,
+			replyCounts: replyCounts,
+			pfpByHandle: pfpMap,
 		}
 	}
 }
@@ -416,7 +416,7 @@ func (m *Chat) leaveCurrent() tea.Cmd {
 	// of the merged sub) and switch active back to #lobby.
 	return tea.Sequence(
 		func() tea.Msg {
-			ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+			ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 			defer cancel()
 			if err := m.chat.LeaveMembership(ctx, currentID, userID); err != nil {
 				return chatErrMsg{stage: "leave", err: err}
@@ -766,7 +766,6 @@ func (m *Chat) submit() tea.Cmd {
 	}
 	return m.sendChat(raw)
 }
-
 
 func (m *Chat) notice(text string) tea.Cmd {
 	m.activeLog().AppendSystem(text)

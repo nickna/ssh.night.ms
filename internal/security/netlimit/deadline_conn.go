@@ -21,10 +21,10 @@ import (
 type DeadlineConn struct {
 	net.Conn
 
-	mu       sync.Mutex
-	cleared  bool
-	onClose  func()
-	fired    bool
+	mu      sync.Mutex
+	cleared bool
+	onClose func()
+	fired   bool
 }
 
 // WrapWithDeadline returns a *DeadlineConn that has SetDeadline(now+grace)

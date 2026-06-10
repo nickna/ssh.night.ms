@@ -48,17 +48,17 @@ type openMeteoResponse struct {
 		WindDir      int     `json:"wind_direction_10m"`
 	} `json:"current"`
 	Hourly struct {
-		Time         []string  `json:"time"`
-		Temperature  []float64 `json:"temperature_2m"`
-		WeatherCode  []int     `json:"weather_code"`
+		Time        []string  `json:"time"`
+		Temperature []float64 `json:"temperature_2m"`
+		WeatherCode []int     `json:"weather_code"`
 	} `json:"hourly"`
 	Daily struct {
-		Time          []string  `json:"time"`
-		TempMax       []float64 `json:"temperature_2m_max"`
-		TempMin       []float64 `json:"temperature_2m_min"`
-		WeatherCode   []int     `json:"weather_code"`
-		Sunrise       []string  `json:"sunrise"`
-		Sunset        []string  `json:"sunset"`
+		Time        []string  `json:"time"`
+		TempMax     []float64 `json:"temperature_2m_max"`
+		TempMin     []float64 `json:"temperature_2m_min"`
+		WeatherCode []int     `json:"weather_code"`
+		Sunrise     []string  `json:"sunrise"`
+		Sunset      []string  `json:"sunset"`
 	} `json:"daily"`
 }
 

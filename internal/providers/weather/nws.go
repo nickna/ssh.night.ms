@@ -15,13 +15,13 @@ import (
 // on the lobby's Alerts destination + as a header strip during severe events,
 // with a future opportunity to broadcast over the wall pipe.
 type Alert struct {
-	ID          string    // NWS feature id; stable for the lifetime of the alert
-	Event       string    // "Severe Thunderstorm Warning", "Tornado Watch", etc.
-	Severity    string    // "Extreme" / "Severe" / "Moderate" / "Minor" / "Unknown"
-	Headline    string    // one-line summary
-	Description string    // full text, multi-line
-	Area        string    // free-form area description
-	Sender      string    // issuing office
+	ID          string // NWS feature id; stable for the lifetime of the alert
+	Event       string // "Severe Thunderstorm Warning", "Tornado Watch", etc.
+	Severity    string // "Extreme" / "Severe" / "Moderate" / "Minor" / "Unknown"
+	Headline    string // one-line summary
+	Description string // full text, multi-line
+	Area        string // free-form area description
+	Sender      string // issuing office
 	Effective   time.Time
 	Expires     time.Time
 	URL         string

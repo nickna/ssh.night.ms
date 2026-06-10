@@ -639,16 +639,16 @@ func writeAudit(ctx context.Context, q *gen.Queries, actorID int64, action, targ
 // Styles shared across tabs. Severity/source colorization for the Events
 // tab lives in sysop_events.go since only that tab uses it.
 var (
-	sysopTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
-	sysopHint     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
-	sysopHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
-	sysopBan      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
-	sysopFlag     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
-	sysopMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
-	sysopErr      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
-	sysopTabBar   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
-	sysopTabOn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent)).Underline(true)
-	sysopTabOff   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
+	sysopTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
+	sysopHint   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
+	sysopHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
+	sysopBan    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
+	sysopFlag   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
+	sysopMuted  = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
+	sysopErr    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
+	sysopTabBar = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
+	sysopTabOn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent)).Underline(true)
+	sysopTabOff = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 )
 
 func (m *Sysop) View() string {

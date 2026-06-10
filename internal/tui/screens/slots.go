@@ -115,7 +115,7 @@ func (m *Slots) loadWallet() tea.Cmd {
 	user := m.sess.Identity.UserID
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		w, err := svc.Load(ctx, user)
 		return slotsWalletLoadedMsg{wallet: w, err: err}
@@ -136,7 +136,7 @@ func (m *Slots) spinCmd() tea.Cmd {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return slotsSpinReadyMsg{err: err}

@@ -30,17 +30,17 @@ const (
 // "new message" case. For edit events Body carries the NEW body and EditedAt
 // carries the mutation timestamp; CreatedAt is preserved across edits.
 type ChatEvent struct {
-	Kind      ChatEventKind `json:"kind"`
-	MessageID int64         `json:"message_id"`
-	ChannelID int64         `json:"channel_id"`
-	UserID    int64         `json:"user_id,omitempty"`
-	Handle    string        `json:"handle,omitempty"`
-	IsSysop   bool          `json:"is_sysop,omitempty"`
-	Body            string    `json:"body,omitempty"`
-	CreatedAt       time.Time `json:"created_at,omitempty"`
-	EditedAt        time.Time `json:"edited_at,omitempty"`
-	ParentMessageID *int64    `json:"parent_message_id,omitempty"`
-	Emoji           string    `json:"emoji,omitempty"` // populated on reaction events
+	Kind            ChatEventKind `json:"kind"`
+	MessageID       int64         `json:"message_id"`
+	ChannelID       int64         `json:"channel_id"`
+	UserID          int64         `json:"user_id,omitempty"`
+	Handle          string        `json:"handle,omitempty"`
+	IsSysop         bool          `json:"is_sysop,omitempty"`
+	Body            string        `json:"body,omitempty"`
+	CreatedAt       time.Time     `json:"created_at,omitempty"`
+	EditedAt        time.Time     `json:"edited_at,omitempty"`
+	ParentMessageID *int64        `json:"parent_message_id,omitempty"`
+	Emoji           string        `json:"emoji,omitempty"` // populated on reaction events
 	// IsPinned is the new state for ChatEventPinChanged. Marshaled even when
 	// false so the receiver can distinguish pin → unpin.
 	IsPinned bool `json:"is_pinned,omitempty"`

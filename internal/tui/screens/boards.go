@@ -129,7 +129,7 @@ func (m *Boards) loadForums() tea.Cmd {
 	svc := m.sess.Forums
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		fs, err := svc.ListForums(ctx)
 		if err != nil {
@@ -149,7 +149,7 @@ func (m *Boards) loadTopics(forum realtime.Forum) tea.Cmd {
 	m.navSeq++
 	seq := m.navSeq
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		ts, err := svc.RecentTopics(ctx, forum.ID, topicListLimit)
 		if err != nil {
@@ -167,7 +167,7 @@ func (m *Boards) touchRead(topicID int64) tea.Cmd {
 	svc := m.sess.Forums
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		return boardsReadTouchedMsg{err: svc.TouchTopicRead(ctx, userID, topicID)}
 	}
@@ -178,7 +178,7 @@ func (m *Boards) loadPosts(topic realtime.Topic) tea.Cmd {
 	m.navSeq++
 	seq := m.navSeq
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		ps, err := svc.Posts(ctx, topic.ID)
 		if err != nil {
@@ -451,7 +451,7 @@ func (m *Boards) submitNewTopic(title, body string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		topic, err := svc.CreateTopic(ctx, nil, forum.ID, user.UserID, user.Handle, title, body)
 		if err != nil {
@@ -471,7 +471,7 @@ func (m *Boards) submitReply(body string) tea.Cmd {
 	topicID := m.activeTopic.ID
 	forumID := m.activeTopic.ForumID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if _, err := svc.Reply(ctx, forumID, topicID, user.UserID, body); err != nil {
 			return boardsErrMsg{stage: "reply", err: err}
@@ -957,9 +957,9 @@ func (m *Boards) viewThread() string {
 
 // renderPostCard wraps one post in theme.PostCard. Layout inside the card:
 //
-//   #3  @handle  Jan 2 15:04             [OP] [SYSOP] (edited)
+//	#3  @handle  Jan 2 15:04             [OP] [SYSOP] (edited)
 //
-//     post body, indented 2 cells, wrapped to fit…
+//	  post body, indented 2 cells, wrapped to fit…
 //
 // isOP is true for the topic's root post — gets an OP chip in the header.
 // isMine highlights the card border in the brighter accent color so the user
@@ -1207,4 +1207,3 @@ func wrapToWidth(text string, width int) []string {
 	}
 	return out
 }
-

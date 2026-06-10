@@ -48,10 +48,10 @@ func (h *handlers) publicProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // avatar serves the avatar PNG for a handle. Order of precedence:
-//   1. Uploaded profile picture (NIGHTMS_PFP_DIR/<user_id>.png) when
-//      users.profile_picture_updated_at is set. ETag = upload timestamp so
-//      a new upload always invalidates browser caches.
-//   2. Otherwise the deterministic identicon. ETag = hash of handle|size.
+//  1. Uploaded profile picture (NIGHTMS_PFP_DIR/<user_id>.png) when
+//     users.profile_picture_updated_at is set. ETag = upload timestamp so
+//     a new upload always invalidates browser caches.
+//  2. Otherwise the deterministic identicon. ETag = hash of handle|size.
 //
 // In both cases we serve Cache-Control max-age=86400. Handle rename
 // keeps the same avatar URL — a renamed user's old avatar can therefore

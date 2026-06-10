@@ -63,7 +63,7 @@ func (m *Leaderboards) Init() tea.Cmd {
 func (m *Leaderboards) loadCmd(view leaderboardView) tea.Cmd {
 	svc := m.sess.Leaderboards
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(leaderboardLoadTimeoutSecond*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(leaderboardLoadTimeoutSecond * time.Second)
 		defer cancel()
 		if svc == nil {
 			return leaderboardLoadedMsg{view: view, err: errors.New("leaderboard service unavailable")}

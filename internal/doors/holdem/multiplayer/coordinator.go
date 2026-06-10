@@ -16,19 +16,19 @@ import (
 // every state mutation. Per-seat hole cards are masked except for the seat's
 // own user and showdown. The screen renders directly from the snapshot.
 type TableSnapshot struct {
-	TableID      int64
-	Seats        []SeatView
-	Board        []cards.Card
-	Pot          int32
-	Street       Street
-	ToAct        int
-	Button       int
-	BigBlind     int32
-	SmallBlind   int32
-	Winner       int
-	WinRank      cards.HandRank
-	HandRunning  bool
-	CapSeats     int
+	TableID       int64
+	Seats         []SeatView
+	Board         []cards.Card
+	Pot           int32
+	Street        Street
+	ToAct         int
+	Button        int
+	BigBlind      int32
+	SmallBlind    int32
+	Winner        int
+	WinRank       cards.HandRank
+	HandRunning   bool
+	CapSeats      int
 	OccupiedSeats int
 }
 
@@ -52,11 +52,11 @@ type Coordinator struct {
 	TableID int64
 	Name    string
 
-	cmds      chan command
-	game      *Game
-	subs      []*subscriber
-	subsMu    sync.Mutex
-	closed    atomic.Bool
+	cmds   chan command
+	game   *Game
+	subs   []*subscriber
+	subsMu sync.Mutex
+	closed atomic.Bool
 
 	// onSettlement fires once per settled hand. The registry wires it to a
 	// closure that calls the multiplayer ledger to persist multiplayer_hands

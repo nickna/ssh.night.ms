@@ -43,9 +43,9 @@ func BootstrapSysop(
 	defer tx.Rollback(ctx)
 
 	var (
-		userID       int64
-		isSysop      bool
-		hasPwd       bool
+		userID  int64
+		isSysop bool
+		hasPwd  bool
 	)
 	err = tx.QueryRow(ctx,
 		`SELECT id, is_sysop, password_hash IS NOT NULL FROM users WHERE handle = $1`,

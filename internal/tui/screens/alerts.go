@@ -33,8 +33,8 @@ type Alerts struct {
 	alerts []weather.Alert
 	cursor int
 
-	mode      alertsMode
-	detail    *weather.Alert
+	mode       alertsMode
+	detail     *weather.Alert
 	detailWrap int
 }
 
@@ -66,7 +66,7 @@ func (m *Alerts) loadCmd() tea.Cmd {
 		if provider == nil {
 			return alertsLoadedMsg{err: fmt.Errorf("alerts provider not configured")}
 		}
-		ctx, cancel := m.sess.CtxWithTimeout(12*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(12 * time.Second)
 		defer cancel()
 		alerts, err := provider.Alerts(ctx, lat, lon)
 		return alertsLoadedMsg{alerts: alerts, err: err}

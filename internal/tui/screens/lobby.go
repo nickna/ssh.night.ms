@@ -103,7 +103,7 @@ func (m *Lobby) fetchAlerts() tea.Cmd {
 		if provider == nil {
 			return lobbyAlertsMsg{}
 		}
-		ctx, cancel := m.sess.CtxWithTimeout(8*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(8 * time.Second)
 		defer cancel()
 		alerts, err := provider.Alerts(ctx, lat, lon)
 		if err != nil {
@@ -256,4 +256,3 @@ func (m *Lobby) renderAlertStrip(width int) string {
 	}
 	return style.Width(width).Align(lipgloss.Center).Render(strings.TrimSpace(label))
 }
-

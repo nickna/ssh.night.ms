@@ -184,7 +184,7 @@ func stripAnsi(s string) string {
 		// ESC followed by '['  → CSI. Skip until a letter byte (final).
 		if in[i+1] == '[' {
 			i += 2
-			for i < len(in) && !((in[i] >= 0x40 && in[i] <= 0x7E)) {
+			for i < len(in) && !(in[i] >= 0x40 && in[i] <= 0x7E) {
 				i++
 			}
 			continue

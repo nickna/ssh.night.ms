@@ -51,14 +51,14 @@ type Quote struct {
 // All optional pointers are nil when the upstream doesn't expose the field
 // (e.g. CoinGecko has no 52-week range; Frankfurter has no volume).
 type Detail struct {
-	Quote                  // the same fields rendered on the list row
-	Open       *float64    // session open (or 1-year open for FX)
-	DayLow     *float64    // 24h low
-	DayHigh    *float64    // 24h high
-	Week52Low  *float64    // 52-week low (stocks only)
-	Week52High *float64    // 52-week high (stocks only)
-	Volume     *int64      // session volume (stocks only)
-	Series     []float64   // chart series — intraday for stocks/crypto, daily for FX
+	Quote                // the same fields rendered on the list row
+	Open       *float64  // session open (or 1-year open for FX)
+	DayLow     *float64  // 24h low
+	DayHigh    *float64  // 24h high
+	Week52Low  *float64  // 52-week low (stocks only)
+	Week52High *float64  // 52-week high (stocks only)
+	Volume     *int64    // session volume (stocks only)
+	Series     []float64 // chart series — intraday for stocks/crypto, daily for FX
 }
 
 // AssetProvider is implemented by a per-asset-class backend (Yahoo for

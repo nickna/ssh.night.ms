@@ -37,8 +37,8 @@ var errInvalidSession = errors.New("invalid session")
 // rows from commit 44a9a18 silently TTL out — existing users re-log
 // in once after deploy):
 //
-//   web:session:{sid}   HASH  → uid, ua, ip, ts, seen
-//   web:user:{user_id}  SET   → {sid, sid, …}
+//	web:session:{sid}   HASH  → uid, ua, ip, ts, seen
+//	web:user:{user_id}  SET   → {sid, sid, …}
 //
 // Both keys carry the session timeout TTL. The per-user index makes
 // ClearAllForUser cheap and powers the listing page. Sliding-expiration

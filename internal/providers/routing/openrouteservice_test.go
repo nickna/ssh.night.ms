@@ -152,7 +152,10 @@ func TestRouteNon200(t *testing.T) {
 }
 
 func TestModeLabel(t *testing.T) {
-	cases := []struct{ in Mode; want string }{
+	cases := []struct {
+		in   Mode
+		want string
+	}{
 		{ModeDriving, "drive"},
 		{ModeWalking, "walk"},
 		{ModeCycling, "cycle"},

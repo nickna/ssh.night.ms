@@ -121,7 +121,7 @@ func (m *Register) submitCmd() tea.Cmd {
 	return func() tea.Msg {
 		// Argon2id takes ~100ms; give a generous timeout so a slow disk write
 		// for the user row doesn't fail the obvious success path.
-		ctx, cancel := m.sess.CtxWithTimeout(15*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(15 * time.Second)
 		defer cancel()
 		known, err := auth.CreateAccount(ctx, deps, in)
 		return submitMsg{known: known, err: err}

@@ -100,12 +100,14 @@ func (r *RedisRateLimiter) effective() RateLimitParams {
 	return p
 }
 
-func failHandleKey(handle string) string      { return "auth:fail:handle:" + strings.ToLower(handle) }
-func failIPKey(ip string) string              { return "auth:fail:ip:" + ip }
-func lockHandleKey(handle string) string      { return "auth:lock:handle:" + strings.ToLower(handle) }
-func lockIPKey(ip string) string              { return "auth:lock:ip:" + ip }
-func lockcountHandleKey(handle string) string { return "auth:lockcount:handle:" + strings.ToLower(handle) }
-func lockcountIPKey(ip string) string         { return "auth:lockcount:ip:" + ip }
+func failHandleKey(handle string) string { return "auth:fail:handle:" + strings.ToLower(handle) }
+func failIPKey(ip string) string         { return "auth:fail:ip:" + ip }
+func lockHandleKey(handle string) string { return "auth:lock:handle:" + strings.ToLower(handle) }
+func lockIPKey(ip string) string         { return "auth:lock:ip:" + ip }
+func lockcountHandleKey(handle string) string {
+	return "auth:lockcount:handle:" + strings.ToLower(handle)
+}
+func lockcountIPKey(ip string) string { return "auth:lockcount:ip:" + ip }
 
 // normalizeIP strips the port from a net.Addr.String() so the lockout key is
 // stable across multiple connection attempts from the same address.

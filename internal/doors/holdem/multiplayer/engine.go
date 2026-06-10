@@ -55,9 +55,9 @@ type Seat struct {
 // Game is the N-seat Hold'em engine. Generalized from the heads-up version
 // in the parent package — same payout math, same Street/Action enums.
 type Game struct {
-	deck   []cards.Card
-	seats  []Seat
-	board  []cards.Card
+	deck  []cards.Card
+	seats []Seat
+	board []cards.Card
 
 	button     int // seat index that has the button this hand
 	toAct      int // next seat to act; -1 between hands
@@ -72,7 +72,7 @@ type Game struct {
 	// the bet or folded.
 	lastRaiserIdx int
 
-	winner int // winning seat index after hand resolved; -1 when split
+	winner  int // winning seat index after hand resolved; -1 when split
 	winRank cards.HandRank
 
 	// lastPayouts is the per-seat chips awarded this hand, indexed by seat
@@ -131,7 +131,7 @@ func (g *Game) OccupiedSeats() []int {
 }
 
 // Board, Pot, Street, ToAct, Button, BigBlind expose state.
-func (g *Game) Board() []cards.Card      { return append([]cards.Card(nil), g.board...) }
+func (g *Game) Board() []cards.Card { return append([]cards.Card(nil), g.board...) }
 func (g *Game) Pot() int32 {
 	total := g.pot
 	for _, s := range g.seats {
@@ -139,11 +139,11 @@ func (g *Game) Pot() int32 {
 	}
 	return total
 }
-func (g *Game) Street() Street      { return g.street }
-func (g *Game) ToAct() int          { return g.toAct }
-func (g *Game) Button() int         { return g.button }
-func (g *Game) BigBlind() int32     { return g.bigBlind }
-func (g *Game) Winner() int         { return g.winner }
+func (g *Game) Street() Street          { return g.street }
+func (g *Game) ToAct() int              { return g.toAct }
+func (g *Game) Button() int             { return g.button }
+func (g *Game) BigBlind() int32         { return g.bigBlind }
+func (g *Game) Winner() int             { return g.winner }
 func (g *Game) WinRank() cards.HandRank { return g.winRank }
 
 // Payouts returns per-seat chips awarded by the most recently settled hand,

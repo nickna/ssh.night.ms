@@ -192,11 +192,11 @@ func TestGrossReturnAmounts(t *testing.T) {
 // double-count chips across bet types.
 func TestBetKeyString(t *testing.T) {
 	cases := map[BetKey]string{
-		{Type: BetRed}:                          "red",
-		{Type: BetDozen2}:                       "2nd12",
-		{Type: BetStraight, Number: 17}:         "straight:17",
-		{Type: BetStraight, Number: Pocket00}:   "straight:00",
-		{Type: BetStraight, Number: Pocket(0)}:  "straight:0",
+		{Type: BetRed}:                         "red",
+		{Type: BetDozen2}:                      "2nd12",
+		{Type: BetStraight, Number: 17}:        "straight:17",
+		{Type: BetStraight, Number: Pocket00}:  "straight:00",
+		{Type: BetStraight, Number: Pocket(0)}: "straight:0",
 	}
 	seen := make(map[string]BetKey, len(cases))
 	for k, want := range cases {

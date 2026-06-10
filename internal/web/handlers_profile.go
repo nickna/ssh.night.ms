@@ -192,12 +192,12 @@ func (h *handlers) passwordPost(w http.ResponseWriter, r *http.Request) {
 //
 
 type sshKeyView struct {
-	ID         int64
+	ID          int64
 	Fingerprint string
-	Algorithm  string
-	Label      string
-	CreatedAt  time.Time
-	LastUsedAt *time.Time
+	Algorithm   string
+	Label       string
+	CreatedAt   time.Time
+	LastUsedAt  *time.Time
 }
 
 type keysData struct {

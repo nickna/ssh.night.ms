@@ -1,12 +1,12 @@
 // wsprobe is a one-shot client that exercises the web login + /ws/bbs path
 // without needing a browser. Mirrors what xterm.js does in the page:
 //
-//   1. GET /login (collect the CSRF cookie + token)
-//   2. POST /login with credentials and the token (gets nightms_session cookie)
-//   3. WebSocket upgrade /ws/bbs (passing the session cookie + Origin)
-//   4. Send {"type":"resize","cols":80,"rows":24}
-//   5. Read binary frames for ~2s and assert an expected substring appears
-//      in the rendered output.
+//  1. GET /login (collect the CSRF cookie + token)
+//  2. POST /login with credentials and the token (gets nightms_session cookie)
+//  3. WebSocket upgrade /ws/bbs (passing the session cookie + Origin)
+//  4. Send {"type":"resize","cols":80,"rows":24}
+//  5. Read binary frames for ~2s and assert an expected substring appears
+//     in the rendered output.
 package main
 
 import (

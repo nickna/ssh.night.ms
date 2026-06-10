@@ -322,7 +322,6 @@ func (m *Root) rearmWallCmd() tea.Cmd {
 	return waitWallCmd(ch)
 }
 
-
 // route swaps to the screen that owns this destination.
 //
 // arg carries the optional NavigateMsg payload (e.g. a handle for the Profile
