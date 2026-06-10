@@ -24,9 +24,9 @@ type SessionKicker struct {
 	bus    Bus
 	logger *slog.Logger
 
-	mu    sync.Mutex
-	next  int64
-	regs  map[int64][]registration // userID -> registrations
+	mu   sync.Mutex
+	next int64
+	regs map[int64][]registration // userID -> registrations
 }
 
 type registration struct {

@@ -45,7 +45,7 @@ func (m *Weather) fetch() tea.Cmd {
 		return func() tea.Msg { return weatherLoadedMsg{err: errNoLocation} }
 	}
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(12*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(12 * time.Second)
 		defer cancel()
 		f, err := provider.Forecast(ctx, lat, lon, label)
 		if err != nil {

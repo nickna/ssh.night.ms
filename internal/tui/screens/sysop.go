@@ -639,16 +639,16 @@ func writeAudit(ctx context.Context, q *gen.Queries, actorID int64, action, targ
 // Styles shared across tabs. Severity/source colorization for the Events
 // tab lives in sysop_events.go since only that tab uses it.
 var (
-	sysopTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
-	sysopHint     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
-	sysopHeader   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
-	sysopBan      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
-	sysopFlag     = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
-	sysopMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
-	sysopErr      = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
-	sysopTabBar   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
-	sysopTabOn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent)).Underline(true)
-	sysopTabOff   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
+	sysopTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent))
+	sysopHint   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
+	sysopHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccentDim))
+	sysopBan    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed)).Bold(true)
+	sysopFlag   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow))
+	sysopMuted  = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
+	sysopErr    = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
+	sysopTabBar = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
+	sysopTabOn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.ColorAccent)).Underline(true)
+	sysopTabOff = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorDim))
 )
 
 func (m *Sysop) View() string {
@@ -787,21 +787,9 @@ func (m *Sysop) renderUsers(w, h int) string {
 			// sysop's display-zone preference. See sysop_time.go.
 			seen = sysopTSMin(u.LastSeenAt.Time)
 		}
-		line := fmt.Sprintf("%s %-24s %s", flagStr, truncateRow(u.Handle, 24), sysopMuted.Render(seen))
+		line := fmt.Sprintf("%s %-24s %s", flagStr, truncate(u.Handle, 24), sysopMuted.Render(seen))
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
 	return lipgloss.NewStyle().Width(w).Render(b.String())
-}
-
-// truncateRow keeps row text inside the per-column budget. finance.go has
-// its own truncate(), hence the differentiated name.
-func truncateRow(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "…"
 }

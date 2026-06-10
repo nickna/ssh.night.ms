@@ -24,7 +24,7 @@ func TestComputeLockDuration_ExponentialSequence(t *testing.T) {
 		{4, 2 * time.Hour},
 		{5, 4 * time.Hour},
 		{6, 8 * time.Hour},
-		{7, 8 * time.Hour}, // capped
+		{7, 8 * time.Hour},  // capped
 		{20, 8 * time.Hour}, // still capped, no overflow
 	}
 	for _, tc := range cases {

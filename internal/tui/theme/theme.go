@@ -25,13 +25,13 @@ const (
 	// spades/clubs → text ink, matching real-world playing cards. Held/winning
 	// reuses gold (Yellow) so a glance reads as "lit up." Felt accents pick a
 	// distinct hue per cabinet so each game still feels its own.
-	ColorSuitRed  = ColorRed
-	ColorSuitInk  = ColorText
-	ColorCardHeld = ColorYellow
-	ColorFeltBJ        = "#2E7D5B"
-	ColorFeltVP        = "#3A8FB7"
-	ColorFeltHE        = "#9E2B3C"
-	ColorFeltRoulette  = "#7A1F2E" // dark wine red — distinct from Hold'em's brighter burgundy
+	ColorSuitRed      = ColorRed
+	ColorSuitInk      = ColorText
+	ColorCardHeld     = ColorYellow
+	ColorFeltBJ       = "#2E7D5B"
+	ColorFeltVP       = "#3A8FB7"
+	ColorFeltHE       = "#9E2B3C"
+	ColorFeltRoulette = "#7A1F2E" // dark wine red — distinct from Hold'em's brighter burgundy
 )
 
 var (
@@ -187,59 +187,4 @@ func KeyChip(s string) string {
 		Foreground(lipgloss.Color(ColorYellow)).
 		Background(lipgloss.Color(ColorSurfaceAlt)).
 		Padding(0, 1).Render(s)
-}
-
-// BlendHex linearly interpolates two hex-form colors. t=0 → a, t=1 → b. Used
-// by the carousel to fade neighbor cards by distance from center.
-func BlendHex(aHex, bHex string, t float64) string {
-	ar, ag, ab := parseHex(aHex)
-	br, bg, bb := parseHex(bHex)
-	r := int(float64(ar)*(1-t) + float64(br)*t)
-	g := int(float64(ag)*(1-t) + float64(bg)*t)
-	b := int(float64(ab)*(1-t) + float64(bb)*t)
-	return rgbHex(r, g, b)
-}
-
-func parseHex(h string) (r, g, b int) {
-	if len(h) != 7 || h[0] != '#' {
-		return 0, 0, 0
-	}
-	r = (hex(h[1])<<4 | hex(h[2]))
-	g = (hex(h[3])<<4 | hex(h[4]))
-	b = (hex(h[5])<<4 | hex(h[6]))
-	return
-}
-
-func hex(c byte) int {
-	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c - 'a' + 10)
-	case c >= 'A' && c <= 'F':
-		return int(c - 'A' + 10)
-	}
-	return 0
-}
-
-func rgbHex(r, g, b int) string {
-	r = clamp8(r)
-	g = clamp8(g)
-	b = clamp8(b)
-	return "#" + nibble(r>>4) + nibble(r&0xF) + nibble(g>>4) + nibble(g&0xF) + nibble(b>>4) + nibble(b&0xF)
-}
-
-func clamp8(v int) int {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return v
-}
-
-func nibble(n int) string {
-	const digits = "0123456789ABCDEF"
-	return string(digits[n&0xF])
 }

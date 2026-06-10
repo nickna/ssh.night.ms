@@ -28,8 +28,8 @@ type HoldemMP struct {
 	err  string
 
 	// lobby state
-	tables       []multiplayer.TableInfo
-	tableCursor  int
+	tables      []multiplayer.TableInfo
+	tableCursor int
 
 	// table state
 	activeID  int64
@@ -78,7 +78,7 @@ func (m *HoldemMP) loadWallet() tea.Cmd {
 	user := m.sess.Identity.UserID
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		w, err := svc.Load(ctx, user)
 		return hmpWalletMsg{wallet: w, err: err}
@@ -271,7 +271,7 @@ func (m *HoldemMP) joinTable(coord *multiplayer.Coordinator) (tea.Model, tea.Cmd
 	svc := m.sess.Wallet
 
 	debitCmd := func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return hmpBuyInMsg{err: err}
@@ -365,7 +365,7 @@ func (m *HoldemMP) leaveTable() (tea.Model, tea.Cmd) {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	creditCmd := func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if chips > 0 {
 			_ = svc.Credit(ctx, &wallet, int64(chips))

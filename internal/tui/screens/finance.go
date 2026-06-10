@@ -430,11 +430,11 @@ func (m *Finance) loadDetail(item gen.UserWatchlistItem) tea.Cmd {
 		ctx, cancel := m.sess.CtxWithTimeout(quoteFanoutTO)
 		defer cancel()
 		var (
-			d        *finance.Detail
-			derr     error
-			hl       []finance.Headline
-			tickers  []string
-			wg       sync.WaitGroup
+			d       *finance.Detail
+			derr    error
+			hl      []finance.Headline
+			tickers []string
+			wg      sync.WaitGroup
 		)
 		if kind == finance.KindStock {
 			tickers = []string{canon}
@@ -1148,7 +1148,6 @@ func formatBigUSD(v float64) string {
 	}
 	return fmt.Sprintf("$%.2f", v)
 }
-
 
 func (m *Finance) viewReader() string {
 	return m.reader.View(m.sess.Width, m.sess.Height, "Finance › Reader")

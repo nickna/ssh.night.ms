@@ -21,7 +21,7 @@ type SearchableList struct {
 	Filter  string   // current filter text (lowercased on every Update)
 	Cursor  int      // index into the *filtered* slice (0-based)
 	Focus   bool
-	Width   int  // render width in cells
+	Width   int   // render width in cells
 	visible []int // indices into Items that survive the filter
 }
 

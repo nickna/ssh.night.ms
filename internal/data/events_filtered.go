@@ -184,4 +184,3 @@ func ListUnifiedEventsFiltered(
 	}
 	return out, nil
 }
-

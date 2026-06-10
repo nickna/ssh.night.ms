@@ -21,9 +21,9 @@ import (
 // table from the holdem_tables row on Start and writes a snapshot back to
 // the same row on graceful Shutdown.
 type Registry struct {
-	mu      sync.Mutex
-	tables  map[int64]*tableEntry
-	nextID  atomic.Int64
+	mu     sync.Mutex
+	tables map[int64]*tableEntry
+	nextID atomic.Int64
 
 	rootCtx     context.Context
 	persistence *gen.Queries

@@ -46,10 +46,10 @@ type AuthSuccess struct {
 	Method string // "password" | "publickey"
 }
 
-func (e AuthSuccess) EventType() string             { return "auth_success" }
-func (e AuthSuccess) Severity() string              { return SeverityInfo }
-func (e AuthSuccess) Subject() (string, string)     { return e.Handle, e.IP }
-func (e AuthSuccess) Details() any                  { return map[string]any{"method": e.Method} }
+func (e AuthSuccess) EventType() string         { return "auth_success" }
+func (e AuthSuccess) Severity() string          { return SeverityInfo }
+func (e AuthSuccess) Subject() (string, string) { return e.Handle, e.IP }
+func (e AuthSuccess) Details() any              { return map[string]any{"method": e.Method} }
 
 // AuthFailure fires on every Refused / RateLimited path on the auth pipeline.
 // Reason captures the internal cause (kept for log triage); the SSH client

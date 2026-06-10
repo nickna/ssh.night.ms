@@ -53,13 +53,13 @@ func (p Phase) String() string {
 // snapshot column on graceful shutdown so the rolling history survives
 // restart. PhaseToken seeds the next-boot counter so monotonicity holds.
 type PhaseMsg struct {
-	Phase      Phase            `json:"phase"`
-	EndsAt     time.Time        `json:"ends_at"`
-	PhaseToken int64            `json:"phase_token"`
-	Winning    *roulette.Pocket `json:"winning,omitempty"`   // nil during Betting/NoMoreBets
-	Aggregate  map[string]int32 `json:"aggregate,omitempty"` // BetKey.String() → total chips
-	History    []roulette.Pocket `json:"history,omitempty"`  // last N pockets, oldest first
-	Occupants  int              `json:"occupants"`
+	Phase      Phase             `json:"phase"`
+	EndsAt     time.Time         `json:"ends_at"`
+	PhaseToken int64             `json:"phase_token"`
+	Winning    *roulette.Pocket  `json:"winning,omitempty"`   // nil during Betting/NoMoreBets
+	Aggregate  map[string]int32  `json:"aggregate,omitempty"` // BetKey.String() → total chips
+	History    []roulette.Pocket `json:"history,omitempty"`   // last N pockets, oldest first
+	Occupants  int               `json:"occupants"`
 }
 
 // PersistShape is the minimal subset of state we serialise to Postgres on

@@ -2,7 +2,6 @@
 // used by card games:
 //
 //   - DealAnimation: reveals cards one-at-a-time with a short delay between
-//   - FlipAnimation: 3-frame back→edge→face reveal for the dealer hole card
 //   - PulseAnimation: toggles bold/dim for a few cycles to draw the eye to
 //     winning cards or a freshly-credited payout chip
 //   - CoinShower: spawns '$' glyphs at random columns and floats them
@@ -59,47 +58,6 @@ func (a *DealAnimation) Step() {
 	if a.Revealed < a.Total {
 		a.Revealed++
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Flip animation (dealer hole reveal)
-// ---------------------------------------------------------------------------
-
-type FlipTickMsg struct{}
-
-type FlipAnimation struct {
-	Frame    int // 0=back, 1=edge (narrow), 2=face
-	Interval time.Duration
-}
-
-func NewFlipAnimation() FlipAnimation {
-	return FlipAnimation{Frame: 0, Interval: 120 * time.Millisecond}
-}
-
-func (a FlipAnimation) Done() bool { return a.Frame >= 2 }
-
-func (a FlipAnimation) Tick() tea.Cmd {
-	if a.Done() {
-		return nil
-	}
-	return tea.Tick(a.Interval, func(time.Time) tea.Msg { return FlipTickMsg{} })
-}
-
-func (a *FlipAnimation) Step() {
-	if a.Frame < 2 {
-		a.Frame++
-	}
-}
-
-// RenderFlipEdge returns a 5-line, 2-column "edge-on" sprite for the
-// middle frame of a flip. Caller pads to CardWidth if it needs the slot
-// width to stay constant.
-func RenderFlipEdge() string {
-	border := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccent))
-	top := border.Render("┌┐")
-	pipe := border.Render("││")
-	bot := border.Render("└┘")
-	return strings.Join([]string{top, pipe, pipe, pipe, bot}, "\n")
 }
 
 // ---------------------------------------------------------------------------

@@ -18,11 +18,11 @@ import (
 )
 
 // VideoPoker drives one hand of 9/6 Jacks or Better. Lifecycle:
-//   1. load wallet
-//   2. Deal pressed → bet debits, deal 5 cards
-//   3. 1-5 toggles hold per card
-//   4. Draw → replace non-held cards, evaluate, credit payout, log round
-//   5. press Deal again to start the next hand
+//  1. load wallet
+//  2. Deal pressed → bet debits, deal 5 cards
+//  3. 1-5 toggles hold per card
+//  4. Draw → replace non-held cards, evaluate, credit payout, log round
+//  5. press Deal again to start the next hand
 type VideoPoker struct {
 	sess    *session.Session
 	wallet  doors.Wallet
@@ -77,7 +77,7 @@ func (m *VideoPoker) Init() tea.Cmd {
 	user := m.sess.Identity.UserID
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		w, err := svc.Load(ctx, user)
 		return vpWalletLoadedMsg{wallet: w, err: err}
@@ -93,7 +93,7 @@ func (m *VideoPoker) dealCmd() tea.Cmd {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return vpDealtMsg{err: err}
@@ -114,7 +114,7 @@ func (m *VideoPoker) drawCmd() tea.Cmd {
 	game := m.game
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		rank, payout := game.Draw(bet)
 		if payout > 0 {
@@ -127,21 +127,13 @@ func (m *VideoPoker) drawCmd() tea.Cmd {
 			UserID: user, GameKey: "videopoker",
 			Bet: bet, Payout: payout, Net: payout - bet,
 			Details: map[string]any{
-				"hand":   handStrings(hand),
+				"hand":   handToStrings(hand[:]),
 				"rank":   rank.String(),
 				"payout": payout,
 			},
 		})
 		return vpDrawnMsg{wallet: wallet, rank: rank, payout: payout}
 	}
-}
-
-func handStrings(h [5]cards.Card) []string {
-	out := make([]string, 5)
-	for i, c := range h {
-		out[i] = c.String()
-	}
-	return out
 }
 
 func (m *VideoPoker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

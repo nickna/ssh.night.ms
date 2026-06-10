@@ -45,14 +45,14 @@ type Options struct {
 	BootstrapSysopHandle   string
 	BootstrapSysopPassword string
 
-	WebPublicHost    string
+	WebPublicHost string
 	// WebSSHHost is the host string rendered into "ssh -p 2222 you@<host>"
 	// snippets on the landing/login/profile pages. Distinct from WebPublicHost
 	// because the SSH listener and the HTTP listener can live on different
 	// names (e.g. SSH direct at ssh.night.ms, HTTP behind Cloudflare at
 	// k.night.ms). Defaults to WebPublicHost when NIGHTMS_SSH_HOST is unset,
 	// preserving the old single-host behavior.
-	WebSSHHost       string
+	WebSSHHost string
 	// WebSSHPort is the externally-reachable SSH port shown to users in those
 	// same snippets. Distinct from the bind port (BBS_SSH_PORT) because the
 	// container may bind to a non-privileged port while the host forwards the
@@ -286,7 +286,7 @@ func Load() Options {
 		OAuthRefreshBatchSize:    int(uintEnv("NIGHTMS_OAUTH_REFRESH_BATCH_SIZE", 50)),
 		OAuthRefreshWorkers:      int(uintEnv("NIGHTMS_OAUTH_REFRESH_WORKERS", 4)),
 		OAuthTokenSecret:         hexBytesEnv("NIGHTMS_OAUTH_TOKEN_SECRET"),
-		ORSAPIKey:             os.Getenv("NIGHTMS_ORS_API_KEY"),
+		ORSAPIKey:                os.Getenv("NIGHTMS_ORS_API_KEY"),
 		Carbonyl: CarbonylOptions{
 			BinPath: envOr("NIGHTMS_CARBONYL_BIN_PATH", "/opt/carbonyl/carbonyl"),
 			DataDir: envOr("NIGHTMS_CARBONYL_DATA_DIR", filepath.Join("data", "carbonyl")),

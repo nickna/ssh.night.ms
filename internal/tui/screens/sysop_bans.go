@@ -39,10 +39,10 @@ func (m *Sysop) renderBans(w, h int) string {
 		if ban.BannedAt.Valid {
 			bannedAt = sysopTSMin(ban.BannedAt.Time)
 		}
-		reason := truncateRow(ban.Reason, 40)
-		creator := truncateRow(ban.CreatedBy, 16)
+		reason := truncate(ban.Reason, 40)
+		creator := truncate(ban.CreatedBy, 16)
 		b.WriteString(fmt.Sprintf("  %-40s  expires %s  by %s\n",
-			truncateRow(ban.IpAddr, 40),
+			truncate(ban.IpAddr, 40),
 			sysopMuted.Render(expires),
 			sysopMuted.Render(creator),
 		))

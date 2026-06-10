@@ -37,8 +37,8 @@ type DaySlot struct {
 
 // Forecast bundles current + hourly + daily into one Provider return.
 type Forecast struct {
-	Location string // human label, e.g. "New York"
-	Latitude float64
+	Location  string // human label, e.g. "New York"
+	Latitude  float64
 	Longitude float64
 	Timezone  string
 	Now       Conditions

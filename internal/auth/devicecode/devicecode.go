@@ -50,10 +50,10 @@ import (
 // scan from the sysop console can survey active flows without sweeping the
 // whole keyspace.
 const (
-	keyFlowPrefix  = "oauth:device:flow:"     // + flow_id  → JSON state, TTL = expires_in
-	keyUserPrefix  = "oauth:device:user:"     // + user_id:provider → flow_id, TTL = expires_in
-	keyBeginBucket = "oauth:device:begin:"    // + user_id → INCR counter, EX 60s
-	beginRateLimit = 6                        // starts per minute per user
+	keyFlowPrefix  = "oauth:device:flow:"  // + flow_id  → JSON state, TTL = expires_in
+	keyUserPrefix  = "oauth:device:user:"  // + user_id:provider → flow_id, TTL = expires_in
+	keyBeginBucket = "oauth:device:begin:" // + user_id → INCR counter, EX 60s
+	beginRateLimit = 6                     // starts per minute per user
 	beginRateTTL   = 60 * time.Second
 )
 
@@ -71,7 +71,7 @@ var ErrRateLimited = errors.New("devicecode: too many recent attempts")
 // (UserCode, VerificationURL) plus the opaque server-side handle the TUI
 // uses on subsequent Poll calls.
 type Flow struct {
-	ID              string        // opaque server-minted handle; client passes back to Poll
+	ID              string // opaque server-minted handle; client passes back to Poll
 	Provider        auth.OAuthProviderKind
 	UserCode        string        // short code the user types into the verification page
 	VerificationURL string        // URL the user opens in a browser
@@ -509,13 +509,13 @@ type deviceCodeResp struct {
 }
 
 type rawDeviceCodeResp struct {
-	DeviceCode               string `json:"device_code"`
-	UserCode                 string `json:"user_code"`
-	VerificationURI          string `json:"verification_uri"`
-	VerificationURIComplete  string `json:"verification_uri_complete"`
-	VerificationURL          string `json:"verification_url"` // Google's older field name
-	ExpiresIn                int    `json:"expires_in"`
-	Interval                 int    `json:"interval"`
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	VerificationURL         string `json:"verification_url"` // Google's older field name
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
 }
 
 func (s *Service) requestDeviceCode(ctx context.Context, p *auth.OAuthProvider) (*deviceCodeResp, error) {

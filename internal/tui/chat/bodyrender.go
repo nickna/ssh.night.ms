@@ -1,5 +1,5 @@
 // Package chat: rendering helpers for chat message bodies. Supports `*bold*`,
-// `_italic_`, `` `code` ``, `@mention` (self vs. other), and `:emoji:`.
+// `_italic_`, “ `code` “, `@mention` (self vs. other), and `:emoji:`.
 package chat
 
 import (
@@ -51,7 +51,7 @@ type BodyToken struct {
 // lookbehind. Rules:
 //   - `*foo*`   bold      — non-space immediately inside both stars, single line
 //   - `_foo_`   italic    — same shape with underscores
-//   - `` `foo` `` code    — anything except backtick/newline inside
+//   - “ `foo` “ code    — anything except backtick/newline inside
 //   - `@name`   mention   — name = [A-Za-z0-9][A-Za-z0-9_-]{0,31}; preceded by start or non-alnum/_
 func TokenizeBody(body, selfHandle string) ([]BodyToken, bool) {
 	text := SubstituteEmoji(body)
@@ -378,4 +378,3 @@ func WrapBodyLines(body, selfHandle string, width int) ([]string, bool) {
 	}
 	return rendered, mentioned
 }
-

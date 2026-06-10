@@ -359,4 +359,3 @@ func (s *ProfileService) BatchHasPfp(ctx context.Context, handles []string) (map
 	}
 	return out, nil
 }
-

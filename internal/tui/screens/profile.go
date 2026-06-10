@@ -104,13 +104,13 @@ type Profile struct {
 	// SSH user, plus the device-code flow state while linking a new one.
 	// oauthCreds is hydrated by oauthLoadedMsg; oauthFlow is non-nil only
 	// while modeOAuthDevice is active.
-	oauthCreds          []gen.ListOAuthCredentialsForUserRow
-	oauthCursor         int
-	oauthErr            string
-	oauthBusy           bool
-	oauthFlow           *devicecode.Flow
-	oauthFlowProvider   auth.OAuthProviderKind
-	oauthFlowStatus     string
+	oauthCreds        []gen.ListOAuthCredentialsForUserRow
+	oauthCursor       int
+	oauthErr          string
+	oauthBusy         bool
+	oauthFlow         *devicecode.Flow
+	oauthFlowProvider auth.OAuthProviderKind
+	oauthFlowStatus   string
 
 	// Add-key modal inputs. Built fresh in openAddKey so a cancelled attempt
 	// leaves no residue. addKeyFocus: 0=public-key, 1=label.
@@ -177,10 +177,10 @@ func NewProfileFinger(sess *session.Session, handle string) tea.Model {
 //
 
 type profileLoadedMsg struct {
-	snap   *realtime.ProfileSnapshot
-	keys   []gen.IdentityCredential
-	oauth  []gen.ListOAuthCredentialsForUserRow
-	err    error
+	snap  *realtime.ProfileSnapshot
+	keys  []gen.IdentityCredential
+	oauth []gen.ListOAuthCredentialsForUserRow
+	err   error
 }
 
 type profileSavedMsg struct{ err error }
@@ -234,7 +234,7 @@ func (m *Profile) loadSelf() tea.Cmd {
 	queries := m.sess.Queries
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		snap, err := svc.GetByID(ctx, userID)
 		if err != nil {
@@ -258,7 +258,7 @@ func (m *Profile) loadSelf() tea.Cmd {
 func (m *Profile) loadFinger(handle string) tea.Cmd {
 	svc := m.sess.Profile
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		snap, err := svc.GetByHandle(ctx, handle)
 		if err != nil {
@@ -517,7 +517,7 @@ func (m *Profile) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.locRenameID = 0
 		// Refresh the Session's PrimaryLocation cache so WeatherCoords()
 		// picks up the new state, then reload the list for the modal.
-		refreshCtx, cancel := m.sess.CtxWithTimeout(2*time.Second)
+		refreshCtx, cancel := m.sess.CtxWithTimeout(2 * time.Second)
 		if err := m.sess.RefreshPrimaryLocation(refreshCtx); err != nil {
 			m.sess.Logger.Warn("refresh primary location", "err", err)
 		}
@@ -698,10 +698,10 @@ var (
 
 	profileHintStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color(theme.ColorDim)).Italic(true)
-	profileNoticeBase  = lipgloss.NewStyle().Bold(true)
-	profileNoticeOk    = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorGreen))
-	profileNoticeErr   = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorRed))
-	profileNoticeDim   = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorAccentDim))
+	profileNoticeBase = lipgloss.NewStyle().Bold(true)
+	profileNoticeOk   = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorGreen))
+	profileNoticeErr  = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorRed))
+	profileNoticeDim  = profileNoticeBase.Foreground(lipgloss.Color(theme.ColorAccentDim))
 
 	profileSysopBadgeStyle = lipgloss.NewStyle().Bold(true).
 				Background(lipgloss.Color(theme.ColorYellow)).
@@ -713,7 +713,7 @@ var (
 				Foreground(lipgloss.Color(theme.ColorAccentDim))
 	profileLabelStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorAccentDim))
 	profileActiveLabelStyle = lipgloss.NewStyle().Bold(true).
-					Foreground(lipgloss.Color(theme.ColorAccent))
+				Foreground(lipgloss.Color(theme.ColorAccent))
 
 	profileButtonFocused = lipgloss.NewStyle().Bold(true).
 				Background(lipgloss.Color(theme.ColorSurfaceAlt)).
@@ -1346,4 +1346,3 @@ func (m *Profile) renderConfirmModal() string {
 	}
 	return m.confirm.View(w)
 }
-

@@ -15,9 +15,9 @@ import (
 // heartbeat. The TTL grace window (1 minute) lets a brief network blip not
 // appear as a logout.
 type PresenceService struct {
-	Client     *redis.Client
-	Logger     *slog.Logger
-	HeartbeatTTL time.Duration // how long a single heartbeat keeps the user "online" (typical: 60s)
+	Client         *redis.Client
+	Logger         *slog.Logger
+	HeartbeatTTL   time.Duration // how long a single heartbeat keeps the user "online" (typical: 60s)
 	HeartbeatEvery time.Duration // how often the per-session goroutine touches the key (typical: 30s)
 }
 

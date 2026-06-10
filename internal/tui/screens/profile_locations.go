@@ -70,7 +70,7 @@ func (m *Profile) reloadLocations() tea.Cmd {
 	svc := m.sess.Locations
 	userID := m.sess.Identity.UserID
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if svc == nil {
 			return locationsLoadedMsg{err: errors.New("location service unavailable")}
@@ -185,7 +185,7 @@ func (m *Profile) dispatchSwap(a, b realtime.SavedLocation) tea.Cmd {
 	userID := m.sess.Identity.UserID
 	m.working = true
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if svc == nil {
 			return locationMutatedMsg{err: errors.New("location service unavailable")}
@@ -211,7 +211,7 @@ func (m *Profile) submitLocationRename() tea.Cmd {
 	id := m.locRenameID
 	m.working = true
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if svc == nil {
 			return locationMutatedMsg{err: errors.New("location service unavailable")}
@@ -306,7 +306,7 @@ func (m *Profile) searchPlace() tea.Cmd {
 	m.locSearching = true
 	m.locErr = ""
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		results, err := svc.Search(ctx, query, 5)
 		return locationSearchMsg{results: results, err: err}
@@ -384,7 +384,7 @@ func (m *Profile) deleteLocation(id int64) tea.Cmd {
 	userID := m.sess.Identity.UserID
 	m.working = true
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		if svc == nil {
 			return locationMutatedMsg{err: errors.New("location service unavailable")}

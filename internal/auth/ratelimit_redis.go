@@ -46,21 +46,6 @@ type RateLimitParams struct {
 	LockcountWindow time.Duration
 }
 
-// DefaultRateLimitParams returns the same numbers the legacy stack defaults
-// to, so two stacks pointed at the same Redis would lock the same accounts
-// at the same thresholds during cutover. Adds the Phase B defaults.
-func DefaultRateLimitParams() RateLimitParams {
-	return RateLimitParams{
-		HandleThreshold:        5,
-		IPThreshold:            20,
-		WindowDuration:         15 * time.Minute,
-		LockDuration:           15 * time.Minute,
-		BackoffMax:             5,
-		PersistentBanThreshold: 3,
-		LockcountWindow:        24 * time.Hour,
-	}
-}
-
 // RedisRateLimiter is the production limiter, backed by Redis INCR/EXPIRE
 // counters and TTL'd lock keys. Implements the RateLimiter interface.
 //
@@ -115,12 +100,14 @@ func (r *RedisRateLimiter) effective() RateLimitParams {
 	return p
 }
 
-func failHandleKey(handle string) string      { return "auth:fail:handle:" + strings.ToLower(handle) }
-func failIPKey(ip string) string              { return "auth:fail:ip:" + ip }
-func lockHandleKey(handle string) string      { return "auth:lock:handle:" + strings.ToLower(handle) }
-func lockIPKey(ip string) string              { return "auth:lock:ip:" + ip }
-func lockcountHandleKey(handle string) string { return "auth:lockcount:handle:" + strings.ToLower(handle) }
-func lockcountIPKey(ip string) string         { return "auth:lockcount:ip:" + ip }
+func failHandleKey(handle string) string { return "auth:fail:handle:" + strings.ToLower(handle) }
+func failIPKey(ip string) string         { return "auth:fail:ip:" + ip }
+func lockHandleKey(handle string) string { return "auth:lock:handle:" + strings.ToLower(handle) }
+func lockIPKey(ip string) string         { return "auth:lock:ip:" + ip }
+func lockcountHandleKey(handle string) string {
+	return "auth:lockcount:handle:" + strings.ToLower(handle)
+}
+func lockcountIPKey(ip string) string { return "auth:lockcount:ip:" + ip }
 
 // normalizeIP strips the port from a net.Addr.String() so the lockout key is
 // stable across multiple connection attempts from the same address.

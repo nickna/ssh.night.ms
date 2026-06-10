@@ -27,10 +27,10 @@ const rouletteCabinetWidth = 60
 // brief ball-landing pause, then optional pulse + coin shower. Total ribbon
 // motion ≈ 3.75s, comfortably inside the coordinator's 5s Spinning phase.
 const (
-	rouletteSpinFastFrames    = 25
+	rouletteSpinFastFrames     = 25
 	rouletteSpinFastIntervalMs = 50
 	rouletteSpinDecelFrames    = 25
-	rouletteSpinDecelStepMs    = 6  // each decel frame adds 6ms to the wait
+	rouletteSpinDecelStepMs    = 6   // each decel frame adds 6ms to the wait
 	rouletteWallClockTickMs    = 250 // for countdown refresh
 )
 
@@ -66,8 +66,8 @@ type Roulette struct {
 	// Animation state.
 	ribbonScroll int
 	ribbonFrame  int
-	spinning     bool       // local-animation flag; true while ribbon is decelerating
-	winnerIdx    int        // RibbonOrder index of the winning pocket (-1 until known)
+	spinning     bool // local-animation flag; true while ribbon is decelerating
+	winnerIdx    int  // RibbonOrder index of the winning pocket (-1 until known)
 	pulse        components.PulseAnimation
 	pulseActive  bool
 	coins        components.CoinShower
@@ -393,8 +393,8 @@ func (m *Roulette) placeBetAtCursor() tea.Cmd {
 // ---------------------------------------------------------------------------
 
 var (
-	rouletteHint = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
-	rouletteErr  = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
+	rouletteHint       = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted)).Italic(true)
+	rouletteErr        = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorRed))
 	roulettePhaseLabel = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorCyan)).Bold(true)
 	rouletteWinLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorYellow)).Bold(true)
 )

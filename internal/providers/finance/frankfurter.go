@@ -2,11 +2,12 @@ package finance
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // Frankfurter delivers FX rates via api.frankfurter.dev (ECB reference rates,
@@ -42,24 +43,12 @@ func (f *Frankfurter) fetchSeries(ctx context.Context, base, quote string, days 
 		"https://api.frankfurter.dev/v1/%s..%s?base=%s&symbols=%s",
 		from.Format("2006-01-02"), to.Format("2006-01-02"), base, quote,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "nightms-bbs/1.0 (+https://night.ms)")
-	resp, err := f.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("frankfurter: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("frankfurter: status %d", resp.StatusCode)
-	}
 	var body struct {
 		Rates map[string]map[string]float64 `json:"rates"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("frankfurter: decode: %w", err)
+	headers := map[string]string{"User-Agent": "nightms-bbs/1.0 (+https://night.ms)"}
+	if err := httpjson.Get(ctx, f.HTTPClient, url, &body, headers); err != nil {
+		return nil, fmt.Errorf("frankfurter: %w", err)
 	}
 	type dp struct {
 		Date string

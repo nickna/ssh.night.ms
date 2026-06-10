@@ -1,2 +1,9 @@
 bundle/*.tar.xz filter=lfs diff=lfs merge=lfs -text
 bundle/*.sha256 -text
+
+# Go tooling (gofmt, staticcheck) assumes LF; without this, Windows
+# checkouts under core.autocrlf=true get CRLF working copies that make
+# `gofmt -l` flag every file.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

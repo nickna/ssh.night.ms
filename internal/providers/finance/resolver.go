@@ -71,14 +71,14 @@ func Resolve(input string) (Resolved, error) {
 	if rest, ok := stripPrefixCI(in, "s:"); ok {
 		s := strings.ToUpper(strings.TrimSpace(rest))
 		if s == "" {
-			return Resolved{}, errors.New("empty stock symbol after s:")
+			return Resolved{}, errors.New("empty stock symbol after s: prefix")
 		}
 		return Resolved{Kind: KindStock, Canonical: s, DisplayHint: s}, nil
 	}
 	if rest, ok := stripPrefixCI(in, "c:"); ok {
 		s := strings.TrimSpace(rest)
 		if s == "" {
-			return Resolved{}, errors.New("empty crypto symbol after c:")
+			return Resolved{}, errors.New("empty crypto symbol after c: prefix")
 		}
 		up := strings.ToUpper(s)
 		if id, found := KnownCryptoIDs[up]; found {

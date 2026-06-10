@@ -19,13 +19,13 @@ import (
 // can show the right "link Google / Microsoft" CTAs alongside what's
 // already attached.
 type connectionsRow struct {
-	ID          int64
-	Provider    string
-	Subject     string
-	Label       string
-	CreatedAt   time.Time
-	LastUsedAt  *time.Time
-	IsSSH       bool
+	ID         int64
+	Provider   string
+	Subject    string
+	Label      string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	IsSSH      bool
 }
 
 // connectionsData is the page view-model.

@@ -531,7 +531,7 @@ func buildSessionDeps(
 	// phase machine — the wheel runs forever, even with zero subscribers.
 	walletSvc := &doors.WalletService{Queries: queries}
 	rouletteReg := roulettemp.NewRegistry(
-		ctx, queries, mpLedger,
+		queries, mpLedger,
 		&roulettemp.WalletAdapter{Svc: walletSvc},
 		doors.CryptoRng{},
 		logger.With("component", "roulette-mp"),

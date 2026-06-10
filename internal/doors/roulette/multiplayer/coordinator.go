@@ -607,4 +607,3 @@ func (c *Coordinator) DrainPending() []userBet {
 // ComputeStats returns the hot/cold/streak rollup over the full history
 // ring. Cheap (≤100 entries) so screens can call this on every paint.
 func (c *Coordinator) ComputeStats() Stats { return c.history.ComputeStats() }
-

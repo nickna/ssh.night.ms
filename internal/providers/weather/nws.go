@@ -2,26 +2,26 @@ package weather
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // Alert is one active National Weather Service alert at a lat/lon. Rendered
 // on the lobby's Alerts destination + as a header strip during severe events,
 // with a future opportunity to broadcast over the wall pipe.
 type Alert struct {
-	ID          string    // NWS feature id; stable for the lifetime of the alert
-	Event       string    // "Severe Thunderstorm Warning", "Tornado Watch", etc.
-	Severity    string    // "Extreme" / "Severe" / "Moderate" / "Minor" / "Unknown"
-	Headline    string    // one-line summary
-	Description string    // full text, multi-line
-	Area        string    // free-form area description
-	Sender      string    // issuing office
+	ID          string // NWS feature id; stable for the lifetime of the alert
+	Event       string // "Severe Thunderstorm Warning", "Tornado Watch", etc.
+	Severity    string // "Extreme" / "Severe" / "Moderate" / "Minor" / "Unknown"
+	Headline    string // one-line summary
+	Description string // full text, multi-line
+	Area        string // free-form area description
+	Sender      string // issuing office
 	Effective   time.Time
 	Expires     time.Time
 	URL         string
@@ -81,26 +81,13 @@ type nwsResponse struct {
 // failed" via the error path, not "no alerts".
 func (n *NWSAlerts) Alerts(ctx context.Context, lat, lon float64) ([]Alert, error) {
 	url := fmt.Sprintf("https://api.weather.gov/alerts/active?point=%.4f,%.4f", lat, lon)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("nws: build request: %w", err)
+	headers := map[string]string{
+		"Accept":     "application/geo+json",
+		"User-Agent": n.UserAgent,
 	}
-	req.Header.Set("Accept", "application/geo+json")
-	req.Header.Set("User-Agent", n.UserAgent)
-
-	resp, err := n.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("nws: fetch: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("nws: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
 	var payload nwsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("nws: decode: %w", err)
+	if err := httpjson.Get(ctx, n.HTTP, url, &payload, headers); err != nil {
+		return nil, fmt.Errorf("nws: %w", err)
 	}
 
 	out := make([]Alert, 0, len(payload.Features))

@@ -33,8 +33,8 @@ type Alerts struct {
 	alerts []weather.Alert
 	cursor int
 
-	mode      alertsMode
-	detail    *weather.Alert
+	mode       alertsMode
+	detail     *weather.Alert
 	detailWrap int
 }
 
@@ -66,7 +66,7 @@ func (m *Alerts) loadCmd() tea.Cmd {
 		if provider == nil {
 			return alertsLoadedMsg{err: fmt.Errorf("alerts provider not configured")}
 		}
-		ctx, cancel := m.sess.CtxWithTimeout(12*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(12 * time.Second)
 		defer cancel()
 		alerts, err := provider.Alerts(ctx, lat, lon)
 		return alertsLoadedMsg{alerts: alerts, err: err}
@@ -193,7 +193,7 @@ func (m *Alerts) View() string {
 		row := fmt.Sprintf("%s%s  %s", prefix, severityBadge(a.Severity), a.Event)
 		b.WriteString(row)
 		b.WriteString("\n")
-		b.WriteString("    " + alertsArea.Render(truncateArea(a.Area, m.sess.Width-6)))
+		b.WriteString("    " + alertsArea.Render(truncateRunes(a.Area, m.sess.Width-6)))
 		b.WriteString("\n")
 		b.WriteString("    " + alertsHint.Render("expires "+m.sess.DisplayPrefs.FormatDayClock(a.Expires)))
 		b.WriteString("\n\n")
@@ -271,15 +271,4 @@ func severityBadge(severity string) string {
 		return alertsMinor.Render("[" + label + "]")
 	}
 	return alertsMinor.Render("[" + label + "]")
-}
-
-func truncateArea(s string, max int) string {
-	if max <= 1 {
-		return s
-	}
-	if len([]rune(s)) <= max {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:max-1]) + "…"
 }

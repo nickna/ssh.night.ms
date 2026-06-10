@@ -200,7 +200,7 @@ func RenderRouletteFelt(opts RouletteFeltOpts) string {
 	myBets := opts.MyBets
 	agg := opts.Aggregate
 
-	cellWidth := 3 // "NN " (left-padded number + trailing space)
+	cellWidth := 3  // "NN " (left-padded number + trailing space)
 	zerosWidth := 5 // " 0  " or " 00 "
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorMuted))
 

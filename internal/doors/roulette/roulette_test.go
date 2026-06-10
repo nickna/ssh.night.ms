@@ -161,30 +161,26 @@ func TestStraightUpPaysOnlyMatch(t *testing.T) {
 	}
 }
 
-// TestPayoutAmounts pins down a few hand-checked cases so the (amount × mult)
-// math doesn't drift if Evaluate is ever refactored to return different
-// multipliers.
-func TestPayoutAmounts(t *testing.T) {
+// TestGrossReturnAmounts pins down a few hand-checked cases so the
+// (amount × (1 + mult)) math doesn't drift if Evaluate is ever refactored
+// to return different multipliers.
+func TestGrossReturnAmounts(t *testing.T) {
 	cases := []struct {
 		desc      string
 		pocket    Pocket
 		bet       Bet
-		wantPay   int32
 		wantGross int32
 	}{
-		{"red bet on red pocket", Pocket(7), Bet{BetKey{Type: BetRed}, 5}, 5, 10},
-		{"red bet on black pocket", Pocket(2), Bet{BetKey{Type: BetRed}, 5}, 0, 0},
-		{"red bet on zero", Pocket(0), Bet{BetKey{Type: BetRed}, 5}, 0, 0},
-		{"dozen1 bet on pocket 7", Pocket(7), Bet{BetKey{Type: BetDozen1}, 10}, 20, 30},
-		{"dozen1 bet on pocket 13", Pocket(13), Bet{BetKey{Type: BetDozen1}, 10}, 0, 0},
-		{"straight 17 on 17", Pocket(17), Bet{BetKey{Type: BetStraight, Number: 17}, 1}, 35, 36},
-		{"straight 17 on 18", Pocket(18), Bet{BetKey{Type: BetStraight, Number: 17}, 1}, 0, 0},
-		{"straight 00 on 00", Pocket00, Bet{BetKey{Type: BetStraight, Number: Pocket00}, 2}, 70, 72},
+		{"red bet on red pocket", Pocket(7), Bet{BetKey{Type: BetRed}, 5}, 10},
+		{"red bet on black pocket", Pocket(2), Bet{BetKey{Type: BetRed}, 5}, 0},
+		{"red bet on zero", Pocket(0), Bet{BetKey{Type: BetRed}, 5}, 0},
+		{"dozen1 bet on pocket 7", Pocket(7), Bet{BetKey{Type: BetDozen1}, 10}, 30},
+		{"dozen1 bet on pocket 13", Pocket(13), Bet{BetKey{Type: BetDozen1}, 10}, 0},
+		{"straight 17 on 17", Pocket(17), Bet{BetKey{Type: BetStraight, Number: 17}, 1}, 36},
+		{"straight 17 on 18", Pocket(18), Bet{BetKey{Type: BetStraight, Number: 17}, 1}, 0},
+		{"straight 00 on 00", Pocket00, Bet{BetKey{Type: BetStraight, Number: Pocket00}, 2}, 72},
 	}
 	for _, c := range cases {
-		if got := Payout(c.pocket, c.bet); got != c.wantPay {
-			t.Errorf("%s: Payout want %d, got %d", c.desc, c.wantPay, got)
-		}
 		if got := GrossReturn(c.pocket, c.bet); got != c.wantGross {
 			t.Errorf("%s: GrossReturn want %d, got %d", c.desc, c.wantGross, got)
 		}
@@ -196,11 +192,11 @@ func TestPayoutAmounts(t *testing.T) {
 // double-count chips across bet types.
 func TestBetKeyString(t *testing.T) {
 	cases := map[BetKey]string{
-		{Type: BetRed}:                          "red",
-		{Type: BetDozen2}:                       "2nd12",
-		{Type: BetStraight, Number: 17}:         "straight:17",
-		{Type: BetStraight, Number: Pocket00}:   "straight:00",
-		{Type: BetStraight, Number: Pocket(0)}:  "straight:0",
+		{Type: BetRed}:                         "red",
+		{Type: BetDozen2}:                      "2nd12",
+		{Type: BetStraight, Number: 17}:        "straight:17",
+		{Type: BetStraight, Number: Pocket00}:  "straight:00",
+		{Type: BetStraight, Number: Pocket(0)}: "straight:0",
 	}
 	seen := make(map[string]BetKey, len(cases))
 	for k, want := range cases {

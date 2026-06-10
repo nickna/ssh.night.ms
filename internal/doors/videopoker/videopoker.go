@@ -14,15 +14,15 @@ import (
 // HandRank → multiplier of the bet. 9 for full house, 6 for flush — the
 // "9/6" designation. Values are flat per-credit; bet × multiplier = payout.
 var PayTable9_6 = map[cards.HandRank]int{
-	cards.JacksOrBetter:  1,
-	cards.TwoPair:        2,
-	cards.ThreeOfAKind:   3,
-	cards.Straight:       4,
-	cards.Flush:          6,
-	cards.FullHouse:      9,
-	cards.FourOfAKind:    25,
-	cards.StraightFlush:  50,
-	cards.RoyalFlush:     800,
+	cards.JacksOrBetter: 1,
+	cards.TwoPair:       2,
+	cards.ThreeOfAKind:  3,
+	cards.Straight:      4,
+	cards.Flush:         6,
+	cards.FullHouse:     9,
+	cards.FourOfAKind:   25,
+	cards.StraightFlush: 50,
+	cards.RoyalFlush:    800,
 }
 
 // PayTableRow is a presentation row for the paytable view.
@@ -48,11 +48,11 @@ func Schedule() []PayTableRow {
 // Game tracks one hand from deal through draw. The same Game value is read by
 // the screen each frame — it doesn't store any view state, just game state.
 type Game struct {
-	deck   []cards.Card // remaining cards after deal (mutates on Draw)
-	hand   [5]cards.Card
-	held   [5]bool
-	dealt  bool
-	drawn  bool
+	deck  []cards.Card // remaining cards after deal (mutates on Draw)
+	hand  [5]cards.Card
+	held  [5]bool
+	dealt bool
+	drawn bool
 
 	finalRank cards.HandRank
 	payout    int32

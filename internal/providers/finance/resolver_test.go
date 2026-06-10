@@ -64,10 +64,10 @@ func TestResolve(t *testing.T) {
 
 func TestCryptoDisplay(t *testing.T) {
 	cases := map[string]string{
-		"bitcoin":     "BTC",
-		"ethereum":    "ETH",
-		"dogecoin":    "DOGE",
-		"unknown-id":  "UNKNOWN-ID",
+		"bitcoin":    "BTC",
+		"ethereum":   "ETH",
+		"dogecoin":   "DOGE",
+		"unknown-id": "UNKNOWN-ID",
 	}
 	for id, want := range cases {
 		if got := CryptoDisplay(id); got != want {

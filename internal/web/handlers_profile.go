@@ -72,7 +72,7 @@ func (h *handlers) profileView(w http.ResponseWriter, r *http.Request) {
 		data.Notice = "profile picture cleared — back to identicon"
 		data.NoticeKind = "ok"
 	}
-	h.renderProfile(w, "profile", data)
+	h.renderProfile(w, http.StatusOK, "profile", data)
 }
 
 type passwordFormData struct {
@@ -85,7 +85,7 @@ func (h *handlers) passwordGet(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	h.renderProfile(w, "profile_password", passwordFormData{pageData: h.basePage(r, "change password")})
+	h.renderProfile(w, http.StatusOK, "profile_password", passwordFormData{pageData: h.basePage(r, "change password")})
 }
 
 func (h *handlers) passwordPost(w http.ResponseWriter, r *http.Request) {
@@ -103,8 +103,7 @@ func (h *handlers) passwordPost(w http.ResponseWriter, r *http.Request) {
 	confirm := r.PostFormValue("confirm")
 
 	render := func(msg string) {
-		w.WriteHeader(http.StatusUnauthorized)
-		h.renderProfile(w, "profile_password", passwordFormData{
+		h.renderProfile(w, http.StatusUnauthorized, "profile_password", passwordFormData{
 			pageData: h.basePage(r, "change password"),
 			Error:    msg,
 		})
@@ -193,12 +192,12 @@ func (h *handlers) passwordPost(w http.ResponseWriter, r *http.Request) {
 //
 
 type sshKeyView struct {
-	ID         int64
+	ID          int64
 	Fingerprint string
-	Algorithm  string
-	Label      string
-	CreatedAt  time.Time
-	LastUsedAt *time.Time
+	Algorithm   string
+	Label       string
+	CreatedAt   time.Time
+	LastUsedAt  *time.Time
 }
 
 type keysData struct {
@@ -238,7 +237,7 @@ func (h *handlers) keysGet(w http.ResponseWriter, r *http.Request) {
 		v.Algorithm = sshAlgorithmFromMetadata(k.Metadata)
 		view = append(view, v)
 	}
-	h.renderProfile(w, "profile_keys", keysData{
+	h.renderProfile(w, http.StatusOK, "profile_keys", keysData{
 		pageData: h.basePage(r, "ssh keys"),
 		Keys:     view,
 	})
@@ -261,7 +260,6 @@ func (h *handlers) keysAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render := func(msg string) {
-		w.WriteHeader(http.StatusBadRequest)
 		// Re-render keys page with error AND current list.
 		rows, _ := h.deps.Queries.ListSshCredentialsForUser(r.Context(), id.UserID)
 		view := make([]sshKeyView, 0, len(rows))
@@ -277,7 +275,7 @@ func (h *handlers) keysAdd(w http.ResponseWriter, r *http.Request) {
 			v.Algorithm = sshAlgorithmFromMetadata(k.Metadata)
 			view = append(view, v)
 		}
-		h.renderProfile(w, "profile_keys", keysData{
+		h.renderProfile(w, http.StatusBadRequest, "profile_keys", keysData{
 			pageData: h.basePage(r, "ssh keys"),
 			Keys:     view,
 			Error:    msg,
@@ -339,7 +337,7 @@ func (h *handlers) pictureGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderProfile(w, "profile_picture", pictureFormData{
+	h.renderProfile(w, http.StatusOK, "profile_picture", pictureFormData{
 		pageData:  h.basePage(r, "profile picture"),
 		HasUpload: user.ProfilePictureUpdatedAt.Valid,
 	})
@@ -357,9 +355,8 @@ func (h *handlers) picturePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render := func(status int, msg string) {
-		w.WriteHeader(status)
 		user, _ := h.deps.Queries.GetUserByID(r.Context(), id.UserID)
-		h.renderProfile(w, "profile_picture", pictureFormData{
+		h.renderProfile(w, status, "profile_picture", pictureFormData{
 			pageData:  h.basePage(r, "profile picture"),
 			HasUpload: user.ProfilePictureUpdatedAt.Valid,
 			Error:     msg,
@@ -480,7 +477,7 @@ func (h *handlers) sessionsView(w http.ResponseWriter, r *http.Request) {
 			Current:   row.Current,
 		})
 	}
-	h.renderProfile(w, "profile_sessions", view)
+	h.renderProfile(w, http.StatusOK, "profile_sessions", view)
 }
 
 // sessionsRevoke kills one specific session by SID. Owner-guarded inside
@@ -567,13 +564,16 @@ func shortUA(ua string) string {
 // is typed loosely so the profile-specific data shapes above thread through.
 // The shared layout template ultimately receives a value that embeds pageData,
 // which is what the {{.Identity}} / {{.CSRFField}} accesses depend on.
-func (h *handlers) renderProfile(w http.ResponseWriter, page string, data any) {
+// Owns the full header sequence (Content-Type before WriteHeader) so error
+// paths can't accidentally flush the status line before the headers land.
+func (h *handlers) renderProfile(w http.ResponseWriter, status int, page string, data any) {
 	tpl, ok := h.templates[page]
 	if !ok {
 		http.Error(w, "template not found", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	if err := tpl.ExecuteTemplate(w, "layout", data); err != nil {
 		h.deps.Logger.Error("web: render profile", "page", page, "err", err)
 	}

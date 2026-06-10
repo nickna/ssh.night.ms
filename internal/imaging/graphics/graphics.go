@@ -1,15 +1,11 @@
-// Package graphics dispatches inline-image rendering to whichever terminal
-// graphics protocol the connected SSH client supports. Halfblock is the
-// universal fallback and reuses the existing imaging.RenderToANSILines.
-// Kitty + iTerm2 + Sixel layer on for clients that advertise them via
-// $TERM / $TERM_PROGRAM at PTY allocation time.
+// Package graphics detects which terminal graphics protocol the connected
+// SSH client supports via $TERM / $TERM_PROGRAM at PTY allocation time.
+// Halfblock (imaging.RenderToANSILines) is the universal fallback and
+// currently the only renderer; per-protocol encoders would layer on here.
 package graphics
 
 import (
-	"image"
 	"strings"
-
-	"github.com/nickna/ssh.night.ms/internal/imaging"
 )
 
 // Protocol identifies the inline-image transport. Halfblock is the default
@@ -75,40 +71,6 @@ func Detect(term string, environ []string) Protocol {
 		return Sixel
 	}
 	return Halfblock
-}
-
-// Encode renders img to a slice of terminal rows for the given protocol.
-// cellCols is the desired cell-width; the protocol may scale to honor or
-// approximate it. Returns nil on unsupported protocols or render failure
-// so the caller can fall through to the halfblock encoder.
-func Encode(p Protocol, img image.Image, cellCols int) []string {
-	if img == nil || cellCols <= 0 {
-		return nil
-	}
-	switch p {
-	case None:
-		return nil
-	case Kitty:
-		return encodeKitty(img, cellCols)
-	case Iterm2:
-		return encodeIterm2(img, cellCols)
-	case Sixel:
-		return encodeSixel(img, cellCols)
-	default:
-		return imaging.RenderToANSILines(img, cellCols)
-	}
-}
-
-// EncodeWithFallback runs Encode and, when the result is empty (a protocol
-// stub returning nil, or a failure), falls back to halfblock so the caller
-// always gets *something* paintable. Use this from screens that don't want
-// to write their own retry.
-func EncodeWithFallback(p Protocol, img image.Image, cellCols int) []string {
-	out := Encode(p, img, cellCols)
-	if len(out) > 0 {
-		return out
-	}
-	return imaging.RenderToANSILines(img, cellCols)
 }
 
 func parseEnviron(env []string) map[string]string {

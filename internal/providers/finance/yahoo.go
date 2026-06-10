@@ -2,11 +2,13 @@ package finance
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/nickna/ssh.night.ms/internal/providers/httpjson"
 )
 
 // Yahoo fetches stock quotes via Yahoo Finance's unofficial endpoints —
@@ -25,23 +27,15 @@ func NewYahoo() *Yahoo {
 const yahooUA = "Mozilla/5.0 (compatible; nightms-bbs/1.0; +https://night.ms)"
 
 func (y *Yahoo) httpGet(ctx context.Context, urlStr string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	err := httpjson.Get(ctx, y.HTTPClient, urlStr, out, map[string]string{"User-Agent": yahooUA})
 	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", yahooUA)
-	resp, err := y.HTTPClient.Do(req)
-	if err != nil {
+		var se *httpjson.StatusError
+		if errors.As(err, &se) && se.Code == 429 {
+			return fmt.Errorf("yahoo: rate limited (429)")
+		}
 		return fmt.Errorf("yahoo: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 429 {
-		return fmt.Errorf("yahoo: rate limited (429)")
-	}
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("yahoo: status %d", resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return nil
 }
 
 type yQuoteRow struct {

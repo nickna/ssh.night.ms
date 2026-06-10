@@ -70,14 +70,14 @@ func (r *historyRing) Replace(items []roulette.Pocket) {
 // Stats summarises the contents of the history ring. The TUI stats overlay
 // renders these aggregates directly.
 type Stats struct {
-	TotalSpins     int
-	RedCount       int
-	BlackCount     int
-	GreenCount     int
-	LongestRed     int  // longest consecutive run of red outcomes
-	LongestBlack   int  // longest consecutive run of black outcomes
-	Hot            []HotEntry // pockets that came up most often, top 5, descending
-	Cold           []HotEntry // pockets that came up least often (still > 0), bottom 5 ascending
+	TotalSpins   int
+	RedCount     int
+	BlackCount   int
+	GreenCount   int
+	LongestRed   int        // longest consecutive run of red outcomes
+	LongestBlack int        // longest consecutive run of black outcomes
+	Hot          []HotEntry // pockets that came up most often, top 5, descending
+	Cold         []HotEntry // pockets that came up least often (still > 0), bottom 5 ascending
 }
 
 // HotEntry pairs a pocket with the number of times it appeared in the

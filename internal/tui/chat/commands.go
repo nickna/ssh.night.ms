@@ -4,7 +4,6 @@
 package chat
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -269,7 +268,7 @@ func normalizeChannelName(s string) string {
 }
 
 func helpText() string {
-	return strings.TrimSpace(fmt.Sprintf(`
+	return strings.TrimSpace(`
 commands:
   /help              show this list
   /join #name        join (create if needed) and switch to a channel
@@ -294,5 +293,5 @@ commands:
   /quit              log out of the BBS
 
 press Esc to return to the lobby; PgUp/PgDn to scroll history.
-`))
+`)
 }

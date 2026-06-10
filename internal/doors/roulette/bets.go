@@ -151,17 +151,6 @@ func Evaluate(p Pocket, k BetKey) (won bool, mult int32) {
 	return false, 0
 }
 
-// Payout returns the *winnings* in credits for a settled bet (0 on a loss).
-// The original stake was already debited at place-time; coordinator credits
-// Amount + Payout to the winner so the house keeps the stake on a loss.
-func Payout(p Pocket, b Bet) int32 {
-	won, mult := Evaluate(p, b.Key)
-	if !won {
-		return 0
-	}
-	return b.Amount * mult
-}
-
 // GrossReturn is the total amount returned to the wallet on a win: stake plus
 // winnings. Coordinator uses this to issue a single Credit call per winning
 // bet — clearer than two Credits of stake + payout. On a loss returns 0.

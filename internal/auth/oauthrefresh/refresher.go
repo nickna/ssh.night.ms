@@ -46,12 +46,12 @@ import (
 // per-tick batch of 50 covers a fully-saturated keyspace within one tick,
 // and the 4-worker pool keeps provider HTTP RTTs from serializing.
 const (
-	defaultInterval   = 60 * time.Second
-	defaultLeadTime   = 10 * time.Minute
-	defaultWorkers    = 4
-	defaultBatchSize  = 50
+	defaultInterval    = 60 * time.Second
+	defaultLeadTime    = 10 * time.Minute
+	defaultWorkers     = 4
+	defaultBatchSize   = 50
 	defaultReauthAfter = 5 // soft failures before we give up and flip needs_reauth
-	perWorkerTimeout  = 20 * time.Second
+	perWorkerTimeout   = 20 * time.Second
 )
 
 // Config bundles construction params. Most have sensible zero-value

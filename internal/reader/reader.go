@@ -24,9 +24,9 @@ import (
 type Article struct {
 	Title  string
 	Byline string
-	Host   string   // hostname of the source URL, for the screen header
-	Blocks []Block  // ordered body content
-	URL    string   // source URL, for "open in browser" hints
+	Host   string  // hostname of the source URL, for the screen header
+	Blocks []Block // ordered body content
+	URL    string  // source URL, for "open in browser" hints
 }
 
 // Block is the sum type for body content. Defined as a concrete struct (not

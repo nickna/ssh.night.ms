@@ -5,31 +5,9 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
-
-// stubRecorder is a minimal Recorder that just collects events. Used to
-// verify call sites in upstream packages route events through correctly.
-type stubRecorder struct {
-	mu     sync.Mutex
-	events []Event
-}
-
-func (s *stubRecorder) Record(_ context.Context, ev Event) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, ev)
-}
-
-func (s *stubRecorder) Events() []Event {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Event, len(s.events))
-	copy(out, s.events)
-	return out
-}
 
 // recorderForTest builds a PostgresRecorder with a nil *gen.Queries — fine
 // because we never call Run() in tests that only exercise Record(); the

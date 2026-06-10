@@ -1,0 +1,63 @@
+# Build, vet, test, and static-analyze on every push and PR. Runs on Linux
+# deliberately: internal/carbonyl's runner is //go:build linux, so analyzing
+# under any other GOOS false-positives its helpers as dead code.
+#
+# No LFS checkout here — the Carbonyl bundle is only needed for docker
+# builds (deploy.yml); pulling ~107 MB per CI run would burn LFS bandwidth
+# for nothing.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build + test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needs to be run on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      # The deadcode tool always exits 0, so fail on any output. Whole-program
+      # reachability from every cmd/ entry point; test-only helpers don't
+      # count as live, which is why the known noop-recorder line is allowed.
+      - name: deadcode
+        run: |
+          go install golang.org/x/tools/cmd/deadcode@latest
+          out=$(deadcode ./cmd/... | grep -v "NoopRecorder.Record" || true)
+          if [ -n "$out" ]; then
+            echo "::error::unreachable code found:"
+            echo "$out"
+            exit 1
+          fi

@@ -4,7 +4,6 @@
 package tui
 
 import (
-	"context"
 	"strings"
 	"time"
 
@@ -112,7 +111,7 @@ func (m *Root) fetchStatusTempCmd() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(5 * time.Second)
 		defer cancel()
 		f, err := provider.Forecast(ctx, lat, lon, label)
 		if err != nil {
@@ -322,7 +321,6 @@ func (m *Root) rearmWallCmd() tea.Cmd {
 	m.wallCancel = cancel
 	return waitWallCmd(ch)
 }
-
 
 // route swaps to the screen that owns this destination.
 //

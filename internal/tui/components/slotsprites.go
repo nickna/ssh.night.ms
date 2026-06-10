@@ -123,13 +123,13 @@ var slotColors = [SlotSymbolCount]struct {
 	FG   *color.NRGBA
 	Bold bool
 }{
-	SlotCherry:  {nil, true}, // unused — BuildCherrySprite paints directly
-	SlotLemon:   {SlotPalette.LemonYellow, false},
-	SlotOrange:  {SlotPalette.OrangeFruit, true},
-	SlotPlum:    {SlotPalette.PlumMagenta, false},
-	SlotBell:    {SlotPalette.BellYellow, true},
-	SlotBar:     {SlotPalette.BarGold, true},
-	SlotSeven:   {SlotPalette.SevenRed, true},
+	SlotCherry: {nil, true}, // unused — BuildCherrySprite paints directly
+	SlotLemon:  {SlotPalette.LemonYellow, false},
+	SlotOrange: {SlotPalette.OrangeFruit, true},
+	SlotPlum:   {SlotPalette.PlumMagenta, false},
+	SlotBell:   {SlotPalette.BellYellow, true},
+	SlotBar:    {SlotPalette.BarGold, true},
+	SlotSeven:  {SlotPalette.SevenRed, true},
 }
 
 // slotSprites is the baked sprite table. Index by SlotSymbolID. Each

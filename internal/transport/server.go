@@ -187,7 +187,6 @@ func NewServer(cfg Config, deps Deps, logger *slog.Logger) (*Server, error) {
 	return &Server{inner: s, logger: logger}, nil
 }
 
-func (s *Server) ListenAndServe() error              { return s.inner.ListenAndServe() }
 func (s *Server) Shutdown(ctx context.Context) error { return s.inner.Shutdown(ctx) }
 
 // ServeWithListener runs the SSH server against a caller-provided listener

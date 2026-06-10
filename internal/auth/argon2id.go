@@ -43,7 +43,6 @@ type Hasher struct {
 
 	dummyOnce sync.Once
 	dummyHash []byte
-	dummyAlgo string
 }
 
 func NewHasher(p Argon2Params) *Hasher { return &Hasher{params: p} }
@@ -137,7 +136,10 @@ func (h *Hasher) VerifyDummy(password string) {
 			h.params.Iterations, h.params.MemoryKB, h.params.Parallelism, h.params.HashBytes)
 		return
 	}
-	_ = h.Verify(password, h.dummyHash, "")
+	// Evaluate the PHC path directly rather than going back through Verify —
+	// Verify's unknown-format branch calls VerifyDummy, so a dummyHash that
+	// ever lost its PHC prefix would recurse forever.
+	_, _ = h.verifyPHC(password, h.dummyHash)
 }
 
 // --- legacy ---

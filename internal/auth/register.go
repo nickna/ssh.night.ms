@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -206,7 +205,5 @@ func classifyInsertError(err error) error {
 			return &RegistrationErr{Kind: RegErrKeyAlreadyUsed, Err: err}
 		}
 	}
-	// pgx may wrap differently; fall through.
-	_ = pgx.ErrNoRows
 	return &RegistrationErr{Kind: RegErrInternal, Err: err}
 }

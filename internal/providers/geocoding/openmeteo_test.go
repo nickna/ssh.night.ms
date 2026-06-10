@@ -1,9 +1,23 @@
 package geocoding
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
+
+// parseOpenMeteoResults exercises the JSON-decoding path without standing
+// up a live HTTP server. Lives in the test file because the production
+// Search path decodes via httpjson.Get, so this helper is test-only.
+func parseOpenMeteoResults(body io.Reader) ([]Result, error) {
+	var raw openMeteoResponse
+	if err := json.NewDecoder(body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("geocoding: decode: %w", err)
+	}
+	return resultsFromResponse(raw), nil
+}
 
 // openMeteoFixture is a trimmed real response from the live endpoint.
 // Covers the two cases the renderer cares about: a city with admin1 +

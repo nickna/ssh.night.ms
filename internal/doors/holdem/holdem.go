@@ -2,11 +2,11 @@
 // multiplayer table actor model lives in the sibling multiplayer/ package.
 //
 // Lifecycle per hand:
-//   1. Post blinds (CPU=SB, player=BB or vice-versa, alternating).
-//   2. Deal hole cards.
-//   3. Preflop betting round (button acts first preflop in HU).
-//   4. Flop, turn, river — each followed by a betting round.
-//   5. Showdown or fold; pot awarded; advance button.
+//  1. Post blinds (CPU=SB, player=BB or vice-versa, alternating).
+//  2. Deal hole cards.
+//  3. Preflop betting round (button acts first preflop in HU).
+//  4. Flop, turn, river — each followed by a betting round.
+//  5. Showdown or fold; pot awarded; advance button.
 package holdem
 
 import (
@@ -79,7 +79,7 @@ type Game struct {
 	bigBlind   int32
 	rng        doors.CryptoRng
 
-	winnerSeat int   // -1 = no winner yet
+	winnerSeat int // -1 = no winner yet
 	winRank    cards.HandRank
 	winBoard   bool // true at showdown so screen reveals bot's cards
 }
@@ -148,15 +148,15 @@ func (g *Game) BotHole() ([2]cards.Card, bool) {
 	}
 	return [2]cards.Card{}, false
 }
-func (g *Game) Board() []cards.Card      { return append([]cards.Card(nil), g.board...) }
-func (g *Game) Stacks() [2]int32         { return g.stacks }
-func (g *Game) Bets() [2]int32           { return g.bets }
-func (g *Game) Pot() int32               { return g.pot + g.bets[0] + g.bets[1] }
-func (g *Game) Street() Street           { return g.street }
-func (g *Game) ToAct() int               { return g.toAct }
-func (g *Game) WinnerSeat() int          { return g.winnerSeat }
-func (g *Game) WinRank() cards.HandRank  { return g.winRank }
-func (g *Game) BigBlind() int32          { return g.bigBlind }
+func (g *Game) Board() []cards.Card     { return append([]cards.Card(nil), g.board...) }
+func (g *Game) Stacks() [2]int32        { return g.stacks }
+func (g *Game) Bets() [2]int32          { return g.bets }
+func (g *Game) Pot() int32              { return g.pot + g.bets[0] + g.bets[1] }
+func (g *Game) Street() Street          { return g.street }
+func (g *Game) ToAct() int              { return g.toAct }
+func (g *Game) WinnerSeat() int         { return g.winnerSeat }
+func (g *Game) WinRank() cards.HandRank { return g.winRank }
+func (g *Game) BigBlind() int32         { return g.bigBlind }
 
 // ToCall returns the amount the to-act seat must put in to call.
 func (g *Game) ToCall() int32 {

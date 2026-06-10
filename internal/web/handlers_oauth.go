@@ -32,9 +32,6 @@ type OAuthProviders struct {
 	Microsoft *auth.OAuthProvider
 }
 
-// Has returns true if any provider is configured.
-func (p OAuthProviders) Has() bool { return p.Google != nil || p.Microsoft != nil }
-
 // providerByKey resolves the URL param ("google" / "microsoft") to the
 // configured provider, or nil if unconfigured/unknown.
 func (h *handlers) providerByKey(key string) *auth.OAuthProvider {
@@ -72,15 +69,9 @@ func (h *handlers) oauthStart(w http.ResponseWriter, r *http.Request) {
 		Provider: string(provider.Kind),
 	}
 	body, _ := json.Marshal(stateBlob)
-	http.SetCookie(w, &http.Cookie{
-		Name:     oauthStateCookieName,
-		Value:    base64.RawURLEncoding.EncodeToString(body),
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.cfg.SecureCookies,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(10 * time.Minute),
-	})
+	http.SetCookie(w, secureCookie(oauthStateCookieName,
+		base64.RawURLEncoding.EncodeToString(body),
+		h.cfg.SecureCookies, time.Now().Add(10*time.Minute)))
 	http.Redirect(w, r, provider.AuthCodeURL(state), http.StatusSeeOther)
 }
 
@@ -251,74 +242,77 @@ func (h *handlers) linkOAuthCredential(ctx context.Context, userID int64, kind a
 	return tx.Commit(ctx)
 }
 
+// sealedTokenFields is the shared serialization step for the insert and
+// upsert token writes: seal both tokens, default a missing expiry to now+1h
+// and a missing token type to "Bearer", and split the space-separated scope
+// string the IdP returns in the token extras.
+type sealedTokenFields struct {
+	access    []byte
+	refresh   []byte // nil when the IdP returned no refresh token
+	expiresAt pgtype.Timestamptz
+	tokenType string
+	scopes    []string
+	now       pgtype.Timestamptz
+}
+
+func sealTokenFields(sealer interface{ Seal([]byte) []byte }, tok *oauth2.Token) sealedTokenFields {
+	now := time.Now().UTC()
+	f := sealedTokenFields{
+		access: sealer.Seal([]byte(tok.AccessToken)),
+		now:    pgtype.Timestamptz{Time: now, Valid: true},
+	}
+	if tok.RefreshToken != "" {
+		f.refresh = sealer.Seal([]byte(tok.RefreshToken))
+	}
+	exp := tok.Expiry
+	if exp.IsZero() {
+		exp = now.Add(time.Hour)
+	}
+	f.expiresAt = pgtype.Timestamptz{Time: exp, Valid: true}
+	f.tokenType = tok.TokenType
+	if f.tokenType == "" {
+		f.tokenType = "Bearer"
+	}
+	if raw, ok := tok.Extra("scope").(string); ok && raw != "" {
+		f.scopes = strings.Fields(raw)
+	}
+	return f
+}
+
 // insertOAuthTokenRow is the initial-link token write. Used by
 // linkOAuthCredential inside its transaction.
 func insertOAuthTokenRow(ctx context.Context, q *gen.Queries, sealer interface {
 	Seal([]byte) []byte
 }, credID int64, tok *oauth2.Token) error {
-	sealedAccess := sealer.Seal([]byte(tok.AccessToken))
-	var sealedRefresh []byte
-	if tok.RefreshToken != "" {
-		sealedRefresh = sealer.Seal([]byte(tok.RefreshToken))
-	}
-	exp := tok.Expiry
-	now := time.Now().UTC()
-	if exp.IsZero() {
-		exp = now.Add(time.Hour)
-	}
-	tokenType := tok.TokenType
-	if tokenType == "" {
-		tokenType = "Bearer"
-	}
-	var scopes []string
-	if raw, ok := tok.Extra("scope").(string); ok && raw != "" {
-		scopes = strings.Fields(raw)
-	}
+	f := sealTokenFields(sealer, tok)
 	return q.InsertOAuthToken(ctx, gen.InsertOAuthTokenParams{
 		CredentialID:          credID,
-		EncryptedAccessToken:  sealedAccess,
-		EncryptedRefreshToken: sealedRefresh,
-		AccessExpiresAt:       pgtype.Timestamptz{Time: exp, Valid: true},
-		Scopes:                scopes,
-		TokenType:             tokenType,
-		CreatedAt:             pgtype.Timestamptz{Time: now, Valid: true},
+		EncryptedAccessToken:  f.access,
+		EncryptedRefreshToken: f.refresh,
+		AccessExpiresAt:       f.expiresAt,
+		Scopes:                f.scopes,
+		TokenType:             f.tokenType,
+		CreatedAt:             f.now,
 	})
 }
 
 // upsertOAuthTokenRow replaces the token row for an existing credential
-// (re-auth path).
+// (re-auth path) and resets the reauth/failure bookkeeping.
 func upsertOAuthTokenRow(ctx context.Context, q *gen.Queries, sealer interface {
 	Seal([]byte) []byte
 }, credID int64, tok *oauth2.Token) error {
-	sealedAccess := sealer.Seal([]byte(tok.AccessToken))
-	var sealedRefresh []byte
-	if tok.RefreshToken != "" {
-		sealedRefresh = sealer.Seal([]byte(tok.RefreshToken))
-	}
-	exp := tok.Expiry
-	now := time.Now().UTC()
-	if exp.IsZero() {
-		exp = now.Add(time.Hour)
-	}
-	tokenType := tok.TokenType
-	if tokenType == "" {
-		tokenType = "Bearer"
-	}
-	var scopes []string
-	if raw, ok := tok.Extra("scope").(string); ok && raw != "" {
-		scopes = strings.Fields(raw)
-	}
+	f := sealTokenFields(sealer, tok)
 	return q.UpsertOAuthToken(ctx, gen.UpsertOAuthTokenParams{
 		CredentialID:          credID,
-		EncryptedAccessToken:  sealedAccess,
-		EncryptedRefreshToken: sealedRefresh,
-		AccessExpiresAt:       pgtype.Timestamptz{Time: exp, Valid: true},
-		Scopes:                scopes,
-		TokenType:             tokenType,
+		EncryptedAccessToken:  f.access,
+		EncryptedRefreshToken: f.refresh,
+		AccessExpiresAt:       f.expiresAt,
+		Scopes:                f.scopes,
+		TokenType:             f.tokenType,
 		NeedsReauth:           false,
-		LastRefreshedAt:       pgtype.Timestamptz{Time: now, Valid: true},
+		LastRefreshedAt:       f.now,
 		RefreshFailureCount:   0,
-		CreatedAt:             pgtype.Timestamptz{Time: now, Valid: true},
+		CreatedAt:             f.now,
 	})
 }
 
@@ -364,31 +358,16 @@ func remoteAddrIP(r *http.Request) string {
 // clearCookie wipes the named cookie. Used for the short-lived OAuth state
 // cookie after the callback runs (success or failure).
 func (h *handlers) clearCookie(w http.ResponseWriter, name string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.cfg.SecureCookies,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, expiredCookie(name, h.cfg.SecureCookies))
 }
 
 // flash writes a one-shot status into a short-lived cookie that the next
 // page render picks up and clears. Used for "Linked!" / "Failed" feedback
 // after the OAuth callback redirects back into /profile/connections.
 func (h *handlers) flash(w http.ResponseWriter, kind, text string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "nightms_flash",
-		Value:    base64.RawURLEncoding.EncodeToString([]byte(kind + "|" + text)),
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.cfg.SecureCookies,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(60 * time.Second),
-	})
+	http.SetCookie(w, secureCookie("nightms_flash",
+		base64.RawURLEncoding.EncodeToString([]byte(kind+"|"+text)),
+		h.cfg.SecureCookies, time.Now().Add(60*time.Second)))
 }
 
 // readFlash consumes the one-shot flash cookie (if any) and returns the

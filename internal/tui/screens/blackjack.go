@@ -67,7 +67,7 @@ func (m *Blackjack) Init() tea.Cmd {
 	user := m.sess.Identity.UserID
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		w, err := svc.Load(ctx, user)
 		return bjWalletMsg{wallet: w, err: err}
@@ -86,7 +86,7 @@ func (m *Blackjack) dealCmd() tea.Cmd {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return bjBetErrMsg{err: err}
@@ -106,7 +106,7 @@ func (m *Blackjack) doubleCmd() tea.Cmd {
 	wallet := m.wallet
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		if err := svc.Bet(ctx, &wallet, bet); err != nil {
 			return bjBetErrMsg{err: err}
@@ -124,7 +124,7 @@ func (m *Blackjack) settleCmd() tea.Cmd {
 	game := m.game
 	svc := m.sess.Wallet
 	return func() tea.Msg {
-		ctx, cancel := m.sess.CtxWithTimeout(3*time.Second)
+		ctx, cancel := m.sess.CtxWithTimeout(3 * time.Second)
 		defer cancel()
 		outcome := game.Outcome()
 		payout := blackjack.Payout(bet, game.Doubled(), outcome)
@@ -151,14 +151,6 @@ func (m *Blackjack) settleCmd() tea.Cmd {
 		})
 		return bjSettledMsg{wallet: wallet, outcome: outcome, payout: payout}
 	}
-}
-
-func handToStrings(h []cards.Card) []string {
-	out := make([]string, len(h))
-	for i, c := range h {
-		out[i] = c.String()
-	}
-	return out
 }
 
 func (m *Blackjack) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -106,7 +106,7 @@ func (h *handlers) weatherIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if loc == nil {
 		// No saved location — render the "add a location" prompt.
-		h.renderProfile(w, "weather", weatherPageData{
+		h.renderProfile(w, http.StatusOK, "weather", weatherPageData{
 			pageData: h.basePage(r, "weather"),
 			Located:  false,
 		})
@@ -126,7 +126,7 @@ func (h *handlers) weatherIndex(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.deps.Logger.Error("weather: forecast", "user_id", id.UserID, "err", err)
 		data.FetchError = "could not load the forecast — try again in a moment"
-		h.renderProfile(w, "weather", data)
+		h.renderProfile(w, http.StatusOK, "weather", data)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *handlers) weatherIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderProfile(w, "weather", data)
+	h.renderProfile(w, http.StatusOK, "weather", data)
 }
 
 // severityClass maps an NWS severity to a CSS modifier class. Mirrors the

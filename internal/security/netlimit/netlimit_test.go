@@ -283,7 +283,7 @@ type fakeListener struct {
 	in chan net.Conn
 }
 
-func newFakeListener() *fakeListener        { return &fakeListener{in: make(chan net.Conn, 16)} }
+func newFakeListener() *fakeListener { return &fakeListener{in: make(chan net.Conn, 16)} }
 func (l *fakeListener) Accept() (net.Conn, error) {
 	c, ok := <-l.in
 	if !ok {
@@ -305,14 +305,14 @@ type fakeConn struct {
 	closed atomic.Bool
 }
 
-func (c *fakeConn) Read(b []byte) (int, error)         { return 0, io.EOF }
-func (c *fakeConn) Write(b []byte) (int, error)        { return len(b), nil }
-func (c *fakeConn) Close() error                       { c.closed.Store(true); return nil }
-func (c *fakeConn) LocalAddr() net.Addr                { return mustAddrPlain("127.0.0.1:0") }
-func (c *fakeConn) RemoteAddr() net.Addr               { return c.remote }
-func (c *fakeConn) SetDeadline(time.Time) error        { return nil }
-func (c *fakeConn) SetReadDeadline(time.Time) error    { return nil }
-func (c *fakeConn) SetWriteDeadline(time.Time) error   { return nil }
+func (c *fakeConn) Read(b []byte) (int, error)       { return 0, io.EOF }
+func (c *fakeConn) Write(b []byte) (int, error)      { return len(b), nil }
+func (c *fakeConn) Close() error                     { c.closed.Store(true); return nil }
+func (c *fakeConn) LocalAddr() net.Addr              { return mustAddrPlain("127.0.0.1:0") }
+func (c *fakeConn) RemoteAddr() net.Addr             { return c.remote }
+func (c *fakeConn) SetDeadline(time.Time) error      { return nil }
+func (c *fakeConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *fakeConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestListener_AcceptDropsRejected(t *testing.T) {
 	tr := NewTracker(Config{MaxConnPerIP: 1}, discardLogger(), nil)
