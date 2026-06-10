@@ -332,9 +332,7 @@ var palette16 = [16][3]uint8{
 var palette256 [256][3]uint8
 
 func init() {
-	for i, c := range palette16 {
-		palette256[i] = c
-	}
+	copy(palette256[:], palette16[:])
 	cube := [6]uint8{0, 95, 135, 175, 215, 255}
 	idx := 16
 	for r := 0; r < 6; r++ {

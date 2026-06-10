@@ -44,7 +44,7 @@ func (h *handlers) publicProfile(w http.ResponseWriter, r *http.Request) {
 		IsSysop:  user.IsSysop,
 		JoinedAt: user.CreatedAt.Time.Format("January 2006"),
 	}
-	h.renderProfile(w, "public_profile", data)
+	h.renderProfile(w, http.StatusOK, "public_profile", data)
 }
 
 // avatar serves the avatar PNG for a handle. Order of precedence:

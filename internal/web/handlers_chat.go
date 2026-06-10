@@ -201,7 +201,7 @@ func (h *handlers) chatIndex(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.renderProfile(w, "chat_index", chatIndexData{
+	h.renderProfile(w, http.StatusOK, "chat_index", chatIndexData{
 		pageData: h.basePage(r, "chat"),
 		Channels: public,
 		DMs:      dms,
@@ -366,7 +366,7 @@ func (h *handlers) chatChannel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderProfile(w, "chat_channel", chatChannelData{
+	h.renderProfile(w, http.StatusOK, "chat_channel", chatChannelData{
 		pageData:   h.basePage(r, chatDisplayName(ch, id.Handle)),
 		Channel:    chatChannelHeader(ch, id.Handle),
 		Messages:   items,

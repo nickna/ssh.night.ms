@@ -123,7 +123,7 @@ func (h *handlers) boardsIndex(w http.ResponseWriter, r *http.Request) {
 			Unread:         unread[f.ID],
 		})
 	}
-	h.renderProfile(w, "boards_index", boardsIndexData{
+	h.renderProfile(w, http.StatusOK, "boards_index", boardsIndexData{
 		pageData: h.basePage(r, "boards"),
 		Forums:   items,
 	})
@@ -203,7 +203,7 @@ func (h *handlers) boardForum(w http.ResponseWriter, r *http.Request) {
 			Unread:       unread[t.ID],
 		})
 	}
-	h.renderProfile(w, "boards_forum", boardForumData{
+	h.renderProfile(w, http.StatusOK, "boards_forum", boardForumData{
 		pageData: h.basePage(r, forum.Name),
 		Forum:    forumHeader{ID: forum.ID, Name: forum.Name, Description: forum.Description},
 		Topics:   items,
@@ -318,7 +318,7 @@ func (h *handlers) boardTopic(w http.ResponseWriter, r *http.Request) {
 		notice = "reply too long (4000 characters max)"
 	}
 
-	h.renderProfile(w, "boards_topic", boardTopicData{
+	h.renderProfile(w, http.StatusOK, "boards_topic", boardTopicData{
 		pageData: h.basePage(r, topic.Title),
 		Forum:    forumHeader{ID: forum.ID, Name: forum.Name},
 		Topic:    topicHeader{ID: topic.ID, ForumID: topic.ForumID, Title: topic.Title},
@@ -361,7 +361,7 @@ func (h *handlers) boardNewGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderProfile(w, "boards_new", boardNewData{
+	h.renderProfile(w, http.StatusOK, "boards_new", boardNewData{
 		pageData: h.basePage(r, "new topic"),
 		Forum:    forumHeader{ID: forum.ID, Name: forum.Name},
 	})
@@ -396,8 +396,7 @@ func (h *handlers) boardNewPost(w http.ResponseWriter, r *http.Request) {
 	body := strings.TrimSpace(r.PostFormValue("body"))
 
 	reRender := func(msg string) {
-		w.WriteHeader(http.StatusBadRequest)
-		h.renderProfile(w, "boards_new", boardNewData{
+		h.renderProfile(w, http.StatusBadRequest, "boards_new", boardNewData{
 			pageData: h.basePage(r, "new topic"),
 			Forum:    forumHeader{ID: forum.ID, Name: forum.Name},
 			Title:    title,
