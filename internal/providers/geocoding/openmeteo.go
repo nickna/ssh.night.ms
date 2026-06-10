@@ -11,7 +11,6 @@ package geocoding
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -109,18 +108,6 @@ func (p *OpenMeteo) Search(ctx context.Context, query string, max int) ([]Result
 	var raw openMeteoResponse
 	if err := httpjson.Get(ctx, p.client(), openMeteoBase+"?"+q.Encode(), &raw, nil); err != nil {
 		return nil, fmt.Errorf("geocoding: %w", err)
-	}
-	return resultsFromResponse(raw), nil
-}
-
-// parseOpenMeteoResults is split out so the test suite can exercise the
-// JSON-decoding path without standing up a live HTTP server.
-func parseOpenMeteoResults(body interface {
-	Read([]byte) (int, error)
-}) ([]Result, error) {
-	var raw openMeteoResponse
-	if err := json.NewDecoder(body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("geocoding: decode: %w", err)
 	}
 	return resultsFromResponse(raw), nil
 }
